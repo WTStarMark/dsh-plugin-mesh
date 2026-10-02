@@ -18,3 +18,4 @@ data/snapshots/
 data/cache/
 data/crawl.log
 tools/.git-askpass.sh
+.git-token
