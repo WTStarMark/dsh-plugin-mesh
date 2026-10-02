@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-CN" data-palette="fresh" data-theme="light">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>插件生态图 — DSH 插件生态扇区图</title>
+<link rel="icon" type="image/png" href="https://github.com/WTStarMark.png?size=64" />
+<link rel="apple-touch-icon" href="https://github.com/WTStarMark.png?size=180" />
+<link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+<header class="cmdbar">
+  <div class="brand">
+    <span class="sigil" aria-hidden="true">◈</span>
+    <div class="brand-text">
+      <b>插件生态图</b>
+      <small>插件生态扇区图 · v0.4</small>
+    </div>
+  </div>
+  <div class="prompt">
+    <span class="caret" aria-hidden="true">›</span>
+    <input id="search" type="search" placeholder="搜索仓库 / 作者 / 描述，回车定位" autocomplete="off" spellcheck="false" />
+    <button id="search-clear" class="key" hidden>清除</button>
+  </div>
+  <div class="readouts">
+    <span class="ro"><i>数据源</i><b>GitHub 搜索接口</b></span>
+    <span class="ro"><i>快照</i><b id="snapshot">--</b></span>
+  </div>
+  <div class="keys">
+    <button id="toggle-rail" class="key" title="收起 / 展开左侧栏（快捷键 [）">左栏</button>
+    <button id="toggle-dossier" class="key" title="收起 / 展开右侧栏（快捷键 ]）">右栏</button>
+    <a class="author" href="https://github.com/WTStarMark" target="_blank" rel="noreferrer" title="项目作者 WTStarMark 的 GitHub">
+      <img src="https://github.com/WTStarMark.png?size=64" alt="WTStarMark" loading="lazy" />
+      <span>WTStarMark</span>
+    </a>
+    <button id="palette" class="key" title="切换配色：清爽 / 粉黛">清爽</button>
+    <button id="theme" class="key" title="切换明暗">浅色</button>
+  </div>
+</header>
+
+<main class="deck">
+  <aside class="rail" id="rail"></aside>
+
+  <section class="stage" id="stage">
+    <canvas id="graph"></canvas>
+
+    <div class="hud hud-tl">
+      <button data-act="zoom-in" title="放大">＋</button>
+      <button data-act="zoom-out" title="缩小">－</button>
+      <button data-act="fit" title="适应窗口">适应</button>
+      <button data-act="relayout" title="重新布局">重排</button>
+      <button data-act="labels" class="on" title="标签显隐">标签</button>
+      <button data-act="avatars" class="on" title="作者头像显隐">头像</button>
+    </div>
+    <div class="hud hud-tr" id="edge-types"></div>
+    <div class="tooltip" id="tooltip" hidden></div>
+    <div class="loading" id="loading">正在载入抽样数据…</div>
+  </section>
+
+  <aside class="dossier" id="inspector"></aside>
+
+  <footer class="ticker">
+    <span class="lamp" id="lamp" aria-hidden="true"></span>
+    <span class="tk-sys">运行正常</span>
+    <span class="tk-body" id="hint">初始化…</span>
+    <span class="tk-zoom" id="telemetry">缩放 1.00</span>
+    <span class="tk-stats" id="stats" hidden>访问 -- · 在线 --</span>
+  </footer>
+</main>
+
+<script type="module" src="./src/app.js"></script>
+</body>
+</html>
