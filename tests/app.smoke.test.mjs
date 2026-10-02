@@ -150,7 +150,19 @@ globalThis.cancelAnimationFrame = () => {};
 globalThis.ResizeObserver = class { observe() {} disconnect() {} };
 globalThis.localStorage = { getItem: () => null, setItem() {} };
 globalThis.location = { search: "" };
-globalThis.fetch = async () => ({ ok: true, status: 200, headers: { get: () => null }, json: async () => mesh });
+const coreJson = JSON.parse(await readFile(new URL("../data/mesh-core.json", import.meta.url), "utf8"));
+globalThis.fetch = async (url) => {
+  const target = String(url ?? "");
+  if (target.includes("mesh-core")) {
+    return { ok: true, status: 200, headers: { get: () => null }, json: async () => coreJson };
+  }
+  if (target.includes("/data/details/")) {
+    const index = Number((target.match(/(\d+)\.json/) ?? [])[1] ?? 0);
+    const bucket = JSON.parse(await readFile(new URL("../data/details/" + index + ".json", import.meta.url), "utf8"));
+    return { ok: true, status: 200, headers: { get: () => null }, json: async () => bucket };
+  }
+  return { ok: true, status: 200, headers: { get: () => null }, json: async () => mesh };
+};
 
 function pump(max = 900) {
   let n = 0;
@@ -163,7 +175,18 @@ function pump(max = 900) {
 }
 
 const appModule = await import("../src/app.js");
-await new Promise((r) => setTimeout(r, 40));
+
+/** 面板现在是动态载入的：等它就绪，而不是赌一个固定毫秒数 */
+async function waitForPanels(timeoutMs = 2000) {
+  const rail = registry.get("rail");
+  const deadline = Date.now() + timeoutMs;
+  while (rail.children.length === 0 && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  await new Promise((r) => setTimeout(r, 20));
+}
+
+await waitForPanels();
 
 const canvas = registry.get("graph");
 const rail = registry.get("rail");
@@ -179,7 +202,8 @@ test("启动后：载入层关闭、快照读数就位", () => {
 
 test("布局会沉降并真的画出东西", () => {
   const frames = pump(900);
-  assert.ok(frames > 20, "应至少跑了若干帧，实际 " + frames);
+  // 预计算布局没有长沉降（一帧即就位），所以这里只要求"跑过帧"且真的画了东西
+  assert.ok(frames >= 1, "应至少跑了一帧，实际 " + frames);
   assert.ok(drawCalls.fill > NODE_COUNT * 0.8, "节点绘制次数异常少: " + drawCalls.fill + "（节点 " + NODE_COUNT + "）");
   assert.ok(drawCalls.closePath >= SECTOR_COUNT, SECTOR_COUNT + " 个扇区的光锥没有画出来: " + drawCalls.closePath);
   assert.ok(drawCalls.clip >= SECTOR_COUNT, "扇区光的裁剪没有生效: " + drawCalls.clip);
@@ -192,7 +216,7 @@ test("布局会沉降并真的画出东西", () => {
 test("三个面板都渲染出了内容", () => {
   assert.ok(rail.children.length >= 4, "左侧 rail 区块过少");
   assert.ok(inspector.children.length >= 2, "右侧检查器未渲染");
-  assert.ok(registry.get("edge-types").children.length >= 2, "连线开关数量不对：" + registry.get("edge-types").children.length);
+  assert.ok(registry.get("edge-types").children.length >= 1, "连线图例应存在：" + registry.get("edge-types").children.length);
 });
 
 test("过滤真的生效：关掉一个标签后命中数下降", () => {
@@ -223,15 +247,11 @@ test("搜索：输入即淡化过滤，回车选中星标最高的命中项", ()
   search.fire("input");
 });
 
-test("点开某类连线后，弧线真的画出来（此时没有任何聚焦，节点全是激活的）", () => {
-  const chip = registry.get("edge-types").children[0];
-  chip.fire("click");
-  const before = drawCalls.curve;
-  pump(30);
-  assert.ok(drawCalls.curve > before, "点开连线后应绘制弧线，新增 " + (drawCalls.curve - before));
-  chip.fire("click"); // 还原
-  pump(10);
-  assert.equal(drawCalls.curve > before, true, "还原后不再新增");
+test("连线不再常驻：未选中时一条都不画", () => {
+  const canvas = registry.get("graph");
+  canvas.fire("pointerup", { clientX: 5, clientY: 5, pointerId: 98 });
+  pump(20);
+  assert.equal(drawCalls.curve, 0, "未选中任何项目时不应画连线，实际 " + drawCalls.curve);
 });
 
 test("画布交互：滚轮 / 拖拽 / 单击 / 双击聚焦都不抛错", () => {
@@ -266,12 +286,11 @@ test("悬停：扫过画布能找到节点并弹出提示，离开后收起", ()
   assert.equal(tooltip.hidden, true, "离开后 tooltip 应收起");
 });
 
-test("默认只开「标签」与「头像」：连线一律默认关闭", () => {
-  const chips = registry.get("edge-types").children;
-  assert.ok(chips.length >= 1, "应有连线开关");
-  for (const chip of chips) assert.ok(!chip.className.includes("on"), "连线开关默认应关闭：" + chip.textContent);
-  assert.ok(hudButtons.find((b) => b.dataset.act === "labels").className.includes("on"), "「标签」应默认开启");
+test("默认开关：标签关闭、头像开启；连线开关已取消", () => {
+  assert.ok(!hudButtons.find((b) => b.dataset.act === "labels").className.includes("on"), "「标签」应默认关闭（球太密，标签反而糊）");
   assert.ok(hudButtons.find((b) => b.dataset.act === "avatars").className.includes("on"), "「头像」应默认开启");
+  assert.equal(hudButtons.find((b) => b.dataset.act === "nebula"), undefined, "不应再有星云开关");
+  assert.ok(registry.get("edge-types").children.length >= 1, "应显示连线图例");
 });
 
 test("侧边栏可收起：点「左栏」「右栏」各自收起并可还原", () => {
@@ -398,38 +417,32 @@ test("从细枝切回全局走布局缓存，不重算", async () => {
   assert.ok(internalStats.layoutHits > 0, "应记录到缓存命中");
 });
 
-test("选中仓库时，即使「同作者」开关关闭也会画出它的同作者连线", () => {
-  // 前提：所有连线开关都是关的
-  const chips = registry.get("edge-types").children;
-  for (const chip of chips) assert.ok(!chip.className.includes("on"), "前提：连线开关全关");
-
-  // 找出「同作者有多个仓库」的那些仓库 —— 只有它们才有同作者连线
-  const byOwner = new Map();
-  for (const n of mesh.nodes) {
-    if (!byOwner.has(n.owner)) byOwner.set(n.owner, []);
-    byOwner.get(n.owner).push(n);
-  }
+test("点选项目后画出两类连线，且颜色不同", () => {
+  // 直接用【实际的同作者连线】来挑目标：
+  // 不能用「同作者有 ≥2 个仓库」推断 —— 后端会把大作者当枢纽过滤掉，那种作者未必有连线。
   const siblings = new Set();
-  for (const list of byOwner.values()) {
-    if (list.length < 2) continue;
-    for (const n of list) siblings.add(n.id);
+  for (const e of coreJson.edges ?? []) {
+    if (e[2] !== 0) continue; // 0 = owner
+    const a = coreJson.nodes[e[0]];
+    const b = coreJson.nodes[e[1]];
+    if (a) siblings.add(a.id);
+    if (b) siblings.add(b.id);
   }
-  assert.ok(siblings.size > 0, "样本里应有同作者多仓库的案例");
+  assert.ok(siblings.size > 0, "core 数据里应有同作者连线");
 
-  // 先清掉选中，记一帧基准
   const canvas = registry.get("graph");
-  canvas.fire("pointerup", { clientX: 5, clientY: 5, pointerId: 99 });
+  canvas.fire("pointerup", { clientX: 5, clientY: 5, pointerId: 97 });
   pump(5);
   const before = drawCalls.curve;
 
-  // 扫画布找到「确有同作者」的那个节点，再点它（与悬停测试同一套扫描方式）
+  // 扫画布找到「确有同作者」的节点再点它
   let hit = null;
   outer: for (let y = 20; y < 600; y += 10) {
     for (let x = 20; x < 900; x += 10) {
       canvas.fire("pointermove", { clientX: x, clientY: y });
       if (!tooltip.hidden) {
-        const name = tooltip.all.map((n) => n.textContent).join(" ");
-        const id = [...siblings].find((sid) => name.includes(sid.split("/")[1]));
+        const text = tooltip.all.map((n) => n.textContent).join(" ");
+        const id = [...siblings].find((sid) => text.includes(sid.split("/")[1]));
         if (id) {
           hit = { x, y, id };
           break outer;
@@ -439,9 +452,109 @@ test("选中仓库时，即使「同作者」开关关闭也会画出它的同�
   }
   assert.ok(hit, "没在画布上找到「有同作者」的节点");
   tooltip.hidden = true;
-
   canvas.fire("pointerdown", { clientX: hit.x, clientY: hit.y, pointerId: 7 });
   canvas.fire("pointerup", { clientX: hit.x, clientY: hit.y, pointerId: 7 });
   pump(30);
-  assert.ok(drawCalls.curve > before, "选中 " + hit.id + " 后应画出同作者连线，新增 " + (drawCalls.curve - before));
+  assert.ok(drawCalls.curve > before, "点选 " + hit.id + " 后应画出它的同作者连线，新增 " + (drawCalls.curve - before));
+
+  // 图例应同时给出两类关系的计数
+  const legend = registry.get("edge-types").all.map((c) => c.textContent).join(" ");
+  assert.match(legend, /同作者/, "图例应显示同作者，实际 " + legend);
+  assert.match(legend, /主题共现/, "图例应显示主题共现，实际 " + legend);
+});
+
+test("回归：放大到某扇区并选中细枝后，节点不会被全部隐藏", () => {
+  const rail = registry.get("rail");
+  const sectorRow = rail.find((n) => n.className?.startsWith("sector-row"));
+  assert.ok(sectorRow, "应有扇区行");
+  sectorRow.fire("click"); // 放大
+  pump(20);
+
+  const rail2 = registry.get("rail");
+  const subRow = rail2.find((n) => n.className?.startsWith("sector-row"));
+  assert.ok(subRow, "放大后应列出细枝");
+  const beforeFill = drawCalls.fill;
+  subRow.fire("click"); // 选中某个细枝
+  pump(20);
+
+  const inspector = registry.get("inspector");
+  const text = inspector.all.map((n) => n.textContent).join(" ");
+  assert.ok(text.length > 0, "选中细枝后应仍渲染内容");
+  assert.ok(drawCalls.fill > beforeFill, "选中细枝后画布应继续绘制（不能被全部隐藏），新增 " + (drawCalls.fill - beforeFill));
+
+  // 收尾：返回全局
+  const banner = registry.get("rail").find((n) => n.className?.includes("focus-banner"));
+  const back = banner && banner.all.find((n) => String(n.textContent ?? "").includes("返回全局"));
+  if (back) back.fire("click");
+  pump(10);
+});
+
+test("回归：进入分类默认显示该分类全部，点细枝才收窄到单支", () => {
+  const hitOf = () => {
+    const m = /当前命中 (\d+) \/ (\d+)/.exec(registry.get("hint").textContent);
+    return m ? Number(m[1]) : -1;
+  };
+  // 先一键清空筛选（前面的用例会留下筛选/聚焦状态）
+  const resetBtn = registry.get("rail").all.find((n) => String(n.textContent ?? "") === "重置筛选");
+  assert.ok(resetBtn, "筛选区应有「重置筛选」按钮");
+  resetBtn.fire("click");
+  pump(20);
+  const back0 = registry.get("rail").find((n) => n.className?.includes("focus-banner"));
+  const backBtn0 = back0 && back0.all.find((n) => String(n.textContent ?? "").includes("返回全局"));
+  if (backBtn0) { backBtn0.fire("click"); pump(10); }
+  const before = hitOf();
+  assert.ok(before > 0, "初始应至少命中一个节点，实际 " + before);
+
+  const sectorRow = registry.get("rail").find((n) => n.className?.startsWith("sector-row"));
+  assert.ok(sectorRow, "应有扇区行");
+  sectorRow.fire("click");
+  pump(20);
+  const inFocus = hitOf();
+  assert.ok(inFocus > 0, "进入分类后必须默认显示该分类的节点（旧 bug：全部被隐藏），实际 " + inFocus);
+
+  const subRow = registry.get("rail").all.filter((n) => n.className?.startsWith("sector-row"))[0];
+  assert.ok(subRow, "放大后应列出细枝");
+  subRow.fire("click");
+  pump(20);
+  const inSub = hitOf();
+  assert.ok(inSub > 0, "点细枝后不能把节点全隐藏，实际 " + inSub);
+  assert.ok(inSub <= inFocus, "细枝命中数不应超过整个分类，实际 " + inSub + " vs " + inFocus);
+
+  const back = registry.get("rail").find((n) => n.className?.includes("focus-banner"));
+  const backBtn = back && back.all.find((n) => String(n.textContent ?? "").includes("返回全局"));
+  if (backBtn) { backBtn.fire("click"); pump(10); }
+});
+
+test("回归：放大到分类后，点选节点仍能画出该分类内的连线", () => {
+  // 仍处于上一条用例留下的细枝状态：先返回全局再放大，保证干净
+  const back = registry.get("rail").find((n) => n.className?.includes("focus-banner"));
+  const backBtn = back && back.all.find((n) => String(n.textContent ?? "").includes("返回全局"));
+  if (backBtn) { backBtn.fire("click"); pump(10); }
+  const sectorRow = registry.get("rail").find((n) => n.className?.startsWith("sector-row"));
+  sectorRow.fire("click");
+  pump(20);
+
+  const canvas = registry.get("graph");
+  canvas.fire("pointerup", { clientX: 5, clientY: 5, pointerId: 96 });
+  pump(5);
+  const before = drawCalls.curve;
+  let hit = null;
+  outer2: for (let y = 20; y < 600; y += 10) {
+    for (let x = 20; x < 900; x += 10) {
+      canvas.fire("pointermove", { clientX: x, clientY: y });
+      if (!tooltip.hidden) { hit = { x, y }; break outer2; }
+    }
+  }
+  assert.ok(hit, "放大后画布上应能找到节点");
+  tooltip.hidden = true;
+  canvas.fire("pointerdown", { clientX: hit.x, clientY: hit.y, pointerId: 6 });
+  canvas.fire("pointerup", { clientX: hit.x, clientY: hit.y, pointerId: 6 });
+  pump(30);
+  const legend = registry.get("edge-types").all.map((n) => n.textContent).join(" ");
+  assert.ok(/同作者 \d+|主题共现 \d+/.test(legend), "放大后点选节点，图例应有计数（说明连线数据已生效），实际 " + legend);
+  assert.ok(drawCalls.curve >= before, "放大后点选节点不应报错");
+
+  const back2 = registry.get("rail").find((n) => n.className?.includes("focus-banner"));
+  const backBtn2 = back2 && back2.all.find((n) => String(n.textContent ?? "").includes("返回全局"));
+  if (backBtn2) { backBtn2.fire("click"); pump(10); }
 });

@@ -1,6 +1,6 @@
 {
  "meta": {
-  "generatedAt": "2026-10-02T04:51:14.934Z",
+  "generatedAt": "2026-10-02T12:11:42.913Z",
   "kind": "sample-seed",
   "note": "临时取样（每标签按星标取头部若干页），非全量采集；全量索引见后端设计。",
   "source": "GitHub REST Search API",
@@ -14,19 +14,19 @@
   "ownerStarEdges": 0,
   "topicEdgesDroppedByCap": 104,
   "categories": {
-   "classified": 532,
-   "unclassified": 61,
+   "classified": 527,
+   "unclassified": 66,
    "minCount": 10,
    "maxSectors": 18,
    "merged": [
     {
      "id": "web",
-     "count": 6,
+     "count": 7,
      "reason": "样本过少"
     },
     {
      "id": "remote",
-     "count": 8,
+     "count": 9,
      "reason": "样本过少"
     },
     {
@@ -35,13 +35,13 @@
      "reason": "样本过少"
     },
     {
-     "id": "doc",
-     "count": 1,
+     "id": "bridge",
+     "count": 9,
      "reason": "样本过少"
     },
     {
-     "id": "bridge",
-     "count": 6,
+     "id": "doc",
+     "count": 1,
      "reason": "样本过少"
     }
    ],
@@ -49,7 +49,7 @@
     {
      "id": "agent",
      "label": "智能体技能",
-     "count": 116
+     "count": 118
     },
     {
      "id": "desktop",
@@ -57,49 +57,49 @@
      "count": 97
     },
     {
+     "id": "other",
+     "label": "其他",
+     "count": 66
+    },
+    {
      "id": "model",
      "label": "模型接入",
      "count": 61
     },
     {
-     "id": "other",
-     "label": "其他",
-     "count": 61
-    },
-    {
      "id": "panel",
      "label": "界面面板",
-     "count": 43
+     "count": 41
     },
     {
      "id": "session",
      "label": "会话交互",
-     "count": 35
+     "count": 32
     },
     {
      "id": "skin",
      "label": "皮肤美化",
-     "count": 30
+     "count": 31
     },
     {
      "id": "tools",
      "label": "工具命令",
-     "count": 28
+     "count": 27
     },
     {
      "id": "memory",
      "label": "记忆上下文",
-     "count": 25
+     "count": 23
     },
     {
      "id": "market",
      "label": "插件市场",
-     "count": 24
+     "count": 23
     },
     {
      "id": "usage",
      "label": "用量额度",
-     "count": 21
+     "count": 22
     },
     {
      "id": "secure",
@@ -107,18 +107,18 @@
      "count": 19
     },
     {
-     "id": "notify",
-     "label": "语音提醒",
-     "count": 12
-    },
-    {
      "id": "dev",
      "label": "开发调试",
-     "count": 11
+     "count": 12
     },
     {
      "id": "pet",
      "label": "桌宠娱乐",
+     "count": 11
+    },
+    {
+     "id": "notify",
+     "label": "语音提醒",
      "count": 10
     }
    ]
@@ -284,7 +284,7 @@
   {
    "id": "agent",
    "label": "智能体技能",
-   "count": 116
+   "count": 118
   },
   {
    "id": "desktop",
@@ -292,49 +292,49 @@
    "count": 97
   },
   {
+   "id": "other",
+   "label": "其他",
+   "count": 66
+  },
+  {
    "id": "model",
    "label": "模型接入",
    "count": 61
   },
   {
-   "id": "other",
-   "label": "其他",
-   "count": 61
-  },
-  {
    "id": "panel",
    "label": "界面面板",
-   "count": 43
+   "count": 41
   },
   {
    "id": "session",
    "label": "会话交互",
-   "count": 35
+   "count": 32
   },
   {
    "id": "skin",
    "label": "皮肤美化",
-   "count": 30
+   "count": 31
   },
   {
    "id": "tools",
    "label": "工具命令",
-   "count": 28
+   "count": 27
   },
   {
    "id": "memory",
    "label": "记忆上下文",
-   "count": 25
+   "count": 23
   },
   {
    "id": "market",
    "label": "插件市场",
-   "count": 24
+   "count": 23
   },
   {
    "id": "usage",
    "label": "用量额度",
-   "count": 21
+   "count": 22
   },
   {
    "id": "secure",
@@ -342,18 +342,18 @@
    "count": 19
   },
   {
-   "id": "notify",
-   "label": "语音提醒",
-   "count": 12
-  },
-  {
    "id": "dev",
    "label": "开发调试",
-   "count": 11
+   "count": 12
   },
   {
    "id": "pet",
    "label": "桌宠娱乐",
+   "count": 11
+  },
+  {
+   "id": "notify",
+   "label": "语音提醒",
    "count": 10
   }
  ],
@@ -394,7 +394,7 @@
    "degree": 0,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 1,
+   "categoryScore": 1.5,
    "categoryHits": [
     "agent"
    ],
@@ -453,7 +453,7 @@
    "degree": 10,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 8,
+   "categoryScore": 10,
    "categoryHits": [
     "claude"
    ],
@@ -511,7 +511,7 @@
    "degree": 9,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 11,
+   "categoryScore": 14,
    "categoryHits": [
     "agent",
     "skill",
@@ -571,7 +571,7 @@
    "degree": 14,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 16,
+   "categoryScore": 22.5,
    "categoryHits": [
     "agent",
     "skill",
@@ -622,7 +622,7 @@
    "degree": 6,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 5,
+   "categoryScore": 7.5,
    "categoryHits": [
     "agent",
     "skill",
@@ -668,7 +668,7 @@
    "degree": 3,
    "category": "memory",
    "categoryLabel": "记忆上下文",
-   "categoryScore": 14,
+   "categoryScore": 17,
    "categoryHits": [
     "memory",
     "knowledge",
@@ -727,7 +727,7 @@
    "degree": 14,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 5,
+   "categoryScore": 7,
    "categoryHits": [
     "agent"
    ],
@@ -775,7 +775,7 @@
    "degree": 9,
    "category": "session",
    "categoryLabel": "会话交互",
-   "categoryScore": 13,
+   "categoryScore": 14.5,
    "categoryHits": [
     "prompt",
     "提示词"
@@ -832,15 +832,16 @@
    "noise": 1,
    "review": true,
    "degree": 14,
-   "category": "memory",
-   "categoryLabel": "记忆上下文",
-   "categoryScore": 10,
+   "category": "model",
+   "categoryLabel": "模型接入",
+   "categoryScore": 14,
    "categoryHits": [
-    "knowledge",
-    "rag"
+    "llm",
+    "openai",
+    "ollama"
    ],
-   "subcategory": "memory-kb",
-   "subcategoryLabel": "知识库"
+   "subcategory": "model-provider",
+   "subcategoryLabel": "模型供应商"
   },
   {
    "id": "anywhere-labs/dsh-desktop",
@@ -883,7 +884,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 10,
+   "categoryScore": 13,
    "categoryHits": [
     "desktop",
     "桌面"
@@ -940,7 +941,7 @@
    "degree": 6,
    "category": "other",
    "categoryLabel": "其他",
-   "categoryScore": 4,
+   "categoryScore": 6,
    "categoryHits": [
     "vue"
    ],
@@ -998,7 +999,7 @@
    "degree": 10,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 20,
+   "categoryScore": 26.5,
    "categoryHits": [
     "agent",
     "skill"
@@ -1056,7 +1057,7 @@
    "degree": 9,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 4,
+   "categoryScore": 6,
    "categoryHits": [
     "agent",
     "workflow"
@@ -1110,7 +1111,7 @@
    "degree": 14,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 12,
+   "categoryScore": 14,
    "categoryHits": [
     "claude",
     "gemini"
@@ -1155,7 +1156,7 @@
    "degree": 7,
    "category": "market",
    "categoryLabel": "插件市场",
-   "categoryScore": 8,
+   "categoryScore": 10,
    "categoryHits": [
     "awesome"
    ],
@@ -1206,7 +1207,7 @@
    "degree": 10,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 3,
+   "categoryScore": 4.5,
    "categoryHits": [
     "agent"
    ],
@@ -1262,7 +1263,7 @@
    "degree": 5,
    "category": "memory",
    "categoryLabel": "记忆上下文",
-   "categoryScore": 18,
+   "categoryScore": 25.5,
    "categoryHits": [
     "memory",
     "rag"
@@ -1320,7 +1321,7 @@
    "degree": 13,
    "category": "memory",
    "categoryLabel": "记忆上下文",
-   "categoryScore": 18,
+   "categoryScore": 24,
    "categoryHits": [
     "memory",
     "rag"
@@ -1372,7 +1373,7 @@
    "degree": 1,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 12,
+   "categoryScore": 16,
    "categoryHits": [
     "desktop",
     "桌面"
@@ -1418,7 +1419,7 @@
    "degree": 5,
    "category": "panel",
    "categoryLabel": "界面面板",
-   "categoryScore": 1,
+   "categoryScore": 1.5,
    "categoryHits": [
     "ui"
    ],
@@ -1474,7 +1475,7 @@
    "degree": 12,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 9,
+   "categoryScore": 13,
    "categoryHits": [
     "agent",
     "skill"
@@ -1516,7 +1517,7 @@
    "degree": 1,
    "category": "other",
    "categoryLabel": "其他",
-   "categoryScore": 6,
+   "categoryScore": 7,
    "categoryHits": [
     "browser"
    ],
@@ -1571,7 +1572,7 @@
    "degree": 9,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 47,
+   "categoryScore": 59.5,
    "categoryHits": [
     "agent",
     "skill",
@@ -1622,7 +1623,7 @@
    "degree": 4,
    "category": "memory",
    "categoryLabel": "记忆上下文",
-   "categoryScore": 15,
+   "categoryScore": 21,
    "categoryHits": [
     "memory",
     "rag"
@@ -1711,7 +1712,7 @@
    "degree": 0,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 1,
+   "categoryScore": 1.5,
    "categoryHits": [
     "agent"
    ],
@@ -1767,7 +1768,7 @@
    "degree": 5,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 15,
+   "categoryScore": 20,
    "categoryHits": [
     "agent",
     "skill"
@@ -1826,7 +1827,7 @@
    "degree": 3,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 14,
+   "categoryScore": 19,
    "categoryHits": [
     "agent",
     "skill",
@@ -1879,7 +1880,7 @@
    "degree": 14,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 11,
+   "categoryScore": 16,
    "categoryHits": [
     "agent",
     "workflow",
@@ -1939,7 +1940,7 @@
    "degree": 3,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 7,
+   "categoryScore": 10,
    "categoryHits": [
     "agent",
     "skill",
@@ -1982,7 +1983,7 @@
    "degree": 4,
    "category": "market",
    "categoryLabel": "插件市场",
-   "categoryScore": 15,
+   "categoryScore": 19.5,
    "categoryHits": [
     "market",
     "marketplace",
@@ -2038,7 +2039,7 @@
    "degree": 2,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 6,
+   "categoryScore": 7,
    "categoryHits": [
     "claude",
     "gemini"
@@ -2098,7 +2099,7 @@
    "degree": 14,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 21,
+   "categoryScore": 26,
    "categoryHits": [
     "llm",
     "claude",
@@ -2150,7 +2151,7 @@
    "degree": 4,
    "category": "secure",
    "categoryLabel": "安全权限",
-   "categoryScore": 5,
+   "categoryScore": 7.5,
    "categoryHits": [
     "credential",
     "secret"
@@ -2196,7 +2197,7 @@
    "degree": 4,
    "category": "panel",
    "categoryLabel": "界面面板",
-   "categoryScore": 27,
+   "categoryScore": 33,
    "categoryHits": [
     "sidebar",
     "侧边"
@@ -2288,7 +2289,7 @@
    "degree": 3,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 2,
+   "categoryScore": 3,
    "categoryHits": [
     "llm"
    ],
@@ -2337,7 +2338,7 @@
    "degree": 0,
    "category": "panel",
    "categoryLabel": "界面面板",
-   "categoryScore": 10,
+   "categoryScore": 13,
    "categoryHits": [
     "widget",
     "界面"
@@ -2392,7 +2393,7 @@
    "degree": 3,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 7,
+   "categoryScore": 10.5,
    "categoryHits": [
     "llm",
     "openai",
@@ -2442,7 +2443,7 @@
    "degree": 2,
    "category": "memory",
    "categoryLabel": "记忆上下文",
-   "categoryScore": 9,
+   "categoryScore": 12,
    "categoryHits": [
     "memory",
     "rag"
@@ -2501,7 +2502,7 @@
    "degree": 14,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 27,
+   "categoryScore": 38,
    "categoryHits": [
     "agent",
     "skill",
@@ -2563,7 +2564,7 @@
    "degree": 14,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 3,
+   "categoryScore": 3.5,
    "categoryHits": [
     "agent"
    ],
@@ -2611,7 +2612,7 @@
    "degree": 0,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 6,
+   "categoryScore": 7,
    "categoryHits": [
     "llm",
     "claude"
@@ -2658,14 +2659,14 @@
    "noise": 0.4,
    "review": false,
    "degree": 5,
-   "category": "panel",
-   "categoryLabel": "界面面板",
+   "category": "model",
+   "categoryLabel": "模型接入",
    "categoryScore": 3,
    "categoryHits": [
-    "面板"
+    "claude"
    ],
-   "subcategory": "panel-side",
-   "subcategoryLabel": "侧边面板"
+   "subcategory": "model-provider",
+   "subcategoryLabel": "模型供应商"
   },
   {
    "id": "sopaco/deepwiki-rs",
@@ -2762,7 +2763,7 @@
    "degree": 1,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 6,
+   "categoryScore": 9,
    "categoryHits": [
     "agent",
     "skill"
@@ -2810,7 +2811,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 19,
+   "categoryScore": 23.5,
    "categoryHits": [
     "desktop",
     "tauri",
@@ -2859,7 +2860,7 @@
    "degree": 0,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 8,
+   "categoryScore": 9,
    "categoryHits": [
     "llm",
     "模型"
@@ -2919,7 +2920,7 @@
    "degree": 14,
    "category": "memory",
    "categoryLabel": "记忆上下文",
-   "categoryScore": 15,
+   "categoryScore": 21,
    "categoryHits": [
     "memory",
     "rag"
@@ -2971,7 +2972,7 @@
    "degree": 12,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 4,
+   "categoryScore": 5,
    "categoryHits": [
     "agent"
    ],
@@ -3158,7 +3159,7 @@
    "degree": 5,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 6,
+   "categoryScore": 9,
    "categoryHits": [
     "llm",
     "claude"
@@ -3217,7 +3218,7 @@
    "degree": 14,
    "category": "memory",
    "categoryLabel": "记忆上下文",
-   "categoryScore": 12,
+   "categoryScore": 15,
    "categoryHits": [
     "memory"
    ],
@@ -3261,7 +3262,7 @@
    "degree": 3,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 3,
+   "categoryScore": 3.5,
    "categoryHits": [
     "agent"
    ],
@@ -3307,7 +3308,7 @@
    "degree": 7,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 12,
+   "categoryScore": 13,
    "categoryHits": [
     "agent",
     "skill",
@@ -3469,7 +3470,7 @@
    "degree": 11,
    "category": "dev",
    "categoryLabel": "开发调试",
-   "categoryScore": 12,
+   "categoryScore": 17,
    "categoryHits": [
     "review",
     "lint"
@@ -3516,7 +3517,7 @@
    "degree": 2,
    "category": "market",
    "categoryLabel": "插件市场",
-   "categoryScore": 5,
+   "categoryScore": 6.5,
    "categoryHits": [
     "registry",
     "catalog"
@@ -3569,7 +3570,7 @@
    "degree": 3,
    "category": "other",
    "categoryLabel": "其他",
-   "categoryScore": 12,
+   "categoryScore": 14.5,
    "categoryHits": [
     "remote",
     "tunnel",
@@ -3625,7 +3626,7 @@
    "degree": 4,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 5,
+   "categoryScore": 7.5,
    "categoryHits": [
     "agent",
     "skill"
@@ -3677,7 +3678,7 @@
    "degree": 6,
    "category": "panel",
    "categoryLabel": "界面面板",
-   "categoryScore": 2,
+   "categoryScore": 3,
    "categoryHits": [
     "editor"
    ],
@@ -3728,14 +3729,15 @@
    "noise": 0.8,
    "review": true,
    "degree": 8,
-   "category": "agent",
-   "categoryLabel": "智能体技能",
-   "categoryScore": 4,
+   "category": "other",
+   "categoryLabel": "其他",
+   "categoryScore": 6,
    "categoryHits": [
-    "agent"
+    "remote"
    ],
-   "subcategory": "agent-sub",
-   "subcategoryLabel": "子代理"
+   "subcategory": null,
+   "subcategoryLabel": null,
+   "categoryRaw": "remote"
   },
   {
    "id": "GanyuanRan/Aegis",
@@ -3785,7 +3787,7 @@
    "degree": 14,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 6,
+   "categoryScore": 8.5,
    "categoryHits": [
     "agent",
     "skill"
@@ -3837,7 +3839,7 @@
    "degree": 13,
    "category": "pet",
    "categoryLabel": "桌宠娱乐",
-   "categoryScore": 6,
+   "categoryScore": 7.5,
    "categoryHits": [
     "pet"
    ],
@@ -3889,7 +3891,7 @@
    "degree": 6,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 13,
+   "categoryScore": 14.5,
    "categoryHits": [
     "desktop",
     "electron",
@@ -3983,7 +3985,7 @@
    "degree": 9,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 25,
+   "categoryScore": 29,
    "categoryHits": [
     "llm",
     "claude",
@@ -4027,7 +4029,7 @@
    "degree": 0,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 9,
+   "categoryScore": 13,
    "categoryHits": [
     "agent",
     "mcp"
@@ -4081,7 +4083,7 @@
    "degree": 6,
    "category": "other",
    "categoryLabel": "其他",
-   "categoryScore": 14,
+   "categoryScore": 20,
    "categoryHits": [
     "browser"
    ],
@@ -4140,7 +4142,7 @@
    "degree": 12,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 17,
+   "categoryScore": 24.5,
    "categoryHits": [
     "agent",
     "skill",
@@ -4197,7 +4199,7 @@
    "degree": 7,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 12,
+   "categoryScore": 15.5,
    "categoryHits": [
     "agent",
     "skill",
@@ -4257,7 +4259,7 @@
    "degree": 8,
    "category": "market",
    "categoryLabel": "插件市场",
-   "categoryScore": 9,
+   "categoryScore": 11,
    "categoryHits": [
     "awesome",
     "hub"
@@ -4302,7 +4304,7 @@
    "degree": 4,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 10,
+   "categoryScore": 11,
    "categoryHits": [
     "vision"
    ],
@@ -4360,7 +4362,7 @@
    "degree": 14,
    "category": "memory",
    "categoryLabel": "记忆上下文",
-   "categoryScore": 18,
+   "categoryScore": 25.5,
    "categoryHits": [
     "memory"
    ],
@@ -4405,7 +4407,7 @@
    "degree": 1,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 2,
+   "categoryScore": 2.5,
    "categoryHits": [
     "agent"
    ],
@@ -4462,7 +4464,7 @@
    "degree": 8,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 3,
+   "categoryScore": 4.5,
    "categoryHits": [
     "agent",
     "workflow"
@@ -4509,7 +4511,7 @@
    "degree": 1,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 4,
+   "categoryScore": 6,
    "categoryHits": [
     "agent",
     "skill"
@@ -4560,7 +4562,7 @@
    "degree": 5,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 8,
+   "categoryScore": 12,
    "categoryHits": [
     "agent",
     "skill"
@@ -4692,7 +4694,7 @@
    "degree": 6,
    "category": "pet",
    "categoryLabel": "桌宠娱乐",
-   "categoryScore": 18,
+   "categoryScore": 22.5,
    "categoryHits": [
     "pet",
     "桌宠",
@@ -4742,7 +4744,7 @@
    "degree": 1,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 2,
+   "categoryScore": 3,
    "categoryHits": [
     "agent"
    ],
@@ -4801,7 +4803,7 @@
    "degree": 0,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 9,
+   "categoryScore": 12.5,
    "categoryHits": [
     "agent",
     "skill"
@@ -4860,7 +4862,7 @@
    "degree": 14,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 16,
+   "categoryScore": 22,
    "categoryHits": [
     "agent",
     "mcp",
@@ -4918,7 +4920,7 @@
    "degree": 4,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 21,
+   "categoryScore": 26,
    "categoryHits": [
     "llm",
     "模型",
@@ -4966,7 +4968,7 @@
    "degree": 3,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 3,
+   "categoryScore": 3.5,
    "categoryHits": [
     "agent",
     "automation"
@@ -5025,7 +5027,7 @@
    "degree": 4,
    "category": "secure",
    "categoryLabel": "安全权限",
-   "categoryScore": 21,
+   "categoryScore": 30,
    "categoryHits": [
     "security"
    ],
@@ -5075,7 +5077,7 @@
    "degree": 11,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 5,
+   "categoryScore": 6,
    "categoryHits": [
     "llm",
     "模型"
@@ -5127,7 +5129,7 @@
    "degree": 2,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 14,
+   "categoryScore": 15,
    "categoryHits": [
     "skill",
     "智能体",
@@ -5231,7 +5233,7 @@
    "degree": 13,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 25,
+   "categoryScore": 34,
    "categoryHits": [
     "desktop",
     "client",
@@ -5281,7 +5283,7 @@
    "degree": 8,
    "category": "other",
    "categoryLabel": "其他",
-   "categoryScore": 10,
+   "categoryScore": 13,
    "categoryHits": [
     "browser",
     "浏览器"
@@ -5476,7 +5478,7 @@
    "degree": 10,
    "category": "secure",
    "categoryLabel": "安全权限",
-   "categoryScore": 25,
+   "categoryScore": 36.5,
    "categoryHits": [
     "security",
     "secret"
@@ -5535,7 +5537,7 @@
    "degree": 14,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 13,
+   "categoryScore": 18,
    "categoryHits": [
     "agent",
     "mcp"
@@ -5595,7 +5597,7 @@
    "degree": 10,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 15,
+   "categoryScore": 20,
    "categoryHits": [
     "agent",
     "skill"
@@ -5648,7 +5650,7 @@
    "degree": 5,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 4,
+   "categoryScore": 6,
    "categoryHits": [
     "agent",
     "skill"
@@ -5701,7 +5703,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 16,
+   "categoryScore": 23.5,
    "categoryHits": [
     "desktop",
     "client",
@@ -5748,7 +5750,7 @@
    "degree": 0,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 1,
+   "categoryScore": 1.5,
    "categoryHits": [
     "agent"
    ],
@@ -5799,7 +5801,7 @@
    "degree": 2,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 13,
+   "categoryScore": 17,
    "categoryHits": [
     "desktop",
     "electron",
@@ -5901,7 +5903,7 @@
    "degree": 13,
    "category": "secure",
    "categoryLabel": "安全权限",
-   "categoryScore": 12,
+   "categoryScore": 16.5,
    "categoryHits": [
     "security",
     "sandbox"
@@ -5982,7 +5984,7 @@
    "degree": 4,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 2,
+   "categoryScore": 3,
    "categoryHits": [
     "gemini"
    ],
@@ -6024,7 +6026,7 @@
    "degree": 1,
    "category": "panel",
    "categoryLabel": "界面面板",
-   "categoryScore": 2,
+   "categoryScore": 2.5,
    "categoryHits": [
     "ui"
    ],
@@ -6076,7 +6078,7 @@
    "degree": 6,
    "category": "memory",
    "categoryLabel": "记忆上下文",
-   "categoryScore": 21,
+   "categoryScore": 26.5,
    "categoryHits": [
     "memory",
     "knowledge",
@@ -6132,7 +6134,7 @@
    "degree": 6,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 11,
+   "categoryScore": 16,
    "categoryHits": [
     "agent",
     "mcp",
@@ -6185,7 +6187,7 @@
    "degree": 13,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 20,
+   "categoryScore": 26.5,
    "categoryHits": [
     "agent",
     "skill"
@@ -6232,7 +6234,7 @@
    "degree": 4,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 12,
+   "categoryScore": 15,
    "categoryHits": [
     "launcher",
     "macos",
@@ -6291,7 +6293,7 @@
    "degree": 14,
    "category": "memory",
    "categoryLabel": "记忆上下文",
-   "categoryScore": 19,
+   "categoryScore": 26,
    "categoryHits": [
     "memory",
     "knowledge"
@@ -6335,7 +6337,7 @@
    "degree": 8,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 6,
+   "categoryScore": 8,
    "categoryHits": [
     "agent"
    ],
@@ -6389,7 +6391,7 @@
    "degree": 5,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 13,
+   "categoryScore": 17.5,
    "categoryHits": [
     "desktop",
     "electron"
@@ -6489,16 +6491,16 @@
    "noise": 0,
    "review": false,
    "degree": 14,
-   "category": "model",
-   "categoryLabel": "模型接入",
-   "categoryScore": 9,
+   "category": "agent",
+   "categoryLabel": "智能体技能",
+   "categoryScore": 13.5,
    "categoryHits": [
-    "claude",
-    "模型",
-    "api"
+    "agent",
+    "skill",
+    "workflow"
    ],
-   "subcategory": "model-provider",
-   "subcategoryLabel": "模型供应商"
+   "subcategory": "agent-skill",
+   "subcategoryLabel": "技能包"
   },
   {
    "id": "flizzywine/dsh-tavern",
@@ -6630,7 +6632,7 @@
    "degree": 3,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 24,
+   "categoryScore": 29,
    "categoryHits": [
     "agent",
     "skill",
@@ -6682,7 +6684,7 @@
    "degree": 1,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 13,
+   "categoryScore": 17,
    "categoryHits": [
     "llm",
     "provider",
@@ -6737,7 +6739,7 @@
    "degree": 13,
    "category": "market",
    "categoryLabel": "插件市场",
-   "categoryScore": 6,
+   "categoryScore": 7,
    "categoryHits": [
     "awesome"
    ],
@@ -6786,7 +6788,7 @@
    "degree": 6,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 6,
+   "categoryScore": 9,
    "categoryHits": [
     "openai",
     "gemini",
@@ -6838,7 +6840,7 @@
    "degree": 2,
    "category": "other",
    "categoryLabel": "其他",
-   "categoryScore": 6,
+   "categoryScore": 7.5,
    "categoryHits": [
     "ssh"
    ],
@@ -6897,7 +6899,7 @@
    "degree": 14,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 8,
+   "categoryScore": 12,
    "categoryHits": [
     "openai",
     "claude",
@@ -6958,7 +6960,7 @@
    "degree": 5,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 7,
+   "categoryScore": 10,
    "categoryHits": [
     "agent",
     "mcp"
@@ -7016,7 +7018,7 @@
    "degree": 14,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 7,
+   "categoryScore": 9.5,
    "categoryHits": [
     "llm",
     "ollama"
@@ -7058,7 +7060,7 @@
    "degree": 0,
    "category": "other",
    "categoryLabel": "其他",
-   "categoryScore": 4,
+   "categoryScore": 5,
    "categoryHits": [
     "file"
    ],
@@ -7114,7 +7116,7 @@
    "degree": 3,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 10,
+   "categoryScore": 13,
    "categoryHits": [
     "agent",
     "skill",
@@ -7166,7 +7168,7 @@
    "degree": 6,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 9,
+   "categoryScore": 13,
    "categoryHits": [
     "agent",
     "skill"
@@ -7214,7 +7216,7 @@
    "degree": 0,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 1,
+   "categoryScore": 1.5,
    "categoryHits": [
     "agent"
    ],
@@ -7257,7 +7259,7 @@
    "degree": 0,
    "category": "secure",
    "categoryLabel": "安全权限",
-   "categoryScore": 6,
+   "categoryScore": 7.5,
    "categoryHits": [
     "sandbox"
    ],
@@ -7357,7 +7359,7 @@
    "degree": 14,
    "category": "memory",
    "categoryLabel": "记忆上下文",
-   "categoryScore": 11,
+   "categoryScore": 15,
    "categoryHits": [
     "memory",
     "knowledge"
@@ -7519,7 +7521,7 @@
    "degree": 14,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 10,
+   "categoryScore": 11,
    "categoryHits": [
     "gemini"
    ],
@@ -7564,7 +7566,7 @@
    "degree": 2,
    "category": "tools",
    "categoryLabel": "工具命令",
-   "categoryScore": 10,
+   "categoryScore": 13.5,
    "categoryHits": [
     "cli",
     "tool"
@@ -7627,7 +7629,7 @@
    "degree": 5,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 6,
+   "categoryScore": 8,
    "categoryHits": [
     "agent",
     "skill"
@@ -7722,7 +7724,7 @@
    "degree": 7,
    "category": "skin",
    "categoryLabel": "皮肤美化",
-   "categoryScore": 26,
+   "categoryScore": 30,
    "categoryHits": [
     "theme",
     "wallpaper",
@@ -7776,7 +7778,7 @@
    "degree": 2,
    "category": "memory",
    "categoryLabel": "记忆上下文",
-   "categoryScore": 9,
+   "categoryScore": 12,
    "categoryHits": [
     "memory"
    ],
@@ -7880,7 +7882,7 @@
    "degree": 11,
    "category": "memory",
    "categoryLabel": "记忆上下文",
-   "categoryScore": 42,
+   "categoryScore": 60,
    "categoryHits": [
     "memory"
    ],
@@ -8027,7 +8029,7 @@
    "degree": 2,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 9,
+   "categoryScore": 12,
    "categoryHits": [
     "agent",
     "skill",
@@ -8087,7 +8089,7 @@
    "degree": 12,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 12,
+   "categoryScore": 17.5,
    "categoryHits": [
     "agent",
     "skill",
@@ -8130,11 +8132,11 @@
    "noise": 1,
    "review": true,
    "degree": 0,
-   "category": "model",
-   "categoryLabel": "模型接入",
-   "categoryScore": 2,
+   "category": "agent",
+   "categoryLabel": "智能体技能",
+   "categoryScore": 2.5,
    "categoryHits": [
-    "llm"
+    "agent"
    ],
    "subcategory": null,
    "subcategoryLabel": null
@@ -8178,16 +8180,16 @@
    "noise": 0.4,
    "review": false,
    "degree": 0,
-   "category": "market",
-   "categoryLabel": "插件市场",
-   "categoryScore": 8,
+   "category": "agent",
+   "categoryLabel": "智能体技能",
+   "categoryScore": 9,
    "categoryHits": [
-    "awesome",
-    "收录",
-    "导航"
+    "agent",
+    "skill",
+    "mcp"
    ],
-   "subcategory": "market-index",
-   "subcategoryLabel": "索引合集"
+   "subcategory": "agent-skill",
+   "subcategoryLabel": "技能包"
   },
   {
    "id": "V1ki/dsh-plugin-subscriptions",
@@ -8230,7 +8232,7 @@
    "degree": 8,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 12,
+   "categoryScore": 14,
    "categoryHits": [
     "llm",
     "provider",
@@ -8277,7 +8279,7 @@
    "degree": 6,
    "category": "skin",
    "categoryLabel": "皮肤美化",
-   "categoryScore": 10,
+   "categoryScore": 11,
    "categoryHits": [
     "theme",
     "主题",
@@ -8337,7 +8339,7 @@
    "degree": 13,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 13,
+   "categoryScore": 18,
    "categoryHits": [
     "agent",
     "skill",
@@ -8383,7 +8385,7 @@
    "degree": 7,
    "category": "market",
    "categoryLabel": "插件市场",
-   "categoryScore": 8,
+   "categoryScore": 9,
    "categoryHits": [
     "awesome",
     "收录"
@@ -8439,7 +8441,7 @@
    "degree": 13,
    "category": "skin",
    "categoryLabel": "皮肤美化",
-   "categoryScore": 23,
+   "categoryScore": 31,
    "categoryHits": [
     "skin",
     "theme",
@@ -8485,7 +8487,7 @@
    "degree": 6,
    "category": "pet",
    "categoryLabel": "桌宠娱乐",
-   "categoryScore": 3,
+   "categoryScore": 4.5,
    "categoryHits": [
     "pet"
    ],
@@ -8536,7 +8538,7 @@
    "degree": 10,
    "category": "usage",
    "categoryLabel": "用量额度",
-   "categoryScore": 22,
+   "categoryScore": 24.5,
    "categoryHits": [
     "usage",
     "balance",
@@ -8580,7 +8582,7 @@
    "degree": 0,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 10,
+   "categoryScore": 13.5,
    "categoryHits": [
     "agent",
     "skill"
@@ -8633,7 +8635,7 @@
    "degree": 3,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 10,
+   "categoryScore": 13,
    "categoryHits": [
     "skill",
     "automation"
@@ -8683,7 +8685,7 @@
    "degree": 0,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 19,
+   "categoryScore": 27,
    "categoryHits": [
     "llm",
     "provider"
@@ -8728,7 +8730,7 @@
    "degree": 0,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 1,
+   "categoryScore": 1.5,
    "categoryHits": [
     "agent"
    ],
@@ -8777,7 +8779,7 @@
    "degree": 14,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 4,
+   "categoryScore": 6,
    "categoryHits": [
     "llm",
     "claude"
@@ -8822,7 +8824,7 @@
    "degree": 6,
    "category": "other",
    "categoryLabel": "其他",
-   "categoryScore": 11,
+   "categoryScore": 12,
    "categoryHits": [
     "remote",
     "局域网",
@@ -8913,7 +8915,7 @@
    "degree": 1,
    "category": "pet",
    "categoryLabel": "桌宠娱乐",
-   "categoryScore": 9,
+   "categoryScore": 10.5,
    "categoryHits": [
     "pet",
     "宠物"
@@ -8966,7 +8968,7 @@
    "degree": 2,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 8,
+   "categoryScore": 9,
    "categoryHits": [
     "claude"
    ],
@@ -9012,7 +9014,7 @@
    "degree": 1,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 2,
+   "categoryScore": 2.5,
    "categoryHits": [
     "agent"
    ],
@@ -9107,7 +9109,7 @@
    "degree": 0,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 1,
+   "categoryScore": 1.5,
    "categoryHits": [
     "agent"
    ],
@@ -9162,7 +9164,7 @@
    "degree": 2,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 9,
+   "categoryScore": 13,
    "categoryHits": [
     "agent",
     "mcp",
@@ -9216,7 +9218,7 @@
    "degree": 12,
    "category": "memory",
    "categoryLabel": "记忆上下文",
-   "categoryScore": 14,
+   "categoryScore": 21,
    "categoryHits": [
     "memory",
     "knowledge",
@@ -9355,7 +9357,7 @@
    "degree": 6,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 16,
+   "categoryScore": 23,
    "categoryHits": [
     "skill"
    ],
@@ -9455,7 +9457,7 @@
    "degree": 6,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 19,
+   "categoryScore": 27.5,
    "categoryHits": [
     "desktop",
     "tauri",
@@ -9598,7 +9600,7 @@
    "degree": 5,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 15,
+   "categoryScore": 19,
    "categoryHits": [
     "desktop",
     "client",
@@ -9657,7 +9659,7 @@
    "degree": 13,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 11,
+   "categoryScore": 14,
    "categoryHits": [
     "agent",
     "workflow"
@@ -9706,7 +9708,7 @@
    "degree": 13,
    "category": "market",
    "categoryLabel": "插件市场",
-   "categoryScore": 6,
+   "categoryScore": 7,
    "categoryHits": [
     "awesome"
    ],
@@ -9802,7 +9804,7 @@
    "degree": 3,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 3,
+   "categoryScore": 4.5,
    "categoryHits": [
     "agent",
     "automation"
@@ -9861,7 +9863,7 @@
    "degree": 12,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 15,
+   "categoryScore": 18,
    "categoryHits": [
     "agent",
     "skill",
@@ -9909,7 +9911,7 @@
    "degree": 4,
    "category": "panel",
    "categoryLabel": "界面面板",
-   "categoryScore": 3,
+   "categoryScore": 4.5,
    "categoryHits": [
     "ui"
    ],
@@ -9970,15 +9972,15 @@
    "degree": 12,
    "category": "market",
    "categoryLabel": "插件市场",
-   "categoryScore": 31,
+   "categoryScore": 38.5,
    "categoryHits": [
     "marketplace",
     "registry",
     "store",
     "awesome"
    ],
-   "subcategory": "market-store",
-   "subcategoryLabel": "市场商店"
+   "subcategory": "market-index",
+   "subcategoryLabel": "索引合集"
   },
   {
    "id": "acryldev/acryl",
@@ -10032,7 +10034,7 @@
    "degree": 14,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 10,
+   "categoryScore": 14,
    "categoryHits": [
     "agent",
     "workflow"
@@ -10072,15 +10074,15 @@
    "noise": 0,
    "review": false,
    "degree": 3,
-   "category": "model",
-   "categoryLabel": "模型接入",
-   "categoryScore": 5,
+   "category": "other",
+   "categoryLabel": "其他",
+   "categoryScore": 6,
    "categoryHits": [
-    "模型",
-    "接入"
+    "connect"
    ],
-   "subcategory": "model-provider",
-   "subcategoryLabel": "模型供应商"
+   "subcategory": null,
+   "subcategoryLabel": null,
+   "categoryRaw": "bridge"
   },
   {
    "id": "See-Sol-Lab/DeepSeekGUI",
@@ -10131,7 +10133,7 @@
    "degree": 3,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 6,
+   "categoryScore": 7,
    "categoryHits": [
     "desktop",
     "桌面"
@@ -10191,7 +10193,7 @@
    "degree": 14,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 3,
+   "categoryScore": 4,
    "categoryHits": [
     "agent"
    ],
@@ -10234,7 +10236,7 @@
    "degree": 1,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 2,
+   "categoryScore": 3,
    "categoryHits": [
     "agent"
    ],
@@ -10280,7 +10282,7 @@
    "degree": 2,
    "category": "memory",
    "categoryLabel": "记忆上下文",
-   "categoryScore": 2,
+   "categoryScore": 3,
    "categoryHits": [
     "knowledge"
    ],
@@ -10323,7 +10325,7 @@
    "degree": 3,
    "category": "tools",
    "categoryLabel": "工具命令",
-   "categoryScore": 14,
+   "categoryScore": 16,
    "categoryHits": [
     "cli",
     "工具",
@@ -10366,7 +10368,7 @@
    "degree": 0,
    "category": "other",
    "categoryLabel": "其他",
-   "categoryScore": 14,
+   "categoryScore": 16,
    "categoryHits": [
     "remote",
     "远程"
@@ -10414,7 +10416,7 @@
    "degree": 0,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 12,
+   "categoryScore": 13.5,
    "categoryHits": [
     "agent",
     "自动化",
@@ -10464,7 +10466,7 @@
    "degree": 5,
    "category": "usage",
    "categoryLabel": "用量额度",
-   "categoryScore": 14,
+   "categoryScore": 17,
    "categoryHits": [
     "usage",
     "balance",
@@ -10506,7 +10508,7 @@
    "degree": 0,
    "category": "skin",
    "categoryLabel": "皮肤美化",
-   "categoryScore": 9,
+   "categoryScore": 12,
    "categoryHits": [
     "skin",
     "皮肤"
@@ -10558,7 +10560,7 @@
    "degree": 3,
    "category": "secure",
    "categoryLabel": "安全权限",
-   "categoryScore": 15,
+   "categoryScore": 18,
    "categoryHits": [
     "approval",
     "sandbox"
@@ -10609,7 +10611,7 @@
    "degree": 1,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 19,
+   "categoryScore": 24.5,
    "categoryHits": [
     "desktop",
     "tauri",
@@ -10654,7 +10656,7 @@
    "degree": 2,
    "category": "other",
    "categoryLabel": "其他",
-   "categoryScore": 3,
+   "categoryScore": 4.5,
    "categoryHits": [
     "ssh"
    ],
@@ -10710,7 +10712,7 @@
    "degree": 6,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 11,
+   "categoryScore": 14,
    "categoryHits": [
     "agent",
     "skill",
@@ -10772,7 +10774,7 @@
    "degree": 14,
    "category": "market",
    "categoryLabel": "插件市场",
-   "categoryScore": 15,
+   "categoryScore": 21.5,
    "categoryHits": [
     "marketplace",
     "awesome",
@@ -10976,7 +10978,7 @@
    "degree": 13,
    "category": "market",
    "categoryLabel": "插件市场",
-   "categoryScore": 29,
+   "categoryScore": 39.5,
    "categoryHits": [
     "market",
     "marketplace",
@@ -11073,7 +11075,7 @@
    "degree": 8,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 9,
+   "categoryScore": 10,
    "categoryHits": [
     "agent",
     "智能体",
@@ -11188,7 +11190,7 @@
    "degree": 5,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 8,
+   "categoryScore": 11.5,
    "categoryHits": [
     "agent",
     "skill",
@@ -11246,7 +11248,7 @@
    "degree": 11,
    "category": "usage",
    "categoryLabel": "用量额度",
-   "categoryScore": 17,
+   "categoryScore": 21,
    "categoryHits": [
     "usage",
     "cost",
@@ -11295,7 +11297,7 @@
    "degree": 2,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 10,
+   "categoryScore": 14,
    "categoryHits": [
     "desktop",
     "桌面"
@@ -11387,7 +11389,7 @@
    "degree": 0,
    "category": "panel",
    "categoryLabel": "界面面板",
-   "categoryScore": 6,
+   "categoryScore": 7,
    "categoryHits": [
     "sidebar",
     "ui"
@@ -11440,7 +11442,7 @@
    "degree": 7,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 10,
+   "categoryScore": 14,
    "categoryHits": [
     "claude"
    ],
@@ -11492,7 +11494,7 @@
    "degree": 14,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 4,
+   "categoryScore": 6,
    "categoryHits": [
     "claude",
     "gemini"
@@ -11550,7 +11552,7 @@
    "degree": 8,
    "category": "secure",
    "categoryLabel": "安全权限",
-   "categoryScore": 3,
+   "categoryScore": 4.5,
    "categoryHits": [
     "sandbox"
    ],
@@ -11604,7 +11606,7 @@
    "degree": 9,
    "category": "other",
    "categoryLabel": "其他",
-   "categoryScore": 6,
+   "categoryScore": 8,
    "categoryHits": [
     "browser"
    ],
@@ -11648,7 +11650,7 @@
    "degree": 0,
    "category": "skin",
    "categoryLabel": "皮肤美化",
-   "categoryScore": 12,
+   "categoryScore": 15,
    "categoryHits": [
     "skin",
     "wallpaper"
@@ -11694,7 +11696,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 14,
+   "categoryScore": 16,
    "categoryHits": [
     "desktop",
     "client",
@@ -11738,7 +11740,7 @@
    "degree": 0,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 2,
+   "categoryScore": 3,
    "categoryHits": [
     "skill"
    ],
@@ -11793,7 +11795,7 @@
    "degree": 11,
    "category": "market",
    "categoryLabel": "插件市场",
-   "categoryScore": 14,
+   "categoryScore": 18,
    "categoryHits": [
     "market",
     "marketplace",
@@ -11890,7 +11892,7 @@
    "degree": 1,
    "category": "memory",
    "categoryLabel": "记忆上下文",
-   "categoryScore": 17,
+   "categoryScore": 21.5,
    "categoryHits": [
     "memory",
     "记忆",
@@ -11983,7 +11985,7 @@
    "degree": 0,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 6,
+   "categoryScore": 7,
    "categoryHits": [
     "agent",
     "智能体"
@@ -12081,7 +12083,7 @@
    "degree": 5,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 3,
+   "categoryScore": 4.5,
    "categoryHits": [
     "agent"
    ],
@@ -12171,7 +12173,7 @@
    "degree": 0,
    "category": "session",
    "categoryLabel": "会话交互",
-   "categoryScore": 3,
+   "categoryScore": 4,
    "categoryHits": [
     "prompt"
    ],
@@ -12221,7 +12223,7 @@
    "degree": 9,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 3,
+   "categoryScore": 4.5,
    "categoryHits": [
     "ollama"
    ],
@@ -12320,7 +12322,7 @@
    "degree": 0,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 5,
+   "categoryScore": 6,
    "categoryHits": [
     "agent",
     "skill"
@@ -12379,7 +12381,7 @@
    "degree": 12,
    "category": "skin",
    "categoryLabel": "皮肤美化",
-   "categoryScore": 19,
+   "categoryScore": 26.5,
    "categoryHits": [
     "skin",
     "theme",
@@ -12433,7 +12435,7 @@
    "degree": 3,
    "category": "usage",
    "categoryLabel": "用量额度",
-   "categoryScore": 32,
+   "categoryScore": 39.5,
    "categoryHits": [
     "usage",
     "billing",
@@ -12575,7 +12577,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 16,
+   "categoryScore": 18.5,
    "categoryHits": [
     "desktop",
     "electron",
@@ -12623,7 +12625,7 @@
    "degree": 0,
    "category": "memory",
    "categoryLabel": "记忆上下文",
-   "categoryScore": 14,
+   "categoryScore": 18.5,
    "categoryHits": [
     "knowledge",
     "rag"
@@ -12671,7 +12673,7 @@
    "degree": 0,
    "category": "secure",
    "categoryLabel": "安全权限",
-   "categoryScore": 12,
+   "categoryScore": 13.5,
    "categoryHits": [
     "sandbox"
    ],
@@ -12720,7 +12722,7 @@
    "degree": 7,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 2,
+   "categoryScore": 3,
    "categoryHits": [
     "mcp"
    ],
@@ -12819,7 +12821,7 @@
    "degree": 11,
    "category": "tools",
    "categoryLabel": "工具命令",
-   "categoryScore": 9,
+   "categoryScore": 12.5,
    "categoryHits": [
     "cli",
     "command"
@@ -13016,7 +13018,7 @@
    "degree": 14,
    "category": "market",
    "categoryLabel": "插件市场",
-   "categoryScore": 12,
+   "categoryScore": 15,
    "categoryHits": [
     "awesome",
     "directory"
@@ -13066,7 +13068,7 @@
    "degree": 4,
    "category": "panel",
    "categoryLabel": "界面面板",
-   "categoryScore": 21,
+   "categoryScore": 24,
    "categoryHits": [
     "sidebar",
     "侧边"
@@ -13157,7 +13159,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 16,
+   "categoryScore": 21.5,
    "categoryHits": [
     "desktop",
     "electron",
@@ -13204,7 +13206,7 @@
    "degree": 0,
    "category": "dev",
    "categoryLabel": "开发调试",
-   "categoryScore": 2,
+   "categoryScore": 3,
    "categoryHits": [
     "verify"
    ],
@@ -13254,7 +13256,7 @@
    "degree": 9,
    "category": "usage",
    "categoryLabel": "用量额度",
-   "categoryScore": 12,
+   "categoryScore": 15,
    "categoryHits": [
     "usage",
     "balance",
@@ -13439,7 +13441,7 @@
    "degree": 9,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 7,
+   "categoryScore": 7.5,
    "categoryHits": [
     "agent",
     "自动化",
@@ -13493,7 +13495,7 @@
    "degree": 0,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 16,
+   "categoryScore": 23,
    "categoryHits": [
     "skill",
     "mcp"
@@ -13582,7 +13584,7 @@
    "degree": 2,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 1,
+   "categoryScore": 1.5,
    "categoryHits": [
     "agent"
    ],
@@ -13716,7 +13718,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 9,
+   "categoryScore": 12,
    "categoryHits": [
     "launcher",
     "启动器"
@@ -13768,7 +13770,7 @@
    "degree": 0,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 2,
+   "categoryScore": 2.5,
    "categoryHits": [
     "agent"
    ],
@@ -14004,7 +14006,7 @@
    "degree": 11,
    "category": "panel",
    "categoryLabel": "界面面板",
-   "categoryScore": 3,
+   "categoryScore": 4.5,
    "categoryHits": [
     "sidebar"
    ],
@@ -14145,7 +14147,7 @@
    "degree": 0,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 3,
+   "categoryScore": 4,
    "categoryHits": [
     "agent"
    ],
@@ -14199,7 +14201,7 @@
    "degree": 5,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 3,
+   "categoryScore": 4.5,
    "categoryHits": [
     "agent",
     "skill"
@@ -14254,7 +14256,7 @@
    "degree": 6,
    "category": "other",
    "categoryLabel": "其他",
-   "categoryScore": 37,
+   "categoryScore": 47.5,
    "categoryHits": [
     "remote",
     "ssh"
@@ -14364,7 +14366,7 @@
    "degree": 10,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 7,
+   "categoryScore": 7.5,
    "categoryHits": [
     "模型",
     "多模态",
@@ -14455,7 +14457,7 @@
    "degree": 0,
    "category": "pet",
    "categoryLabel": "桌宠娱乐",
-   "categoryScore": 15,
+   "categoryScore": 18,
    "categoryHits": [
     "pet",
     "桌宠"
@@ -14552,7 +14554,7 @@
    "degree": 0,
    "category": "other",
    "categoryLabel": "其他",
-   "categoryScore": 6,
+   "categoryScore": 8,
    "categoryHits": [
     "browser"
    ],
@@ -14657,7 +14659,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 13,
+   "categoryScore": 17,
    "categoryHits": [
     "desktop",
     "macos",
@@ -14721,7 +14723,7 @@
    "degree": 8,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 11,
+   "categoryScore": 11.5,
    "categoryHits": [
     "模型",
     "api"
@@ -14776,7 +14778,7 @@
    "degree": 1,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 6,
+   "categoryScore": 7,
    "categoryHits": [
     "agent",
     "子代理"
@@ -14838,7 +14840,7 @@
    "degree": 4,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 16,
+   "categoryScore": 25,
    "categoryHits": [
     "agent",
     "skill"
@@ -14886,7 +14888,7 @@
    "degree": 0,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 6,
+   "categoryScore": 8,
    "categoryHits": [
     "claude"
    ],
@@ -14938,7 +14940,7 @@
    "degree": 1,
    "category": "market",
    "categoryLabel": "插件市场",
-   "categoryScore": 3,
+   "categoryScore": 4.5,
    "categoryHits": [
     "hub"
    ],
@@ -15033,7 +15035,7 @@
    "degree": 0,
    "category": "skin",
    "categoryLabel": "皮肤美化",
-   "categoryScore": 8,
+   "categoryScore": 9,
    "categoryHits": [
     "theme",
     "wallpaper"
@@ -15226,7 +15228,7 @@
    "degree": 6,
    "category": "skin",
    "categoryLabel": "皮肤美化",
-   "categoryScore": 10,
+   "categoryScore": 14,
    "categoryHits": [
     "theme",
     "主题"
@@ -15275,7 +15277,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 6,
+   "categoryScore": 8,
    "categoryHits": [
     "desktop"
    ],
@@ -15332,7 +15334,7 @@
    "degree": 1,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 12,
+   "categoryScore": 17,
    "categoryHits": [
     "desktop",
     "electron",
@@ -15484,7 +15486,7 @@
    "degree": 1,
    "category": "memory",
    "categoryLabel": "记忆上下文",
-   "categoryScore": 15,
+   "categoryScore": 20,
    "categoryHits": [
     "memory",
     "knowledge",
@@ -15532,7 +15534,7 @@
    "degree": 0,
    "category": "other",
    "categoryLabel": "其他",
-   "categoryScore": 11,
+   "categoryScore": 14,
    "categoryHits": [
     "bridge",
     "connect"
@@ -15575,7 +15577,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 4,
+   "categoryScore": 6,
    "categoryHits": [
     "desktop"
    ],
@@ -15625,14 +15627,14 @@
    "noise": 0,
    "review": false,
    "degree": 4,
-   "category": "session",
-   "categoryLabel": "会话交互",
-   "categoryScore": 6,
+   "category": "secure",
+   "categoryLabel": "安全权限",
+   "categoryScore": 9,
    "categoryHits": [
-    "会话"
+    "sandbox"
    ],
-   "subcategory": "session-manage",
-   "subcategoryLabel": "会话管理"
+   "subcategory": "secure-sandbox",
+   "subcategoryLabel": "沙箱隔离"
   },
   {
    "id": "xxccdl/DeepSeek-Harness-Mobile",
@@ -15677,7 +15679,7 @@
    "degree": 0,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 2,
+   "categoryScore": 3,
    "categoryHits": [
     "skill"
    ],
@@ -15912,7 +15914,7 @@
    "degree": 0,
    "category": "pet",
    "categoryLabel": "桌宠娱乐",
-   "categoryScore": 18,
+   "categoryScore": 21,
    "categoryHits": [
     "pet",
     "宠物",
@@ -16057,7 +16059,7 @@
    "degree": 4,
    "category": "market",
    "categoryLabel": "插件市场",
-   "categoryScore": 11,
+   "categoryScore": 15,
    "categoryHits": [
     "marketplace",
     "awesome",
@@ -16163,7 +16165,7 @@
    "degree": 1,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 2,
+   "categoryScore": 3,
    "categoryHits": [
     "agent"
    ],
@@ -16213,7 +16215,7 @@
    "degree": 0,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 15,
+   "categoryScore": 17,
    "categoryHits": [
     "模型",
     "视觉",
@@ -16312,7 +16314,7 @@
    "degree": 0,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 3,
+   "categoryScore": 4,
    "categoryHits": [
     "agent"
    ],
@@ -16408,7 +16410,7 @@
    "degree": 0,
    "category": "skin",
    "categoryLabel": "皮肤美化",
-   "categoryScore": 2,
+   "categoryScore": 3,
    "categoryHits": [
     "theme"
    ],
@@ -16507,7 +16509,7 @@
    "degree": 2,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 3,
+   "categoryScore": 4.5,
    "categoryHits": [
     "agent",
     "workflow"
@@ -16558,7 +16560,7 @@
    "degree": 1,
    "category": "tools",
    "categoryLabel": "工具命令",
-   "categoryScore": 2,
+   "categoryScore": 3,
    "categoryHits": [
     "cli"
    ],
@@ -16716,7 +16718,7 @@
    "degree": 3,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 8,
+   "categoryScore": 11,
    "categoryHits": [
     "desktop",
     "client",
@@ -16824,15 +16826,14 @@
    "noise": 0,
    "review": false,
    "degree": 6,
-   "category": "tools",
-   "categoryLabel": "工具命令",
+   "category": "model",
+   "categoryLabel": "模型接入",
    "categoryScore": 5,
    "categoryHits": [
-    "tool",
-    "工具"
+    "api"
    ],
-   "subcategory": "tools-gen",
-   "subcategoryLabel": "生成转换"
+   "subcategory": "model-gateway",
+   "subcategoryLabel": "网关代理"
   },
   {
    "id": "WTStarMark/dsh-myskin",
@@ -16979,7 +16980,7 @@
    "degree": 2,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 14,
+   "categoryScore": 17,
    "categoryHits": [
     "skill"
    ],
@@ -17077,7 +17078,7 @@
    "degree": 0,
    "category": "usage",
    "categoryLabel": "用量额度",
-   "categoryScore": 15,
+   "categoryScore": 18,
    "categoryHits": [
     "usage",
     "用量"
@@ -17183,7 +17184,7 @@
    "degree": 1,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 8,
+   "categoryScore": 11.5,
    "categoryHits": [
     "agent",
     "skill"
@@ -17232,14 +17233,14 @@
    "noise": 0,
    "review": false,
    "degree": 0,
-   "category": "notify",
-   "categoryLabel": "语音提醒",
+   "category": "skin",
+   "categoryLabel": "皮肤美化",
    "categoryScore": 3,
    "categoryHits": [
-    "语音"
+    "theme"
    ],
-   "subcategory": "notify-voice",
-   "subcategoryLabel": "语音播报"
+   "subcategory": "skin-theme",
+   "subcategoryLabel": "主题皮肤"
   },
   {
    "id": "Hope-Phenom/dsh-desktop-tray",
@@ -17377,7 +17378,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 9,
+   "categoryScore": 12.5,
    "categoryHits": [
     "desktop",
     "electron"
@@ -17477,7 +17478,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 6,
+   "categoryScore": 8,
    "categoryHits": [
     "desktop",
     "桌面"
@@ -17525,14 +17526,15 @@
    "noise": 0,
    "review": false,
    "degree": 6,
-   "category": "notify",
-   "categoryLabel": "语音提醒",
-   "categoryScore": 3,
+   "category": "model",
+   "categoryLabel": "模型接入",
+   "categoryScore": 3.5,
    "categoryHits": [
-    "notification"
+    "llm",
+    "api"
    ],
-   "subcategory": "notify-push",
-   "subcategoryLabel": "通知推送"
+   "subcategory": null,
+   "subcategoryLabel": null
   },
   {
    "id": "Rewmington/deskwhale-harness",
@@ -17670,7 +17672,7 @@
    "degree": 0,
    "category": "dev",
    "categoryLabel": "开发调试",
-   "categoryScore": 2,
+   "categoryScore": 3,
    "categoryHits": [
     "verify"
    ],
@@ -17726,7 +17728,7 @@
    "degree": 8,
    "category": "tools",
    "categoryLabel": "工具命令",
-   "categoryScore": 3,
+   "categoryScore": 4,
    "categoryHits": [
     "cli",
     "tool"
@@ -17773,7 +17775,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 12,
+   "categoryScore": 13,
    "categoryHits": [
     "desktop",
     "client",
@@ -17824,7 +17826,7 @@
    "degree": 6,
    "category": "skin",
    "categoryLabel": "皮肤美化",
-   "categoryScore": 6,
+   "categoryScore": 8,
    "categoryHits": [
     "theme"
    ],
@@ -18054,7 +18056,7 @@
    "degree": 0,
    "category": "panel",
    "categoryLabel": "界面面板",
-   "categoryScore": 4,
+   "categoryScore": 6,
    "categoryHits": [
     "dashboard"
    ],
@@ -18101,7 +18103,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 10,
+   "categoryScore": 12,
    "categoryHits": [
     "desktop",
     "macos",
@@ -18152,7 +18154,7 @@
    "degree": 0,
    "category": "dev",
    "categoryLabel": "开发调试",
-   "categoryScore": 2,
+   "categoryScore": 3,
    "categoryHits": [
     "verify"
    ],
@@ -18210,7 +18212,7 @@
    "degree": 2,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 8,
+   "categoryScore": 11,
    "categoryHits": [
     "desktop"
    ],
@@ -18410,7 +18412,7 @@
    "degree": 0,
    "category": "notify",
    "categoryLabel": "语音提醒",
-   "categoryScore": 8,
+   "categoryScore": 11,
    "categoryHits": [
     "notification",
     "通知"
@@ -18460,7 +18462,7 @@
    "degree": 0,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 2,
+   "categoryScore": 3,
    "categoryHits": [
     "skill"
    ],
@@ -18508,7 +18510,7 @@
    "degree": 5,
    "category": "secure",
    "categoryLabel": "安全权限",
-   "categoryScore": 9,
+   "categoryScore": 12,
    "categoryHits": [
     "oauth"
    ],
@@ -18892,15 +18894,16 @@
    "noise": 0,
    "review": false,
    "degree": 13,
-   "category": "session",
-   "categoryLabel": "会话交互",
-   "categoryScore": 4,
+   "category": "other",
+   "categoryLabel": "其他",
+   "categoryScore": 5,
    "categoryHits": [
-    "chat",
-    "对话"
+    "browser",
+    "网页"
    ],
-   "subcategory": "session-chat",
-   "subcategoryLabel": "消息对话"
+   "subcategory": null,
+   "subcategoryLabel": null,
+   "categoryRaw": "web"
   },
   {
    "id": "hujicheng-666/deepseek-balance-monitor",
@@ -18995,7 +18998,7 @@
    "degree": 14,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 15,
+   "categoryScore": 22.5,
    "categoryHits": [
     "agent",
     "skill",
@@ -19231,7 +19234,7 @@
    "degree": 4,
    "category": "pet",
    "categoryLabel": "桌宠娱乐",
-   "categoryScore": 3,
+   "categoryScore": 4.5,
    "categoryHits": [
     "pet"
    ],
@@ -19369,7 +19372,7 @@
    "degree": 0,
    "category": "skin",
    "categoryLabel": "皮肤美化",
-   "categoryScore": 2,
+   "categoryScore": 3,
    "categoryHits": [
     "theme"
    ],
@@ -19561,7 +19564,7 @@
    "degree": 4,
    "category": "notify",
    "categoryLabel": "语音提醒",
-   "categoryScore": 22,
+   "categoryScore": 27.5,
    "categoryHits": [
     "voice",
     "tts",
@@ -19702,7 +19705,7 @@
    "degree": 0,
    "category": "pet",
    "categoryLabel": "桌宠娱乐",
-   "categoryScore": 12,
+   "categoryScore": 15,
    "categoryHits": [
     "pet",
     "桌宠",
@@ -19843,7 +19846,7 @@
    "degree": 3,
    "category": "skin",
    "categoryLabel": "皮肤美化",
-   "categoryScore": 7,
+   "categoryScore": 8,
    "categoryHits": [
     "theme",
     "主题",
@@ -19980,7 +19983,7 @@
    "degree": 1,
    "category": "skin",
    "categoryLabel": "皮肤美化",
-   "categoryScore": 8,
+   "categoryScore": 9,
    "categoryHits": [
     "theme",
     "主题"
@@ -20025,14 +20028,14 @@
    "noise": 0.4,
    "review": false,
    "degree": 4,
-   "category": "memory",
-   "categoryLabel": "记忆上下文",
-   "categoryScore": 6,
+   "category": "pet",
+   "categoryLabel": "桌宠娱乐",
+   "categoryScore": 7.5,
    "categoryHits": [
-    "memory"
+    "pet"
    ],
-   "subcategory": "memory-long",
-   "subcategoryLabel": "长期记忆"
+   "subcategory": "pet-pet",
+   "subcategoryLabel": "桌宠养成"
   },
   {
    "id": "Jiong-w-ang/dsh-preview-panel",
@@ -20072,7 +20075,7 @@
    "degree": 0,
    "category": "panel",
    "categoryLabel": "界面面板",
-   "categoryScore": 6,
+   "categoryScore": 8,
    "categoryHits": [
     "panel"
    ],
@@ -20118,7 +20121,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 16,
+   "categoryScore": 19,
    "categoryHits": [
     "desktop",
     "windows",
@@ -20220,7 +20223,7 @@
    "degree": 0,
    "category": "skin",
    "categoryLabel": "皮肤美化",
-   "categoryScore": 7,
+   "categoryScore": 9,
    "categoryHits": [
     "theme",
     "style"
@@ -20309,7 +20312,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 4,
+   "categoryScore": 6,
    "categoryHits": [
     "desktop"
    ],
@@ -20357,7 +20360,7 @@
    "degree": 0,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 1,
+   "categoryScore": 1.5,
    "categoryHits": [
     "agent"
    ],
@@ -20832,7 +20835,7 @@
    "degree": 14,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 13,
+   "categoryScore": 17,
    "categoryHits": [
     "desktop",
     "electron",
@@ -20877,7 +20880,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 8,
+   "categoryScore": 10,
    "categoryHits": [
     "desktop"
    ],
@@ -20925,7 +20928,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 4,
+   "categoryScore": 6,
    "categoryHits": [
     "desktop"
    ],
@@ -20971,7 +20974,7 @@
    "degree": 0,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 4,
+   "categoryScore": 6,
    "categoryHits": [
     "vision"
    ],
@@ -21021,7 +21024,7 @@
    "degree": 0,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 2,
+   "categoryScore": 3,
    "categoryHits": [
     "skill"
    ],
@@ -21069,7 +21072,7 @@
    "degree": 0,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 2,
+   "categoryScore": 3,
    "categoryHits": [
     "skill"
    ],
@@ -21117,7 +21120,7 @@
    "degree": 0,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 3,
+   "categoryScore": 4,
    "categoryHits": [
     "agent",
     "skill"
@@ -21258,7 +21261,7 @@
    "degree": 0,
    "category": "skin",
    "categoryLabel": "皮肤美化",
-   "categoryScore": 8,
+   "categoryScore": 11,
    "categoryHits": [
     "theme",
     "主题",
@@ -21305,7 +21308,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 11,
+   "categoryScore": 14,
    "categoryHits": [
     "desktop",
     "macos",
@@ -21401,7 +21404,7 @@
    "degree": 4,
    "category": "session",
    "categoryLabel": "会话交互",
-   "categoryScore": 4,
+   "categoryScore": 6,
    "categoryHits": [
     "conversation"
    ],
@@ -21451,7 +21454,7 @@
    "degree": 0,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 2,
+   "categoryScore": 3,
    "categoryHits": [
     "skill"
    ],
@@ -21635,7 +21638,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 11,
+   "categoryScore": 14,
    "categoryHits": [
     "desktop",
     "launcher"
@@ -21738,7 +21741,7 @@
    "degree": 6,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 20,
+   "categoryScore": 22,
    "categoryHits": [
     "llm",
     "provider",
@@ -21792,7 +21795,7 @@
    "degree": 0,
    "category": "dev",
    "categoryLabel": "开发调试",
-   "categoryScore": 2,
+   "categoryScore": 3,
    "categoryHits": [
     "verify"
    ],
@@ -21897,7 +21900,7 @@
    "degree": 0,
    "category": "skin",
    "categoryLabel": "皮肤美化",
-   "categoryScore": 2,
+   "categoryScore": 3,
    "categoryHits": [
     "theme"
    ],
@@ -21941,7 +21944,7 @@
    "degree": 2,
    "category": "skin",
    "categoryLabel": "皮肤美化",
-   "categoryScore": 12,
+   "categoryScore": 16.5,
    "categoryHits": [
     "skin",
     "皮肤"
@@ -22041,7 +22044,7 @@
    "degree": 6,
    "category": "skin",
    "categoryLabel": "皮肤美化",
-   "categoryScore": 16,
+   "categoryScore": 18,
    "categoryHits": [
     "theme",
     "wallpaper"
@@ -22093,7 +22096,7 @@
    "degree": 5,
    "category": "pet",
    "categoryLabel": "桌宠娱乐",
-   "categoryScore": 3,
+   "categoryScore": 4.5,
    "categoryHits": [
     "pet"
    ],
@@ -22193,7 +22196,7 @@
    "degree": 0,
    "category": "usage",
    "categoryLabel": "用量额度",
-   "categoryScore": 6,
+   "categoryScore": 9,
    "categoryHits": [
     "usage"
    ],
@@ -22342,7 +22345,7 @@
    "degree": 1,
    "category": "skin",
    "categoryLabel": "皮肤美化",
-   "categoryScore": 2,
+   "categoryScore": 3,
    "categoryHits": [
     "theme"
    ],
@@ -22433,7 +22436,7 @@
    "degree": 0,
    "category": "panel",
    "categoryLabel": "界面面板",
-   "categoryScore": 7,
+   "categoryScore": 9,
    "categoryHits": [
     "panel",
     "侧边"
@@ -22489,7 +22492,7 @@
    "degree": 5,
    "category": "market",
    "categoryLabel": "插件市场",
-   "categoryScore": 6,
+   "categoryScore": 9,
    "categoryHits": [
     "marketplace"
    ],
@@ -22577,7 +22580,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 4,
+   "categoryScore": 6,
    "categoryHits": [
     "desktop"
    ],
@@ -22724,7 +22727,7 @@
    "degree": 7,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 12,
+   "categoryScore": 17,
    "categoryHits": [
     "desktop",
     "tauri",
@@ -22771,7 +22774,7 @@
    "degree": 0,
    "category": "session",
    "categoryLabel": "会话交互",
-   "categoryScore": 2,
+   "categoryScore": 3,
    "categoryHits": [
     "chat"
    ],
@@ -22817,14 +22820,14 @@
    "noise": 0,
    "review": false,
    "degree": 0,
-   "category": "session",
-   "categoryLabel": "会话交互",
-   "categoryScore": 6,
+   "category": "usage",
+   "categoryLabel": "用量额度",
+   "categoryScore": 8,
    "categoryHits": [
-    "conversation"
+    "cost"
    ],
-   "subcategory": "session-chat",
-   "subcategoryLabel": "消息对话"
+   "subcategory": "usage-billing",
+   "subcategoryLabel": "计费成本"
   },
   {
    "id": "Zenith-Lxz/dsh-foundry",
@@ -22956,7 +22959,7 @@
    "degree": 0,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 10,
+   "categoryScore": 12,
    "categoryHits": [
     "mcp"
    ],
@@ -23186,7 +23189,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 9,
+   "categoryScore": 11,
    "categoryHits": [
     "client",
     "electron"
@@ -23234,7 +23237,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 8,
+   "categoryScore": 10,
    "categoryHits": [
     "desktop",
     "桌面"
@@ -23295,7 +23298,7 @@
    "degree": 14,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 10,
+   "categoryScore": 14,
    "categoryHits": [
     "desktop",
     "桌面"
@@ -23351,7 +23354,7 @@
    "degree": 4,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 2,
+   "categoryScore": 3,
    "categoryHits": [
     "agent"
    ],
@@ -23399,7 +23402,7 @@
    "degree": 2,
    "category": "tools",
    "categoryLabel": "工具命令",
-   "categoryScore": 3,
+   "categoryScore": 4,
    "categoryHits": [
     "tool"
    ],
@@ -23487,7 +23490,7 @@
    "degree": 0,
    "category": "dev",
    "categoryLabel": "开发调试",
-   "categoryScore": 2,
+   "categoryScore": 3,
    "categoryHits": [
     "verify"
    ],
@@ -23588,7 +23591,7 @@
    "degree": 0,
    "category": "session",
    "categoryLabel": "会话交互",
-   "categoryScore": 10,
+   "categoryScore": 13,
    "categoryHits": [
     "session",
     "conversation"
@@ -23738,7 +23741,7 @@
    "degree": 6,
    "category": "market",
    "categoryLabel": "插件市场",
-   "categoryScore": 25,
+   "categoryScore": 31.5,
    "categoryHits": [
     "marketplace",
     "registry",
@@ -23791,7 +23794,7 @@
    "degree": 0,
    "category": "panel",
    "categoryLabel": "界面面板",
-   "categoryScore": 3,
+   "categoryScore": 3.5,
    "categoryHits": [
     "ui"
    ],
@@ -23839,7 +23842,7 @@
    "degree": 6,
    "category": "pet",
    "categoryLabel": "桌宠娱乐",
-   "categoryScore": 15,
+   "categoryScore": 19.5,
    "categoryHits": [
     "pet",
     "桌宠"
@@ -24213,7 +24216,7 @@
    "degree": 4,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 2,
+   "categoryScore": 3,
    "categoryHits": [
     "skill"
    ],
@@ -24259,7 +24262,7 @@
    "degree": 4,
    "category": "skin",
    "categoryLabel": "皮肤美化",
-   "categoryScore": 8,
+   "categoryScore": 11,
    "categoryHits": [
     "theme",
     "主题"
@@ -24351,14 +24354,14 @@
    "noise": 0,
    "review": false,
    "degree": 0,
-   "category": "panel",
-   "categoryLabel": "界面面板",
+   "category": "skin",
+   "categoryLabel": "皮肤美化",
    "categoryScore": 3,
    "categoryHits": [
-    "工作台"
+    "theme"
    ],
-   "subcategory": null,
-   "subcategoryLabel": null
+   "subcategory": "skin-theme",
+   "subcategoryLabel": "主题皮肤"
   },
   {
    "id": "jiuge2467/dsh-studio",
@@ -24400,7 +24403,7 @@
    "degree": 10,
    "category": "panel",
    "categoryLabel": "界面面板",
-   "categoryScore": 6,
+   "categoryScore": 7.5,
    "categoryHits": [
     "sidebar",
     "工作台"
@@ -24542,7 +24545,7 @@
    "degree": 0,
    "category": "other",
    "categoryLabel": "其他",
-   "categoryScore": 7,
+   "categoryScore": 9,
    "categoryHits": [
     "lan",
     "局域网"
@@ -24637,7 +24640,7 @@
    "degree": 1,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 2,
+   "categoryScore": 3,
    "categoryHits": [
     "llm"
    ],
@@ -24783,7 +24786,7 @@
    "degree": 2,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 19,
+   "categoryScore": 24.5,
    "categoryHits": [
     "desktop",
     "launcher",
@@ -24848,7 +24851,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 21,
+   "categoryScore": 25,
    "categoryHits": [
     "desktop",
     "桌面",
@@ -24936,7 +24939,7 @@
    "degree": 0,
    "category": "session",
    "categoryLabel": "会话交互",
-   "categoryScore": 10,
+   "categoryScore": 12,
    "categoryHits": [
     "session",
     "会话"
@@ -25216,7 +25219,7 @@
    "degree": 0,
    "category": "market",
    "categoryLabel": "插件市场",
-   "categoryScore": 9,
+   "categoryScore": 12,
    "categoryHits": [
     "market",
     "marketplace"
@@ -25263,14 +25266,14 @@
    "noise": 0,
    "review": false,
    "degree": 0,
-   "category": "skin",
-   "categoryLabel": "皮肤美化",
-   "categoryScore": 2,
+   "category": "dev",
+   "categoryLabel": "开发调试",
+   "categoryScore": 3,
    "categoryHits": [
-    "style"
+    "verify"
    ],
-   "subcategory": null,
-   "subcategoryLabel": null
+   "subcategory": "dev-test",
+   "subcategoryLabel": "测试验证"
   },
   {
    "id": "bruc3van/safer-dsh-market",
@@ -25306,7 +25309,7 @@
    "degree": 0,
    "category": "market",
    "categoryLabel": "插件市场",
-   "categoryScore": 9,
+   "categoryScore": 12,
    "categoryHits": [
     "market",
     "市场"
@@ -25446,7 +25449,7 @@
    "degree": 0,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 2,
+   "categoryScore": 3,
    "categoryHits": [
     "skill"
    ],
@@ -25727,7 +25730,7 @@
    "degree": 0,
    "category": "usage",
    "categoryLabel": "用量额度",
-   "categoryScore": 16,
+   "categoryScore": 20.5,
    "categoryHits": [
     "usage",
     "quota",
@@ -25816,7 +25819,7 @@
    "degree": 0,
    "category": "market",
    "categoryLabel": "插件市场",
-   "categoryScore": 15,
+   "categoryScore": 19.5,
    "categoryHits": [
     "market",
     "市场"
@@ -25865,7 +25868,7 @@
    "degree": 4,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 6,
+   "categoryScore": 7,
    "categoryHits": [
     "mcp"
    ],
@@ -25907,14 +25910,15 @@
    "noise": 0,
    "review": false,
    "degree": 0,
-   "category": "secure",
-   "categoryLabel": "安全权限",
-   "categoryScore": 9,
+   "category": "other",
+   "categoryLabel": "其他",
+   "categoryScore": 12,
    "categoryHits": [
-    "oauth"
+    "adapter"
    ],
-   "subcategory": "secure-cred",
-   "subcategoryLabel": "凭据密钥"
+   "subcategory": null,
+   "subcategoryLabel": null,
+   "categoryRaw": "bridge"
   },
   {
    "id": "pgmi-builds/better-dsh",
@@ -25962,7 +25966,7 @@
    "degree": 7,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 6,
+   "categoryScore": 6.5,
    "categoryHits": [
     "agent",
     "skill",
@@ -26011,7 +26015,7 @@
    "degree": 7,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 15,
+   "categoryScore": 16,
    "categoryHits": [
     "模型",
     "多模态",
@@ -26116,7 +26120,7 @@
    "degree": 0,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 8,
+   "categoryScore": 9,
    "categoryHits": [
     "llm",
     "接入"
@@ -26159,7 +26163,7 @@
    "degree": 2,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 12,
+   "categoryScore": 16.5,
    "categoryHits": [
     "launcher",
     "启动器"
@@ -26219,7 +26223,7 @@
    "degree": 8,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 19,
+   "categoryScore": 26,
    "categoryHits": [
     "desktop",
     "electron",
@@ -26265,7 +26269,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 6,
+   "categoryScore": 8,
    "categoryHits": [
     "desktop"
    ],
@@ -26312,7 +26316,7 @@
    "degree": 0,
    "category": "tools",
    "categoryLabel": "工具命令",
-   "categoryScore": 5,
+   "categoryScore": 5.5,
    "categoryHits": [
     "tool",
     "一键",
@@ -26409,7 +26413,7 @@
    "degree": 12,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 25,
+   "categoryScore": 33,
    "categoryHits": [
     "desktop",
     "electron",
@@ -26460,7 +26464,7 @@
    "degree": 4,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 11,
+   "categoryScore": 13,
    "categoryHits": [
     "desktop",
     "macos",
@@ -26507,7 +26511,7 @@
    "degree": 3,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 9,
+   "categoryScore": 11,
    "categoryHits": [
     "proxy",
     "模型",
@@ -26551,7 +26555,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 6,
+   "categoryScore": 8,
    "categoryHits": [
     "desktop"
    ],
@@ -26603,7 +26607,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 9,
+   "categoryScore": 12,
    "categoryHits": [
     "launcher"
    ],
@@ -26659,7 +26663,7 @@
    "degree": 3,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 17,
+   "categoryScore": 23,
    "categoryHits": [
     "desktop",
     "electron",
@@ -26714,7 +26718,7 @@
    "degree": 0,
    "category": "session",
    "categoryLabel": "会话交互",
-   "categoryScore": 8,
+   "categoryScore": 9,
    "categoryHits": [
     "session"
    ],
@@ -26817,7 +26821,7 @@
    "degree": 3,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 8,
+   "categoryScore": 10,
    "categoryHits": [
     "desktop",
     "桌面"
@@ -26870,7 +26874,7 @@
    "degree": 7,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 25,
+   "categoryScore": 33,
    "categoryHits": [
     "desktop",
     "client",
@@ -26926,7 +26930,7 @@
    "degree": 8,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 20,
+   "categoryScore": 26,
    "categoryHits": [
     "desktop",
     "client",
@@ -26981,7 +26985,7 @@
    "degree": 3,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 12,
+   "categoryScore": 15,
    "categoryHits": [
     "desktop",
     "client",
@@ -27080,7 +27084,7 @@
    "degree": 2,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 4,
+   "categoryScore": 6,
    "categoryHits": [
     "llm"
    ],
@@ -27129,7 +27133,7 @@
    "degree": 1,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 3,
+   "categoryScore": 4,
    "categoryHits": [
     "agent",
     "skill"
@@ -27172,7 +27176,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 8,
+   "categoryScore": 9,
    "categoryHits": [
     "desktop"
    ],
@@ -27230,7 +27234,7 @@
    "degree": 8,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 16,
+   "categoryScore": 19,
    "categoryHits": [
     "desktop",
     "electron"
@@ -27289,7 +27293,7 @@
    "degree": 0,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 4,
+   "categoryScore": 6,
    "categoryHits": [
     "claude"
    ],
@@ -27336,7 +27340,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 19,
+   "categoryScore": 23.5,
    "categoryHits": [
     "desktop",
     "electron",
@@ -27434,7 +27438,7 @@
    "degree": 1,
    "category": "usage",
    "categoryLabel": "用量额度",
-   "categoryScore": 15,
+   "categoryScore": 16.5,
    "categoryHits": [
     "balance",
     "余额"
@@ -27476,16 +27480,15 @@
    "noise": 0.8,
    "review": true,
    "degree": 6,
-   "category": "model",
-   "categoryLabel": "模型接入",
-   "categoryScore": 7,
+   "category": "other",
+   "categoryLabel": "其他",
+   "categoryScore": 9,
    "categoryHits": [
-    "openai",
-    "endpoint",
-    "proxy"
+    "bridge"
    ],
-   "subcategory": "model-gateway",
-   "subcategoryLabel": "网关代理"
+   "subcategory": null,
+   "subcategoryLabel": null,
+   "categoryRaw": "bridge"
   },
   {
    "id": "limileo/DSH-Desktop",
@@ -27527,7 +27530,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 11,
+   "categoryScore": 14,
    "categoryHits": [
     "desktop",
     "macos",
@@ -27622,7 +27625,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 16,
+   "categoryScore": 17.5,
    "categoryHits": [
     "desktop",
     "windows",
@@ -27676,7 +27679,7 @@
    "degree": 3,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 22,
+   "categoryScore": 29,
    "categoryHits": [
     "desktop",
     "client",
@@ -27727,7 +27730,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 20,
+   "categoryScore": 23,
    "categoryHits": [
     "desktop",
     "electron",
@@ -27783,7 +27786,7 @@
    "degree": 7,
    "category": "tools",
    "categoryLabel": "工具命令",
-   "categoryScore": 3,
+   "categoryScore": 4.5,
    "categoryHits": [
     "cli",
     "tool"
@@ -27873,7 +27876,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 15,
+   "categoryScore": 16.5,
    "categoryHits": [
     "desktop",
     "tauri",
@@ -27935,7 +27938,7 @@
    "degree": 14,
    "category": "tools",
    "categoryLabel": "工具命令",
-   "categoryScore": 1,
+   "categoryScore": 1.5,
    "categoryHits": [
     "tool"
    ],
@@ -27978,7 +27981,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 14,
+   "categoryScore": 17,
    "categoryHits": [
     "desktop",
     "桌面",
@@ -28023,7 +28026,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 7,
+   "categoryScore": 8,
    "categoryHits": [
     "desktop",
     "macos",
@@ -28068,7 +28071,7 @@
    "degree": 3,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 13,
+   "categoryScore": 16,
    "categoryHits": [
     "desktop",
     "electron",
@@ -28121,7 +28124,7 @@
    "degree": 8,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 15,
+   "categoryScore": 20.5,
    "categoryHits": [
     "desktop",
     "electron",
@@ -28271,7 +28274,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 15,
+   "categoryScore": 17.5,
    "categoryHits": [
     "desktop",
     "tauri",
@@ -28315,7 +28318,7 @@
    "degree": 1,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 11,
+   "categoryScore": 14,
    "categoryHits": [
     "desktop",
     "windows",
@@ -28360,14 +28363,14 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 11,
+   "categoryScore": 12,
    "categoryHits": [
     "desktop",
     "windows",
     "installer"
    ],
-   "subcategory": "desktop-client",
-   "subcategoryLabel": "客户端本体"
+   "subcategory": "desktop-installer",
+   "subcategoryLabel": "安装分发"
   },
   {
    "id": "zink-ning-lkr/dsh-desktop",
@@ -28404,7 +28407,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 7,
+   "categoryScore": 9,
    "categoryHits": [
     "desktop",
     "windows",
@@ -28451,7 +28454,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 6,
+   "categoryScore": 8,
    "categoryHits": [
     "desktop",
     "桌面"
@@ -28495,7 +28498,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 4,
+   "categoryScore": 5,
    "categoryHits": [
     "desktop",
     "macos"
@@ -28581,7 +28584,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 9,
+   "categoryScore": 10,
    "categoryHits": [
     "desktop",
     "client",
@@ -28687,7 +28690,7 @@
    "degree": 10,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 20,
+   "categoryScore": 28.5,
    "categoryHits": [
     "desktop",
     "launcher",
@@ -28740,7 +28743,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 10,
+   "categoryScore": 11,
    "categoryHits": [
     "desktop",
     "client",
@@ -28795,7 +28798,7 @@
    "degree": 5,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 10,
+   "categoryScore": 13.5,
    "categoryHits": [
     "desktop",
     "windows"
@@ -28895,7 +28898,7 @@
    "degree": 7,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 26,
+   "categoryScore": 32,
    "categoryHits": [
     "desktop",
     "electron",
@@ -28989,7 +28992,7 @@
    "degree": 1,
    "category": "skin",
    "categoryLabel": "皮肤美化",
-   "categoryScore": 18,
+   "categoryScore": 24.5,
    "categoryHits": [
     "skin",
     "theme",
@@ -29077,7 +29080,7 @@
    "degree": 0,
    "category": "other",
    "categoryLabel": "其他",
-   "categoryScore": 4,
+   "categoryScore": 6,
    "categoryHits": [
     "drag"
    ],
@@ -29133,7 +29136,7 @@
    "degree": 12,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 3,
+   "categoryScore": 4,
    "categoryHits": [
     "agent"
    ],
@@ -29220,7 +29223,7 @@
    "degree": 0,
    "category": "usage",
    "categoryLabel": "用量额度",
-   "categoryScore": 3,
+   "categoryScore": 4.5,
    "categoryHits": [
     "billing"
    ],
@@ -29275,7 +29278,7 @@
    "degree": 1,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 17,
+   "categoryScore": 21,
    "categoryHits": [
     "llm",
     "provider",
@@ -29327,7 +29330,7 @@
    "degree": 0,
    "category": "notify",
    "categoryLabel": "语音提醒",
-   "categoryScore": 9,
+   "categoryScore": 10.5,
    "categoryHits": [
     "notification"
    ],
@@ -29418,7 +29421,7 @@
    "degree": 0,
    "category": "agent",
    "categoryLabel": "智能体技能",
-   "categoryScore": 13,
+   "categoryScore": 14,
    "categoryHits": [
     "agent",
     "skill",
@@ -29469,14 +29472,14 @@
    "degree": 4,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 6,
+   "categoryScore": 8,
    "categoryHits": [
     "launcher",
     "windows",
     "桌面"
    ],
-   "subcategory": "desktop-client",
-   "subcategoryLabel": "客户端本体"
+   "subcategory": "desktop-launcher",
+   "subcategoryLabel": "启动器"
   },
   {
    "id": "qingchunnh/dsh-desktop",
@@ -29516,7 +29519,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 8,
+   "categoryScore": 10,
    "categoryHits": [
     "desktop",
     "桌面",
@@ -29563,7 +29566,7 @@
    "degree": 6,
    "category": "usage",
    "categoryLabel": "用量额度",
-   "categoryScore": 12,
+   "categoryScore": 13.5,
    "categoryHits": [
     "usage"
    ],
@@ -29658,7 +29661,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 14,
+   "categoryScore": 19.5,
    "categoryHits": [
     "desktop",
     "tauri"
@@ -29702,7 +29705,7 @@
    "degree": 0,
    "category": "desktop",
    "categoryLabel": "桌面客户端",
-   "categoryScore": 6,
+   "categoryScore": 8,
    "categoryHits": [
     "desktop"
    ],
@@ -29747,8 +29750,8 @@
    "categoryHits": [
     "desktop"
    ],
-   "subcategory": "desktop-client",
-   "subcategoryLabel": "客户端本体"
+   "subcategory": "desktop-installer",
+   "subcategoryLabel": "安装分发"
   }
  ],
  "edges": [

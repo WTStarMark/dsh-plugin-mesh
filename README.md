@@ -5,7 +5,7 @@
 [![在线访问](https://img.shields.io/badge/在线访问-104.129.51.126-2f7df6?style=flat-square)](http://104.129.51.126/)
 [![测试](https://img.shields.io/badge/tests-93%20JS%20%2B%2033%20Python-3fb8a8?style=flat-square)](#测试)
 [![依赖](https://img.shields.io/badge/dependencies-0-57b894?style=flat-square)](#技术选型)
-[![版本](https://img.shields.io/badge/version-v0.4.0-9b8cf0?style=flat-square)](#)
+[![版本](https://img.shields.io/badge/version-v0.4.1-9b8cf0?style=flat-square)](#)
 
 👉 **在线地址：<http://104.129.51.126/>**
 
@@ -209,6 +209,166 @@ docs/               data-contract.md 与预览图
 - **前端零依赖、无构建**：ES 模块 + Canvas 2D，`node:test` 单测；不引框架、不引 three.js
 - **后端零 pip**：只用 Python 标准库（urllib / json / unittest），`python3 backend/collect.py` 直接跑
 - **不用模型分类**：500+ 仓库逐个让模型读就是烧 token，且结果不稳定、无法 diff；规则表可审计、可复跑、可手改
+
+## 使用：查询 API（与前端同端口）
+
+线上 demo：`http://104.129.51.126` · 本地开发：`http://127.0.0.1:8788`
+
+> **版本要求**：API 与卡片是 **v0.4.1** 起提供的功能。上面的线上地址要等部署 v0.4.1 之后才生效；
+> 想在部署前先试，把 `BASE` 换成本机预览地址（如 `http://127.0.0.1:8788`）即可，命令一字不用改。
+
+API 与前端**共用同一个端口**：不需要另外开服务、不需要任何密钥、不占用额外端口。
+零依赖（Python 标准库 + Node 标准库）、**只读**、允许跨域（`Access-Control-Allow-Origin: *`），
+响应带 5 分钟公共缓存，数据每小时更新一次。
+
+### 端点一览
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api` | 端点清单（自描述，建议先看这个） |
+| GET | `/api/health` | 健康检查 + 数据概况（节点数、生成时间） |
+| GET | `/api/categories` | 扇区（功能分类）与细枝，含各自数量 |
+| GET | `/api/repos` | 检索仓库（过滤 / 排序 / 翻页） |
+| GET | `/api/repos/:owner/:name` | 单个仓库详情 + 同作者 / 主题共现连线 |
+| GET | `/api/card/:owner/:name.svg` | 可分享的 SVG 卡片（见下一节） |
+| GET | `/card/:owner/:name` | 卡片分享页（预览 + 嵌入代码） |
+| GET | `/api/stats` | 访问统计（只读） |
+| POST | `/api/ping` | 上报一次访问（前端自动调用，唯一接受 POST 的接口） |
+
+### 30 秒上手
+
+```bash
+BASE=http://104.129.51.126
+
+# 1. 星标最高的 5 个仓库
+curl -s "$BASE/api/repos?sort=stars&limit=5"
+
+# 2. 搜关键词（匹配 owner/name、描述、topics、命中标签）
+curl -s "$BASE/api/repos?q=皮肤&limit=3&fields=all"
+
+# 3. 某个扇区下的仓库（扇区 id 从 /api/categories 拿）
+curl -s "$BASE/api/repos?category=skin&sort=stars&limit=10"
+
+# 4. 单个仓库的完整档案（含关系连线）
+curl -s "$BASE/api/repos/WTStarMark/dsh-myskin"
+
+# 5. 生态总览：扇区 + 细枝分布
+curl -s "$BASE/api/categories"
+```
+
+### 检索参数（`/api/repos`）
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `q` | — | 关键词，匹配 `owner/name`、描述、topics、命中标签（不区分大小写） |
+| `category` | — | 扇区 id，如 `agent` / `skin` / `desktop` |
+| `subcategory` | — | 细枝 id，如 `skin-theme` |
+| `tag` | — | 采集标签：`dsh` / `dsh-plugin` / `dsh-desktop` / `dsh-plugin-desktop` / `dsh-plugin-market` / `dsh-plugins` |
+| `language` | — | 主语言，如 `TypeScript` |
+| `minStars` | `0` | 最低星标数 |
+| `archived` | — | `hide` = 隐藏归档；`only` = 只看归档 |
+| `sort` | `stars` | `stars` 星标 / `pushed` 最近推送 / `created` 创建时间 / `name` 名称 |
+| `limit` | `20` | 每页条数，**上限 100**（超出自动夹到 100） |
+| `offset` | `0` | 偏移量，用于翻页 |
+| `fields` | 精简 | 传 `all` 返回完整字段（描述、topics、许可证、主页、创建/推送时间、归档与复核标记） |
+
+### 响应示例
+
+```json
+{
+  "query": { "q": "harness", "sort": "stars", "limit": 2, "offset": 0 },
+  "total": 1981,
+  "count": 2,
+  "offset": 0,
+  "limit": 2,
+  "generatedAt": "2026-10-01T17:00:42Z",
+  "items": [
+    {
+      "id": "deepseek-ai/deepseek-harness",
+      "stars": 241610,
+      "categoryLabel": "智能体技能",
+      "subcategoryLabel": null,
+      "language": "TypeScript",
+      "description": "…"
+    }
+  ]
+}
+```
+
+### 约定与错误码
+
+- **只读**：非 `GET`/`HEAD` 一律 `405`（仅 `/api/ping` 接受 `POST`）；`OPTIONS` 返回 `204`，方便浏览器预检。
+- **缓存**：`Cache-Control: public, max-age=300`。数据每小时更新，查询结果与卡片都会跟着变。
+- **跨域**：允许任意来源引用——这是公开的只读数据，适合直接在前端页面里 fetch。
+- **限流**：沿用服务端按 IP 的滑动窗口限流，超限返回 `429`。
+- **校验**：仓库名按 GitHub 字符集做白名单校验，非法返回 `400`；未收录返回 `404`（卡片请求的 404 会回一张占位图，不会出现裂图）。
+
+| 状态码 | 含义 |
+|---|---|
+| 200 | 正常 |
+| 204 | 预检通过（OPTIONS） |
+| 400 | 仓库名不合法 |
+| 404 | 未收录该仓库 |
+| 405 | 使用了写方法 |
+| 429 | 请求过于频繁 |
+
+## 使用：卡片（给别人的项目用）
+
+任何被收录的仓库都有一张**自包含 SVG 卡片**：无脚本、无外部字体、无外部依赖，**420×168，GitHub 仓库卡片风格**（默认深色，`?theme=light` 出浅色）。
+卡片显示：仓库图标 + `owner / name`、两行简介、● 语言色点（GitHub 语言配色）、★ 星标、⑂ 复刻（为 0 时隐藏）、更新于 X 前，
+底部是所属扇区标签（同色淡底）与去处。**点击卡片背景 → 站点；点击仓库名 → GitHub 原仓库**（两个链接是兄弟节点，不是嵌套）。
+
+**线上 demo（GitHub 会直接渲染出真图）：**
+
+![dsh-myskin 卡片](http://104.129.51.126/api/card/WTStarMark/dsh-myskin.svg)
+
+浅色版：http://104.129.51.126/api/card/WTStarMark/dsh-myskin.svg?theme=light
+
+### 贴进 README
+
+```markdown
+[![dsh-myskin](http://104.129.51.126/api/card/WTStarMark/dsh-myskin.svg)](http://104.129.51.126/)
+```
+
+### 贴进网页
+
+```html
+<!-- 最省事：img（注意：用 img 嵌入时 SVG 内部的链接不生效，所以去处也印在了卡面上） -->
+<a href="http://104.129.51.126/">
+  <img src="http://104.129.51.126/api/card/WTStarMark/dsh-myskin.svg" alt="dsh-myskin" width="420" height="168">
+</a>
+
+<!-- 想要卡片本身可点：object -->
+<object type="image/svg+xml" data="http://104.129.51.126/api/card/WTStarMark/dsh-myskin.svg" width="420" height="168"></object>
+```
+
+### 卡片参数
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `theme` | `dark` | 默认 GitHub 深色；传 `light` 出浅色版（SVG 读不到系统的 prefers-color-scheme，需要显式指定） |
+| `link` | `http://104.129.51.126/` | 点击去处。只接受 `http`/`https`（`javascript:` 之类自动回落默认），**保留完整路径**，可指向仓库页或文档页 |
+
+```bash
+# 浅色版 + 导向本仓库的 GitHub 页面
+http://104.129.51.126/api/card/WTStarMark/dsh-myskin.svg?theme=light&link=https://github.com/WTStarMark/dsh-myskin
+```
+
+### 交互式获取代码
+
+打开 `http://104.129.51.126/card/<owner>/<name>`：深色/浅色两版实时预览，Markdown 与 HTML 代码一键复制（默认深色）。
+
+例：http://104.129.51.126/card/WTStarMark/dsh-myskin
+
+### 换掉默认去处
+
+部署时用环境变量统一改（无需改代码）：
+
+```bash
+SITE_URL=https://your-site.example pm2 restart dsh-plugin-mesh --update-env
+```
+
+> 本机开发预览：`http://192.168.22.250:8788/api/card/WTStarMark/dsh-myskin.svg`（卡片与前端同端口）
 
 ## 许可
 

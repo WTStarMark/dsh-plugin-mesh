@@ -20,9 +20,9 @@ export const TAG_COLORS = {
  * curv：弧线鼓起的程度（相对弦长），值越大越远离圆心 —— 观赏性的关键参数。
  */
 export const EDGE_STYLES = {
-  neighbor: { label: "同扇区近邻", color: null, alpha: 0.3, curv: 0.05, dash: [] },
-  owner: { label: "同作者", color: "#7f8ea6", alpha: 0.34, curv: 0.16, dash: [4, 4] },
-  topic: { label: "主题共现", color: "#9aa8bb", alpha: 0.15, curv: 0.22, dash: [] },
+  // 选中时画的两类连线：颜色明显区分（同作者=主题主色，主题共现=琥珀）
+  owner: { label: "同作者", color: null, alpha: 0.85, curv: 0.16, dash: [] },
+  topic: { label: "主题共现", color: "#e08a00", alpha: 0.5, curv: 0.22, dash: [5, 4] },
   fork: { label: "复刻血缘", color: "#a08a6a", alpha: 0.3, curv: 0.14, dash: [2, 3] },
 };
 
@@ -86,7 +86,142 @@ export async function loadMeshCached(url = "./data/mesh.json", options = {}) {
   return { mesh, fromCache: false, revalidate: async () => null };
 }
 
-/** 把原始契约整理成渲染/交互所需的索引结构 */
+/**
+ * 优先载入预计算契约（mesh-core.json）：体积小一半、且浏览器不用再算布局。
+ * 没有 core 就回退到整份 mesh.json（老数据/老部署照常能用）。
+ */
+export async function loadMeshBest(url = "./data/mesh.json", options = {}) {
+  const coreUrl = options.coreUrl ?? "./data/mesh-core.json";
+  try {
+    const res = await fetch(coreUrl, { cache: "no-store" });
+    if (res.ok) {
+      const core = await res.json();
+      if (core?.nodes?.length && core.meta?.layout === "precomputed") {
+        return { mesh: core, core: true, fromCache: false, revalidate: async () => null };
+      }
+    }
+  } catch {
+    /* 回退 */
+  }
+  const result = await loadMeshCached(url, options);
+  return { ...result, core: false };
+}
+
+/** 预计算契约里的连线类型编码 */
+export const EDGE_TYPE_BY_CODE = ["owner", "topic", "fork", "neighbor"];
+
+/**
+ * 从预计算契约（mesh-core.json）构建，产物与 prepare() 同形。
+ * 区别：节点已经带好 x/y/r，连线已经是索引三元组（不再需要 buildLinks）。
+ */
+export function prepareCore(core) {
+  const nodes = core.nodes ?? [];
+  const triples = core.edges ?? [];
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+
+  const links = [];
+  const adjacency = new Map(nodes.map((n) => [n.id, []]));
+  for (const [a, b, code] of triples) {
+    const na = nodes[a];
+    const nb = nodes[b];
+    if (!na || !nb) continue;
+    const type = EDGE_TYPE_BY_CODE[code] ?? "topic";
+    links.push({ a, b, type });
+    adjacency.get(na.id).push({ id: nb.id, type, weight: 1, via: [] });
+    adjacency.get(nb.id).push({ id: na.id, type, weight: 1, via: [] });
+  }
+
+  const review = nodes.filter((n) => n.review).sort((a, b) => b.stars - a.stars);
+  return {
+    mesh: core,
+    core: true,
+    nodes,
+    edges: triples,
+    links,
+    byId,
+    adjacency,
+    languages: [...new Set(nodes.map((n) => n.language).filter(Boolean))].sort(),
+    owners: new Set(nodes.map((n) => n.owner)),
+    maxStars: nodes.reduce((m, n) => Math.max(m, n.stars || 0), 0),
+    review,
+    meta: core.meta ?? {},
+    tags: core.tags ?? [],
+    clusters: core.clusters ?? [],
+    hubs: core.hubs ?? [],
+    edgeTypes: [...new Set(links.map((l) => l.type))],
+  };
+}
+
+/**
+ * 预计算布局 → 与 createSectorLayout 同接口的轻量对象。
+ * 坐标直接来自数据，浏览器不再做上万节点的松弛迭代（这正是卡顿的根因）。
+ * 入场动画仍保留：从圆心扩散到最终位置。
+ */
+export function precomputedLayout(core) {
+  const nodes = core.nodes ?? [];
+  const size = nodes.length;
+  const index = new Map(nodes.map((n, i) => [n.id, i]));
+  const tx = Float64Array.from(nodes, (n) => n.x ?? 0);
+  const ty = Float64Array.from(nodes, (n) => n.y ?? 0);
+  // 立即用最终坐标填充（不能再等 tick 动画，否则所有点会先挤在圆心）
+  const x = Float64Array.from(tx);
+  const y = Float64Array.from(ty);
+  const radius = Float32Array.from(nodes, (n) => n.r ?? 3);
+  // 坐标立即就位：视图的沉降判定是 alpha > 0.004（原布局 alpha 从 1 递减到 0），
+  // 预计算模式没有可沉降的东西，所以直接给最终坐标 + alpha = 1，第一次 tick 就归零。
+  let alpha = 1;
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (let i = 0; i < size; i++) {
+    if (tx[i] < minX) minX = tx[i];
+    if (tx[i] > maxX) maxX = tx[i];
+    if (ty[i] < minY) minY = ty[i];
+    if (ty[i] > maxY) maxY = ty[i];
+  }
+  // 扇区成员：预计算里存的是索引，这里还原成面板需要的 {id} 结构（顺序即离圆心远近）
+  const arms = (core.arms ?? []).map((arm) => ({
+    ...arm,
+    members: (arm.members ?? []).map((i) => ({ id: nodes[i]?.id, index: i })).filter((m) => m.id),
+  }));
+  const hubIndex = index.get("deepseek-ai/deepseek-harness");
+  return {
+    kind: "radial",
+    precomputed: true,
+    seed: core.meta?.layoutSeed ?? "precomputed",
+    size,
+    index,
+    nodes,
+    x,
+    y,
+    radius,
+    arms,
+    // 视图读的是 center.index（原布局的 center 是带 index 的成员对象），这里必须给同形结构
+    center: hubIndex !== undefined ? { ...nodes[hubIndex], index: hubIndex } : null,
+    get alpha() {
+      return alpha;
+    },
+    tick() {
+      // 预计算布局没有沉降过程：一帧内结束，坐标已经是最终值
+      alpha = 0;
+      return false;
+    },
+    getBounds(padding = 0) {
+      return { minX: minX - padding, maxX: maxX + padding, minY: minY - padding, maxY: maxY + padding };
+    },
+    /** 预计算模式下"重排"由 app 层改走本地重算，这里只做占位 */
+    reseed() {
+      alpha = 0;
+    },
+  };
+}
+
+/** 星标分位阈值：给「最少星标」滑块用（纯函数，放数据层免得为了它加载整个面板模块） */
+export function starThreshold(pct, maxStars) {
+  return Math.round(maxStars * Math.pow(pct / 100, 3));
+}
+
 export function prepare(mesh) {
   const nodes = mesh.nodes ?? [];
   const edges = mesh.edges ?? [];
