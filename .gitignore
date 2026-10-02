@@ -1,0 +1,20 @@
+node_modules/
+.tmp/
+*.log
+.env
+.env.local
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+backend/tests/.tmp/
+tools/.askpass.sh
+data/stats.json
+
+
+# 采集器产物（每小时更新，不入库）
+data/snapshots/
+data/cache/
+data/crawl.log
+tools/.git-askpass.sh
