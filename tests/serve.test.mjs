@@ -175,3 +175,14 @@ test("统计文件本身绝不对外提供", async () => {
     assert.ok(code === 403 || code === 404, path + " 不应可读，实际 " + code);
   }
 });
+
+test("缓存分层：数据永远实时，代码与样式走浏览器缓存", async () => {
+  const data = await fetch(base + "/data/mesh.json");
+  assert.equal(data.headers.get("cache-control"), "no-store", "mesh.json 必须每次取新的");
+
+  for (const path of ["/src/app.js", "/styles.css", "/index.html"]) {
+    const res = await fetch(base + path);
+    assert.match(res.headers.get("cache-control") ?? "", /max-age=300/, path + " 应走浏览器缓存");
+    assert.ok(res.headers.get("etag"), path + " 应带 ETag 以便 304 校验");
+  }
+});
