@@ -318,11 +318,15 @@ curl -s "$BASE/api/categories"
 卡片显示：仓库图标 + `owner / name`、两行简介、● 语言色点（GitHub 语言配色）、★ 星标、⑂ 复刻（为 0 时隐藏）、更新于 X 前，
 底部是所属扇区标签（同色淡底）与去处。**点击卡片背景 → 站点；点击仓库名 → GitHub 原仓库**（两个链接是兄弟节点，不是嵌套）。
 
-**线上 demo（GitHub 会直接渲染出真图）：**
+**卡片长这样（点图直达线上生态图）：**
 
-![dsh-myskin 卡片](http://104.129.51.126/api/card/WTStarMark/dsh-myskin.svg)
+[![dsh-myskin 卡片示例](docs/card-example-dark.svg)](http://104.129.51.126/)
 
-浅色版：http://104.129.51.126/api/card/WTStarMark/dsh-myskin.svg?theme=light
+[![dsh-myskin 卡片示例（浅色）](docs/card-example.svg)](http://104.129.51.126/)
+
+> 上面两张是仓库内的静态样本（`docs/card-example*.svg`），按当前数据生成、随仓库一起版本化；
+> 每张卡片都包在链接里，点图即可前往线上站点。真实卡片（数据每小时更新）：
+> http://104.129.51.126/api/card/WTStarMark/dsh-myskin.svg
 
 ### 贴进 README
 

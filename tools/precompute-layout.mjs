@@ -30,7 +30,9 @@ const CHUNKS = Math.max(1, Number(argOf("--chunks", "8")));
 const HUB_ID = "deepseek-ai/deepseek-harness";
 
 /** 挪到详情分片的字段：只有点开右栏才需要 */
-const DETAIL_FIELDS = ["description", "topics", "license", "homepage", "sizeKb", "openIssues", "createdAt", "pushedAt", "updatedAt"];
+// 注意：pushedAt 不能挪走 —— 「最近推送」筛选、悬浮提示、相对时间都要用它，
+// 否则核心路径下 ts=0 会把所有节点过滤掉（曾出过这个 bug）。
+const DETAIL_FIELDS = ["description", "topics", "license", "homepage", "sizeKb", "openIssues", "createdAt", "updatedAt"];
 /** 完全丢弃：能从 id 推出来，或者前端根本没用 */
 const DROP_FIELDS = ["htmlUrl"];
 
