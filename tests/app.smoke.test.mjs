@@ -162,7 +162,7 @@ function pump(max = 900) {
   return n;
 }
 
-await import("../src/app.js");
+const appModule = await import("../src/app.js");
 await new Promise((r) => setTimeout(r, 40));
 
 const canvas = registry.get("graph");
@@ -373,4 +373,75 @@ test("手机端：左右两栏互斥，不同时打开", () => {
     if (!deckNode.classList.contains("hide-rail")) railBtn.fire("click");
     if (!deckNode.classList.contains("hide-dossier")) dossierBtn.fire("click");
   }
+});
+
+test("从细枝切回全局走布局缓存，不重算", async () => {
+  const { internalStats } = appModule;
+  const rail = registry.get("rail");
+  const sectorRow = rail.find((n) => n.className?.startsWith("sector-row"));
+  assert.ok(sectorRow, "左栏应有扇区行");
+
+  const buildsBefore = internalStats.layoutBuilds;
+  sectorRow.fire("click"); // 放大到某个扇区
+  pump(20);
+  const buildsAfterFocus = internalStats.layoutBuilds;
+  assert.equal(buildsAfterFocus, buildsBefore + 1, "第一次放大需要建一次细枝布局");
+
+  // 放大后左栏换成细枝行，返回全局要点「← 返回全局」
+  const banner = registry.get("rail").find((n) => n.className?.includes("focus-banner"));
+  assert.ok(banner, "放大后应出现返回条");
+  const backBtn = banner.all.find((n) => String(n.textContent ?? "").includes("返回全局"));
+  assert.ok(backBtn, "返回条上应有返回按钮");
+  backBtn.fire("click");
+  pump(20);
+  assert.equal(internalStats.layoutBuilds, buildsAfterFocus, "切回全局不该重算布局（应命中缓存）");
+  assert.ok(internalStats.layoutHits > 0, "应记录到缓存命中");
+});
+
+test("选中仓库时，即使「同作者」开关关闭也会画出它的同作者连线", () => {
+  // 前提：所有连线开关都是关的
+  const chips = registry.get("edge-types").children;
+  for (const chip of chips) assert.ok(!chip.className.includes("on"), "前提：连线开关全关");
+
+  // 找出「同作者有多个仓库」的那些仓库 —— 只有它们才有同作者连线
+  const byOwner = new Map();
+  for (const n of mesh.nodes) {
+    if (!byOwner.has(n.owner)) byOwner.set(n.owner, []);
+    byOwner.get(n.owner).push(n);
+  }
+  const siblings = new Set();
+  for (const list of byOwner.values()) {
+    if (list.length < 2) continue;
+    for (const n of list) siblings.add(n.id);
+  }
+  assert.ok(siblings.size > 0, "样本里应有同作者多仓库的案例");
+
+  // 先清掉选中，记一帧基准
+  const canvas = registry.get("graph");
+  canvas.fire("pointerup", { clientX: 5, clientY: 5, pointerId: 99 });
+  pump(5);
+  const before = drawCalls.curve;
+
+  // 扫画布找到「确有同作者」的那个节点，再点它（与悬停测试同一套扫描方式）
+  let hit = null;
+  outer: for (let y = 20; y < 600; y += 10) {
+    for (let x = 20; x < 900; x += 10) {
+      canvas.fire("pointermove", { clientX: x, clientY: y });
+      if (!tooltip.hidden) {
+        const name = tooltip.all.map((n) => n.textContent).join(" ");
+        const id = [...siblings].find((sid) => name.includes(sid.split("/")[1]));
+        if (id) {
+          hit = { x, y, id };
+          break outer;
+        }
+      }
+    }
+  }
+  assert.ok(hit, "没在画布上找到「有同作者」的节点");
+  tooltip.hidden = true;
+
+  canvas.fire("pointerdown", { clientX: hit.x, clientY: hit.y, pointerId: 7 });
+  canvas.fire("pointerup", { clientX: hit.x, clientY: hit.y, pointerId: 7 });
+  pump(30);
+  assert.ok(drawCalls.curve > before, "选中 " + hit.id + " 后应画出同作者连线，新增 " + (drawCalls.curve - before));
 });

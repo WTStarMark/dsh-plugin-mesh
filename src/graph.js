@@ -211,12 +211,16 @@ export function createGraphView(canvas, hooks = {}) {
   function drawEdges() {
     if (!layout || links.length === 0) return;
     const focus = hoverId ?? selectedId;
+    // 选中的仓库：无论「同作者」开关开没开，都把它自己的同作者连线画出来
+    const selectedIndex = selectedId != null ? layout.index.get(selectedId) : undefined;
     const visible = [];
     for (const l of links) {
-      if (!edgeTypes.has(l.type)) continue;
+      const pinned = selectedIndex !== undefined && l.type === "owner" && (l.a === selectedIndex || l.b === selectedIndex);
+      if (!pinned && !edgeTypes.has(l.type)) continue;
       const a = layout.nodes[l.a];
       const b = layout.nodes[l.b];
-      if (!isActive(a) || !isActive(b)) continue;
+      // 选中的仓库：同作者连线连开关和淡化过滤都豁免（兄弟仓库往往不匹配当前筛选词）
+      if (!pinned && (!isActive(a) || !isActive(b))) continue;
       visible.push(l);
     }
     if (visible.length === 0) return;

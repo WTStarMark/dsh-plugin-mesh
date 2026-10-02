@@ -282,9 +282,11 @@ const server = createServer(async (req, res) => {
     }
     const body = await readFile(filePath);
     const type = MIME[extname(filePath)] ?? "application/octet-stream";
+    // 缓存分两层：数据（mesh.json）永远实时；代码与样式走浏览器缓存 + 304 校验
+    const cacheControl = pathname === "/data/mesh.json" ? "no-store" : "public, max-age=300, must-revalidate";
     const etag = '"' + createHash("sha1").update(body).digest("hex").slice(0, 20) + '"';
     if (req.headers["if-none-match"] === etag) {
-      res.writeHead(304, { etag, "cache-control": "no-cache", ...SECURITY_HEADERS });
+      res.writeHead(304, { etag, "cache-control": cacheControl, ...SECURITY_HEADERS });
       res.end();
       console.log("304 " + pathname);
       return;
@@ -300,7 +302,7 @@ const server = createServer(async (req, res) => {
     const headers = {
       "content-type": type,
       etag,
-      "cache-control": "no-cache",
+      "cache-control": cacheControl,
       "content-length": payload.length,
       vary: "accept-encoding",
       ...SECURITY_HEADERS,

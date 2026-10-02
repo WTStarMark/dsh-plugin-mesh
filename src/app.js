@@ -118,7 +118,39 @@ function computeGroups() {
     .map((g, i) => ({ ...g, color: palette[i % palette.length] }));
 }
 
+/**
+ * 布局缓存：从细枝切回全局时，不必把上万个节点重算一遍。
+ * 实测这是「切回来卡一下」的根因 —— 全局布局的重排是全量计算，缓存后切换是瞬时的。
+ */
+const layoutCache = new Map();
+const LAYOUT_CACHE_MAX = 6;
+
+/** 缓存命中计数：给测试一个确定性判据，而不是靠掐时间 */
+export const internalStats = { layoutBuilds: 0, layoutHits: 0 };
+
+function layoutCacheKey() {
+  return [state.seed, state.groupBy, state.focusCategory ?? "-"].join("|");
+}
+
+function clearLayoutCache() {
+  layoutCache.clear();
+}
+
 function buildLayout() {
+  const key = layoutCacheKey();
+  const cached = layoutCache.get(key);
+  if (cached) {
+    internalStats.layoutHits += 1;
+    return cached;
+  }
+  internalStats.layoutBuilds += 1;
+  const built = buildLayoutUncached();
+  if (layoutCache.size >= LAYOUT_CACHE_MAX) layoutCache.clear();
+  layoutCache.set(key, built);
+  return built;
+}
+
+function buildLayoutUncached() {
   const focus = state.focusCategory;
   if (focus) {
     // 单扇区放大：大扇区占满整个圆，扇区本身变成它的「细枝分类」
@@ -496,6 +528,7 @@ function bootMesh(mesh, { resetFilters }) {
   prepared = prepare(mesh);
   if (resetFilters || state.tags.size === 0) resetView();
   pickTopLanguages();
+  clearLayoutCache(); // 数据换了，旧布局不能复用
   layout = buildLayout();
 
   if (!view) {
@@ -613,12 +646,38 @@ async function main() {
   const { mesh, fromCache, revalidate } = await loadMeshCached("./data/mesh.json", { store });
   bootMesh(mesh, { resetFilters: true });
   if (fromCache) dom.hint.title = "已用本地缓存渲染，正在后台校验是否有新快照…";
-  revalidate()
-    .then((fresh) => {
-      if (fresh && fresh.meta?.generatedAt !== mesh.meta?.generatedAt) bootMesh(fresh, { resetFilters: false });
-      else if (fromCache) dom.hint.title = "缓存已是最新（" + String(mesh.meta?.generatedAt ?? "").slice(11, 16) + " UTC 快照）";
-    })
-    .catch((err) => console.warn("后台校验失败，继续使用缓存数据：", err));
+
+  // 在线实时更新：数据每次核对都带 ETag，没变就是 304（几乎零成本），变了才重建
+  let liveGeneration = mesh.meta?.generatedAt ?? null;
+  let refreshing = false;
+  const pullFresh = async (why) => {
+    if (refreshing) return;
+    refreshing = true;
+    try {
+      const fresh = await revalidate();
+      if (fresh && (fresh.meta?.generatedAt ?? null) !== liveGeneration) {
+        liveGeneration = fresh.meta?.generatedAt ?? null;
+        bootMesh(fresh, { resetFilters: false });
+        dom.hint.title = "已同步到最新快照（" + String(liveGeneration ?? "").slice(11, 16) + " UTC）";
+      } else if (why === "boot" && fromCache) {
+        dom.hint.title = "缓存已是最新（" + String(liveGeneration ?? "").slice(11, 16) + " UTC 快照）";
+      }
+    } catch (err) {
+      console.warn("后台校验失败，继续使用缓存数据：", err);
+    } finally {
+      refreshing = false;
+    }
+  };
+
+  await pullFresh("boot");
+  // 数据每小时更新一次，这里每 5 分钟核对一次；标签页在后台时不打扰
+  const liveTimer = setInterval(() => {
+    if (!document.hidden) pullFresh("timer");
+  }, 5 * 60 * 1000);
+  liveTimer?.unref?.(); // Node（测试环境）里别让定时器拖住事件循环
+  document.addEventListener?.("visibilitychange", () => {
+    if (!document.hidden) pullFresh("visible");
+  });
 }
 
 main().catch((err) => {
