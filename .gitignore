@@ -25,3 +25,7 @@ data/details/
 
 # 部署包（构建产物）
 dist/
+
+# 一次性运维脚本（从 .env 读令牌，不进仓库）
+.push-github.mjs
+.remote-*.sh
