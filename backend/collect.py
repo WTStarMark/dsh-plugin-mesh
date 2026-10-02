@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -124,6 +126,37 @@ def seconds_until_next(now: float, interval: int) -> float:
     return max(60.0, interval - (now % interval))
 
 
+def run_precompute(log) -> None:
+    """调 Node 工具预计算布局并给载荷瘦身（mesh-core.json + 详情分片）。
+
+    失败不影响数据本身：前端拿不到 core 会自动回退到本地计算布局。
+    """
+    from dsh_mesh.config import ROOT
+
+    node = shutil.which("node")
+    if not node:
+        fallback = Path("/opt/dsh-runtime/node/bin/node")
+        node = str(fallback) if fallback.exists() else None
+    if not node:
+        log("未找到 node，跳过预计算（前端会自动回退到本地计算布局）")
+        return
+    script = ROOT / "tools" / "precompute-layout.mjs"
+    if not script.exists():
+        log("未找到预计算脚本，跳过")
+        return
+    try:
+        result = subprocess.run(
+            [node, str(script)], cwd=str(ROOT), capture_output=True, text=True, timeout=900
+        )
+        if result.returncode == 0:
+            lines = [line for line in result.stdout.strip().splitlines() if line.strip()]
+            log("预计算完成：" + (lines[-1].strip() if lines else ""))
+        else:
+            log("预计算失败（不影响数据）：" + (result.stderr.strip()[:160] or "退出码 " + str(result.returncode)))
+    except Exception as exc:  # noqa: BLE001 - 预计算失败不该拖垮采集
+        log("预计算异常（不影响数据）：" + str(exc)[:160])
+
+
 def run_once(args, log) -> dict:
     started = time.time()
     log(f"=== 采集开始 {utcnow()} ===")
@@ -190,6 +223,7 @@ def run_once(args, log) -> dict:
     snap.write_last_crawl(summary, LAST_CRAWL)
 
     log(f"索引 {total_indexed} 个仓库 · 前端 {len(mesh['nodes'])} 个节点 / {len(mesh['edges'])} 条连线")
+    run_precompute(log)
     if path is None:
         log("索引与上一份快照一致，本次不生成新快照")
     else:

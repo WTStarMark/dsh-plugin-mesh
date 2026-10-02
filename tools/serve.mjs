@@ -20,8 +20,27 @@ import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import { networkInterfaces } from "node:os";
+import { createApi, apiIndex, validNamePart } from "./api.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const VERSION = "0.4.1";
+/** 卡片默认去处（线上站点），可用环境变量 SITE_URL 或请求参数 ?link= 覆盖 */
+const SITE_URL = process.env.SITE_URL ?? "http://104.129.51.126/";
+
+/** 只接受 http/https 的去处，其余一律回落到默认站点（挡 javascript: 之类） */
+function siteFrom(url) {
+  const raw = url.searchParams.get("link");
+  if (!raw) return SITE_URL;
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return SITE_URL;
+    // 保留完整路径（可能想导向仓库页/文档页），只做协议与长度校验
+    return parsed.href.length <= 300 ? parsed.href : SITE_URL;
+  } catch {
+    return SITE_URL;
+  }
+}
+const api = createApi({ root: ROOT });
 const PORT = Number(process.env.PORT ?? 8788);
 const HOST = process.env.HOST ?? "127.0.0.1";
 
@@ -43,6 +62,8 @@ const ALLOW = [
   { pattern: /^\/styles\.css$/, file: "styles.css" },
   { pattern: /^\/src\/[A-Za-z0-9_.-]+\.js$/, file: null }, // 前端模块
   { pattern: /^\/data\/mesh\.json$/, file: "data/mesh.json" },
+  { pattern: /^\/data\/mesh-core\.json$/, file: "data/mesh-core.json" },
+  { pattern: /^\/data\/details\/[0-9]+\.json$/, file: null },
 ];
 
 /** Host 白名单：本机回环 + 本机各网卡地址 + 显式声明的额外域名/IP（ALLOW_HOSTS，逗号分隔）*/
@@ -136,12 +157,41 @@ function rateLimited(req) {
   return entry.count > RATE_LIMIT.max;
 }
 
-function sendJson(res, data, code = 200) {
+function sendJson(res, data, code = 200, extra = {}) {
   const body = Buffer.from(JSON.stringify(data));
   res.writeHead(code, {
     "content-type": "application/json; charset=utf-8",
     "cache-control": "no-store",
     "content-length": body.length,
+    ...SECURITY_HEADERS,
+    ...extra,
+  });
+  res.end(body);
+}
+
+/** 只读公开接口：允许跨域，方便别人直接在前端/文档里引用 */
+const CORS = { "access-control-allow-origin": "*", "access-control-allow-methods": "GET, HEAD, OPTIONS" };
+const API_CACHE = { "cache-control": "public, max-age=300" };
+
+function sendSvg(res, svg, code = 200) {
+  const body = Buffer.from(svg);
+  res.writeHead(code, {
+    "content-type": "image/svg+xml; charset=utf-8",
+    "content-length": body.length,
+    ...API_CACHE,
+    ...CORS,
+    ...SECURITY_HEADERS,
+  });
+  res.end(body);
+}
+
+function sendHtml(res, html, code = 200) {
+  const body = Buffer.from(html);
+  res.writeHead(code, {
+    "content-type": "text/html; charset=utf-8",
+    "content-length": body.length,
+    ...API_CACHE,
+    ...CORS,
     ...SECURITY_HEADERS,
   });
   res.end(body);
@@ -168,6 +218,68 @@ function readBody(req, limit = 1024) {
 async function handleApi(req, res, method, pathname, url) {
   if (rateLimited(req)) {
     sendJson(res, { error: "请求过于频繁" }, 429);
+    return;
+  }
+  if (method === "OPTIONS") {
+    res.writeHead(204, { ...CORS, ...SECURITY_HEADERS });
+    res.end();
+    return;
+  }
+  // 查询接口一律只读：除访问统计的 /api/ping（POST）外，写方法全部拒绝
+  if (pathname !== "/api/ping" && method !== "GET" && method !== "HEAD") {
+    sendJson(res, { error: "只读接口，只允许 GET / HEAD" }, 405, CORS);
+    return;
+  }
+  if (pathname === "/api") {
+    sendJson(res, apiIndex(VERSION), 200, { ...API_CACHE, ...CORS });
+    return;
+  }
+  if (pathname === "/api/health") {
+    const cats = await api.categories();
+    sendJson(
+      res,
+      { ok: true, version: VERSION, nodes: cats.total, generatedAt: cats.generatedAt, time: new Date().toISOString() },
+      200,
+      { ...API_CACHE, ...CORS },
+    );
+    return;
+  }
+  if (pathname === "/api/categories") {
+    sendJson(res, await api.categories(), 200, { ...API_CACHE, ...CORS });
+    return;
+  }
+  if (pathname === "/api/repos") {
+    sendJson(res, await api.search(url.searchParams), 200, { ...API_CACHE, ...CORS });
+    return;
+  }
+  const repoMatch = /^\/api\/repos\/([^/]+)\/([^/]+)$/.exec(pathname);
+  if (repoMatch) {
+    const [, owner, name] = repoMatch;
+    if (!validNamePart(owner) || !validNamePart(name)) {
+      sendJson(res, { error: "仓库名不合法" }, 400, CORS);
+      return;
+    }
+    const found = await api.one(owner, name);
+    if (!found) {
+      sendJson(res, { error: "未收录该仓库", id: owner + "/" + name }, 404, CORS);
+      return;
+    }
+    sendJson(res, found, 200, { ...API_CACHE, ...CORS });
+    return;
+  }
+  const cardMatch = /^\/api\/card\/([^/]+)\/([^/]+)\.svg$/.exec(pathname);
+  if (cardMatch) {
+    const [, owner, name] = cardMatch;
+    if (!validNamePart(owner) || !validNamePart(name)) {
+      sendJson(res, { error: "仓库名不合法" }, 400, CORS);
+      return;
+    }
+    const svg = await api.cardSvg(owner, name, { theme: url.searchParams.get("theme") === "dark" ? "dark" : "light", site: siteFrom(url) });
+    if (!svg) {
+      sendSvg(res, '<svg xmlns="http://www.w3.org/2000/svg" width="480" height="150"><rect width="480" height="150" rx="12" fill="#f3f6fc"/><text x="24" y="80" font-family="sans-serif" font-size="14" fill="#5f6b80">未收录该仓库</text></svg>', 404);
+      return;
+    }
+    sendSvg(res, svg);
     return;
   }
   if (pathname === "/api/stats") {
@@ -242,8 +354,34 @@ const server = createServer(async (req, res) => {
   if (pathname.endsWith("/") && pathname !== "/") pathname = pathname.slice(0, -1);
 
   // 接口路由：只认白名单里的两个，其余 404，绝不落到静态文件逻辑
-  if (pathname.startsWith("/api/")) {
+  if (pathname === "/api" || pathname.startsWith("/api/")) {
     await handleApi(req, res, method, pathname, url);
+    return;
+  }
+  // 卡片分享页：/card/:owner/:name（同样是只读、同端口）
+  const pageMatch = /^\/card\/([^/]+)\/([^/]+)$/.exec(pathname);
+  if (pageMatch) {
+    const [, owner, name] = pageMatch;
+    if (method !== "GET" && method !== "HEAD") {
+      deny(res, 405, "405 只允许 GET / HEAD");
+      return;
+    }
+    if (!validNamePart(owner) || !validNamePart(name)) {
+      deny(res, 400, "400 仓库名不合法");
+      return;
+    }
+    const html = await api.cardPage(owner, name, "http://" + (req.headers.host ?? "localhost"), { site: siteFrom(url) });
+    if (!html) {
+      deny(res, 404, "404 未收录该仓库");
+      return;
+    }
+    res.writeHead(200, {
+      "content-type": "text/html; charset=utf-8",
+      "cache-control": "public, max-age=300",
+      ...CORS,
+      ...SECURITY_HEADERS,
+    });
+    res.end(html);
     return;
   }
 
@@ -322,6 +460,8 @@ server.listen(PORT, HOST, () => {
   const actual = server.address().port;
   console.log("dsh-plugin-mesh 前端原型: http://" + HOST + ":" + actual + "/");
   console.log("白名单路径: /  /index.html  /styles.css  /src/*.js  /data/mesh.json");
-  console.log("接口: GET /api/stats  ·  POST /api/ping（访问数 / 同时在线）");
+  console.log("接口: GET /api · /api/health · /api/categories · /api/repos · /api/repos/:owner/:name");
+  console.log("      GET /api/card/:owner/:name.svg（卡片）· /card/:owner/:name（分享页）");
+  console.log("      GET /api/stats · POST /api/ping（访问数 / 同时在线）");
   if (process.env.ALLOW_HOSTS) console.log("额外放行的 Host: " + process.env.ALLOW_HOSTS);
 });

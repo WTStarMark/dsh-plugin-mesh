@@ -19,3 +19,6 @@ data/cache/
 data/crawl.log
 tools/.git-askpass.sh
 .git-token
+
+data/mesh-core.json
+data/details/

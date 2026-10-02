@@ -248,6 +248,27 @@ _COUNTERS = {rule["id"]: [(term, weight, make_counter(term)) for term, weight in
 _sub_counters: dict[str, list] = {}
 
 
+MIN_SCORE = 1      # 低于它判为「其他」（=1 表示只要有一处命中就保留）
+MIN_SUB_SCORE = 1  # 低于它判为「未细分」
+
+
+def _last_segment(name: str) -> str:
+    """名称最后一段：dsh-plugin-skin 里的 skin 通常是这个仓库的关键词。"""
+    parts = [p for p in re.split(r"[-_\s]+", name or "") if p]
+    return parts[-1] if parts else ""
+
+
+def _score_of(counter, sig: dict, weight: int) -> float:
+    """统一算分：名称 ×2、名称末段额外 +1、描述 ×1、topic ×1.5（与 JS 端逐条一致）。"""
+    in_name = counter(sig["name"])
+    in_last = counter(sig["last"])
+    in_desc = counter(sig["desc"])
+    in_topics = counter(sig["topics"])
+    if in_name + in_desc + in_topics == 0:
+        return 0.0
+    return (in_name * 2 + in_last + in_desc + in_topics * 1.5) * weight
+
+
 def _signals(node: dict) -> dict:
     """信号来源：仓库名 + 描述 + 非白名单 topic（白名单标签本身不算证据）。"""
     from .config import WHITELIST_TAGS
@@ -256,8 +277,10 @@ def _signals(node: dict) -> dict:
     name = node.get("name")
     if name is None:
         name = node.get("id") or ""
+    lowered = str(name).lower()
     return {
-        "name": str(name).lower(),
+        "name": lowered,
+        "last": _last_segment(lowered),
         "desc": str(node.get("description") or "").lower(),
         "topics": topics.lower(),
     }
@@ -292,7 +315,7 @@ def classify_node(node: dict) -> dict:
         score = 0
         hits: list[str] = []
         for term, weight, count in _COUNTERS[rule["id"]]:
-            s = count(sig["name"]) * weight * 2 + count(sig["desc"]) * weight + count(sig["topics"]) * weight
+            s = _score_of(count, sig, weight)
             if s > 0:
                 score += s
                 hits.append(term)
@@ -306,25 +329,32 @@ def classify_node(node: dict) -> dict:
             continue
         if best is None or score > best["score"]:
             best = {"id": rule["id"], "label": rule["label"], "score": score, "hits": hits[:4]}
+    # 最低置信分：只有一个很弱的描述命中时不硬塞进扇区，留给「其他」
+    if best is not None and best["score"] < MIN_SCORE:
+        blocked = blocked or {"id": best["id"], "label": best["label"], "reason": "置信分不足"}
+        best = None
     if best is None:
         return {"id": OTHER["id"], "label": OTHER["label"], "score": 0, "hits": [], "sub": None, "blocked": blocked}
 
     # 细枝：同一套规则下挑该扇区内部得分最高的细枝
     sub = None
     for rule in SUBCATEGORY_RULES.get(best["id"], []):
-        sub_score = 0
+        sub_score = 0.0
+        name_score = 0
         sub_hits: list[str] = []
-        for term, weight in rule["terms"]:
-            count = _sub_counters.setdefault(rule["id"], [(t, w, make_counter(t)) for t, w in rule["terms"]])
-            for t, w, fn in count:
-                if t != term:
-                    continue
-                s = fn(sig["name"]) * w * 2 + fn(sig["desc"]) * w + fn(sig["topics"]) * w
-                if s > 0:
-                    sub_score += s
-                    sub_hits.append(t)
-        if sub_score > 0 and (sub is None or sub_score > sub["score"]):
-            sub = {"id": rule["id"], "label": rule["label"], "score": sub_score, "hits": sub_hits[:3]}
+        for term, weight, fn in _sub_counters.setdefault(
+            rule["id"], [(t, w, make_counter(t)) for t, w in rule["terms"]]
+        ):
+            s = _score_of(fn, sig, weight)
+            if s > 0:
+                sub_score += s
+                sub_hits.append(term)
+                name_score += fn(sig["name"]) + fn(sig["last"])
+        better = sub is None or name_score > sub["nameScore"] or (name_score == sub["nameScore"] and sub_score > sub["score"])
+        if sub_score > 0 and better:
+            sub = {"id": rule["id"], "label": rule["label"], "score": sub_score, "nameScore": name_score, "hits": sub_hits[:3]}
+    if sub is not None and sub["score"] < MIN_SUB_SCORE:
+        sub = None
     return {**best, "sub": sub}
 
 

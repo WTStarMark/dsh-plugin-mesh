@@ -150,14 +150,25 @@ test("renderTooltip：定位落在画布内且显示节点信息", () => {
   assert.equal(tip.hidden, true, "传入 null 应隐藏");
 });
 
-test("renderEdgeTypeChips：每个边类型一个开关，点击回调 toggleEdgeType", () => {
-  calls.length = 0;
-  const root = new FakeNode("div");
-  const state = baseState();
-  panels.renderEdgeTypeChips(root, prepared, state, actions);
-  assert.equal(root.children.length, 2, "样本里应有 topic / owner 两类边");
-  root.children[0].listeners.click[0]();
-  assert.equal(calls[0][0], "toggleEdgeType");
+test("renderLinkLegend：实时显示同作者/主题共现计数（无提示语）", () => {
+  const root = new FakeNode();
+  const info = { colors: { accent: "#2f7df6", topic: "#e08a00" } };
+
+  // 无选中、无悬停 → 两个 0，且不再有提示语
+  panels.renderLinkLegend(root, prepared, {}, {}, info);
+  const empty = root.all.map((n) => n.textContent).join(" ");
+  assert.match(empty, /同作者 0/, "未选中时应显示 0，实际 " + empty);
+  assert.match(empty, /主题共现 0/, "未选中时应显示 0，实际 " + empty);
+  assert.ok(!/点选/.test(empty), "不应再出现提示语");
+
+  // 有选中 → 显示该仓库的实际计数
+  const target = prepared.nodes.find((n) => (prepared.adjacency.get(n.id) ?? []).some((e) => e.type === "owner"));
+  assert.ok(target, "样本里应有带同作者连线的仓库");
+  panels.renderLinkLegend(root, prepared, { selectedId: target.id }, {}, info);
+  const text = root.all.map((n) => n.textContent).join(" ");
+  const owner = (prepared.adjacency.get(target.id) ?? []).filter((e) => e.type === "owner").length;
+  assert.match(text, new RegExp("同作者 " + owner), "应显示实际同作者数，实际 " + text);
+  assert.match(text, /主题共现 \d+/, "应显示主题共现数");
 });
 
 test("starThreshold：0 到 maxStars 单调递增", () => {

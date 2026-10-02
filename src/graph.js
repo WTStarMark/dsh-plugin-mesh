@@ -54,6 +54,17 @@ export function createGraphView(canvas, hooks = {}) {
   });
   let running = false;
   let dirty = true;
+  // 交互期降 LOD：拖拽/缩放进行中先不画连线与标签，停手 140ms 后再画精细版
+  let lowDetail = false;
+  let lowDetailTimer = 0;
+  function bumpInteraction() {
+    lowDetail = true;
+    clearTimeout(lowDetailTimer);
+    lowDetailTimer = setTimeout(() => {
+      lowDetail = false;
+      invalidate();
+    }, 140);
+  }
   let drag = null;
   let raf = 0;
 
@@ -210,54 +221,29 @@ export function createGraphView(canvas, hooks = {}) {
 
   function drawEdges() {
     if (!layout || links.length === 0) return;
-    const focus = hoverId ?? selectedId;
-    // 选中的仓库：无论「同作者」开关开没开，都把它自己的同作者连线画出来
-    const selectedIndex = selectedId != null ? layout.index.get(selectedId) : undefined;
-    const visible = [];
+    // v0.4.1：连线不再常驻。只有点选某个仓库时，才画它自己的两类连线——
+    // 同作者（主题主色 · 实线）与主题共现（琥珀色 · 虚线），颜色区分开。
+    if (selectedId == null) return;
+    const center = layout.index.get(selectedId);
+    if (center === undefined) return;
+    // 注意：拖拽/缩放中也照样画选中节点的连线（数量很少，而且正是用户要看的东西）
+
+    const ownerColor = p().accent;
+    const topicColor = EDGE_STYLES.topic?.color ?? "#e08a00";
     for (const l of links) {
-      const pinned = selectedIndex !== undefined && l.type === "owner" && (l.a === selectedIndex || l.b === selectedIndex);
-      if (!pinned && !edgeTypes.has(l.type)) continue;
-      const a = layout.nodes[l.a];
-      const b = layout.nodes[l.b];
-      // 选中的仓库：同作者连线连开关和淡化过滤都豁免（兄弟仓库往往不匹配当前筛选词）
-      if (!pinned && (!isActive(a) || !isActive(b))) continue;
-      visible.push(l);
-    }
-    if (visible.length === 0) return;
-    // 第一遍：背景连线（有焦点时进一步压暗，保留上下文但不抢戏）
-    const dim = focus ? 0.18 : 1;
-    const byType = new Map();
-    for (const l of visible) {
-      const touches = focus && (layout.nodes[l.a].id === focus || layout.nodes[l.b].id === focus);
-      if (touches) continue;
-      if (!byType.has(l.type)) byType.set(l.type, []);
-      byType.get(l.type).push(l);
-    }
-    for (const [type, list] of byType) {
-      const style = EDGE_STYLES[type] ?? { alpha: 0.2, curv: 0.14, dash: [] };
+      if (l.a !== center && l.b !== center) continue;
+      const isOwner = l.type === "owner";
+      const isTopic = l.type === "topic";
+      if (!isOwner && !isTopic) continue; // 其它类型不再绘制
+      const other = l.a === center ? l.b : l.a;
+      if (!layout.nodes[other]) continue;
       ctx.save();
-      ctx.setLineDash(style.dash ?? []);
-      ctx.lineWidth = 1;
-      for (const l of list) {
-        ctx.beginPath();
-        ctx.strokeStyle = hexA(edgeColor(l, style), style.alpha * dim);
-        edgePath(l, style.curv ?? 0.14);
-        ctx.stroke();
-      }
-      ctx.restore();
-    }
-    // 第二遍：焦点节点的连线，用主色提亮画在最上层
-    if (focus) {
-      ctx.save();
-      ctx.lineWidth = 1.6;
-      for (const l of visible) {
-        if (layout.nodes[l.a].id !== focus && layout.nodes[l.b].id !== focus) continue;
-        const style = EDGE_STYLES[l.type] ?? {};
-        ctx.beginPath();
-        ctx.strokeStyle = hexA(p().accent, 0.55);
-        edgePath(l, style.curv ?? 0.14);
-        ctx.stroke();
-      }
+      ctx.setLineDash(isOwner ? [] : [5, 4]);
+      ctx.lineWidth = isOwner ? 1.7 : 1.2;
+      ctx.beginPath();
+      ctx.strokeStyle = hexA(isOwner ? ownerColor : topicColor, isOwner ? 0.85 : 0.55);
+      edgePath(l, isOwner ? 0.16 : 0.22);
+      ctx.stroke();
       ctx.restore();
     }
   }
@@ -328,7 +314,7 @@ export function createGraphView(canvas, hooks = {}) {
 
   /** 圆心：官方仓库（柔和同心环 + 主色实心核） */
   function drawHub() {
-    if (!hasArms() || layout.center.index < 0) return;
+    if (!hasArms() || !layout.center || !(layout.center.index >= 0)) return; // center 契约：必须带 index
     const p = P();
     const i = layout.center.index;
     const [sx, sy] = toScreen(layout.x[i], layout.y[i]);
@@ -374,7 +360,7 @@ export function createGraphView(canvas, hooks = {}) {
   }
 
   function drawLabels() {
-    if (!layout || !showLabels) return;
+    if (!layout || !showLabels || lowDetail) return; // 交互中不画标签，优先跟手
     const p = P();
     const nodes = layout.nodes;
     ctx.textAlign = "center";
@@ -506,6 +492,7 @@ export function createGraphView(canvas, hooks = {}) {
       drag.moved += Math.abs(dx) + Math.abs(dy);
       view.x = drag.vx + dx;
       view.y = drag.vy + dy;
+      bumpInteraction();
       invalidate();
       return;
     }
@@ -539,6 +526,7 @@ export function createGraphView(canvas, hooks = {}) {
 
   function onWheel(ev) {
     ev.preventDefault();
+    bumpInteraction();
     const [mx, my] = localPoint(ev);
     zoomBy(Math.exp(-ev.deltaY * 0.0016), [mx, my]);
   }

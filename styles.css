@@ -220,6 +220,11 @@ input[type="range"]::-moz-range-thumb {
 
 .hud > button.on { color: var(--accent); }
 
+/* 连线图例：替代原来的连线开关（连线只在选中时出现） */
+.edge-hint { font-size: 11.5px; color: var(--label-3); padding: 0 4px; }
+.edge-swatch { width: 10px; height: 3px; border-radius: 2px; border-width: 2px; display: inline-block; }
+.hud-tr .edge-chip { display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; height: 28px; }
+
 .tooltip {
   position: absolute; z-index: 7; pointer-events: none; max-width: 340px;
   background: color-mix(in srgb, var(--bg-layer-1) 96%, transparent);
@@ -353,3 +358,7 @@ input[type="range"]::-moz-range-thumb {
   .deck.hide-dossier { grid-template-columns: 244px 1fr 0; }
   .deck.hide-rail.hide-dossier { grid-template-columns: 0 1fr 0; }
 }
+
+/* 底栏的 API / 数据入口 */
+.api-link { color: var(--accent); text-decoration: none; font-size: 12px; padding: 1px 6px; border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); border-radius: 6px; }
+.api-link:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }

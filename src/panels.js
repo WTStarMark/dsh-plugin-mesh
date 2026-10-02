@@ -45,9 +45,7 @@ function field(label, control, value) {
   return el("div", { class: "field" }, [el("label", { text: label }), el("div", { class: "ctl" }, [control, value ?? null])]);
 }
 
-export function starThreshold(pct, maxStars) {
-  return Math.round(maxStars * Math.pow(pct / 100, 3));
-}
+export { starThreshold } from "./mesh-data.js";
 
 export function reviewReason(node) {
   const desc = (node.description ?? "").toLowerCase();
@@ -209,6 +207,9 @@ export function renderRail(root, prepared, state, actions, view = {}) {
         el("input", { type: "checkbox", checked: state.hideNoise, on: { change: (ev) => actions.setHideNoise(ev.target.checked) } }),
         "隐藏疑似噪声（" + review.length + " 个）",
       ]),
+      el("div", { class: "row" }, [
+        el("button", { class: "key", text: "重置筛选", title: "清空标签/语言/归档/星标/搜索，并退出放大与关联聚焦", on: { click: () => actions.resetFilters() } }),
+      ]),
       el("div", { class: "note", text: "筛选只做淡化、不移除节点：布局位置保持不变，便于前后对照。" }),
     ]),
     sec(view.focusCategory ? "细枝分类" : "功能扇区", [
@@ -351,14 +352,17 @@ export function renderTooltip(tooltipEl, node, pos, stageRect) {
     tooltipEl.hidden = true;
     return;
   }
+  // 注意：replaceChildren 不过滤 null（真实 DOM 会插入文本 "null"），必须自己拍平
   tooltipEl.replaceChildren(
-    el("b", { text: node.id }),
-    el("div", {
-      class: "tt-sub",
-      text: "★ " + formatStars(node.stars) + " · " + (node.language ?? "未知语言") + " · 最近推送 " + formatDate(node.pushedAt) + " · " + (node.categoryLabel ?? node.category ?? "未分类"),
-    }),
-    node.description ? el("div", { class: "tt-desc", text: node.description.slice(0, 150) }) : null,
-    el("div", { class: "pills" }, (node.matchedTags ?? []).map((t) => el("span", { class: "pill hit", text: t }))),
+    ...[
+      el("b", { text: node.id }),
+      el("div", {
+        class: "tt-sub",
+        text: "★ " + formatStars(node.stars) + " · " + (node.language ?? "未知语言") + " · 最近推送 " + formatDate(node.pushedAt) + " · " + (node.categoryLabel ?? node.category ?? "未分类"),
+      }),
+      node.description ? el("div", { class: "tt-desc", text: node.description.slice(0, 150) }) : null,
+      el("div", { class: "pills" }, (node.matchedTags ?? []).map((t) => el("span", { class: "pill hit", text: t }))),
+    ].filter(Boolean),
   );
   tooltipEl.hidden = false;
   const tw = tooltipEl.offsetWidth;
@@ -371,19 +375,38 @@ export function renderTooltip(tooltipEl, node, pos, stageRect) {
   tooltipEl.style.top = Math.max(8, y) + "px";
 }
 
-export function renderEdgeTypeChips(root, prepared, state, actions, view = {}) {
-  const counts = view.linkCounts ?? {};
+/**
+ * 连线图例（v0.4.1 取代原来的连线开关）：
+ * 连线不再常驻，只有点选某个仓库时才画出它自己的两类关系，所以这里只做"说明 + 计数"。
+ */
+export function renderLinkLegend(root, prepared, state, actions, view = {}) {
+  // 实时计数：跟随当前悬停的项目，没悬停就跟随选中项；都没有就是 0。
+  // 不再显示提示语 —— 计数本身就在说明：点选后会画出这些连线。
+  const id = view.activeId ?? state.selectedId ?? null;
+  const row = (color, dash, label, count) =>
+    el("span", { class: "edge-chip on" }, [
+      el("span", {
+        class: "edge-swatch",
+        style: {
+          background: dash ? "transparent" : color,
+          borderColor: color,
+          borderStyle: dash ? "dashed" : "solid",
+        },
+      }),
+      el("span", { text: label + " " + count }),
+    ]);
+
+  const linked = (type) => {
+    if (!id || !prepared.adjacency) return 0;
+    const list = prepared.adjacency.get(id);
+    if (!list) return 0;
+    let n = 0;
+    for (const e of list) if (e.type === type) n += 1;
+    return n;
+  };
+  const accent = view.colors?.accent ?? "#2f7df6";
+  const topicColor = view.colors?.topic ?? "#e08a00";
   root.replaceChildren(
-    ...EDGE_ORDER.filter((type) => (counts[type] ?? 0) > 0 || state.edgeTypes.has(type)).map((type) => {
-      const style = EDGE_STYLES[type] ?? { label: type };
-      const on = state.edgeTypes.has(type);
-      const n = counts[type] ?? prepared.edges.filter((e) => e.type === type).length;
-      return el("button", {
-        class: on ? "on" : "",
-        text: style.label + " " + n,
-        title: (on ? "隐藏" : "显示") + "「" + style.label + "」连线（共 " + n + " 条）",
-        on: { click: () => actions.toggleEdgeType(type) },
-      });
-    }),
+    ...[row(accent, false, "同作者", linked("owner")), row(topicColor, true, "主题共现", linked("topic"))],
   );
 }

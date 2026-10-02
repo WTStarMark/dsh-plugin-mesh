@@ -305,10 +305,35 @@ export const DEFAULT_OPTIONS = { minCount: 10, maxSectors: 18 };
 
 const RULE_BY_PRIORITY = [...CATEGORY_RULES].sort((a, b) => a.priority - b.priority);
 
+/** 最低置信分：低于它判为「其他」/「未细分」，避免单个弱词决定分类 */
+export const MIN_SCORE = 1;
+export const MIN_SUB_SCORE = 1;
+
+/** 名称最后一段：dsh-plugin-skin 里的 skin 通常是这个仓库的关键词 */
+function lastSegment(name) {
+  const parts = String(name ?? "").split(/[-_\s]+/).filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : "";
+}
+
+/**
+ * 统一算分：名称 ×2、名称末段额外 +1（末段命中即 ×3）、描述 ×1、topic ×1.5。
+ * topic 是作者自己标的，比描述里的客套话可信；名称末段是仓库自称的功能词。
+ */
+function scoreOf(counter, sig, weight) {
+  const inName = counter(sig.name);
+  const inLast = counter(sig.last);
+  const inDesc = counter(sig.desc);
+  const inTopics = counter(sig.topics);
+  if (inName + inDesc + inTopics === 0) return 0;
+  return (inName * 2 + inLast + inDesc + inTopics * 1.5) * weight;
+}
+
 function textSignals(node) {
   const topics = (node.topics ?? []).filter((t) => !WHITELIST_TAGS.includes(t)).join(" ");
+  const name = (node.name ?? node.id ?? "").toLowerCase();
   return {
-    name: (node.name ?? node.id ?? "").toLowerCase(),
+    name,
+    last: lastSegment(name),
     desc: (node.description ?? "").toLowerCase(),
     topics: topics.toLowerCase(),
   };
@@ -346,8 +371,7 @@ export function classifyNode(node) {
     let score = 0;
     const hits = [];
     for (const [term, weight] of rule.terms) {
-      const count = makeCounter(term);
-      const s = count(sig.name) * weight * 2 + count(sig.desc) * weight + count(sig.topics) * weight;
+      const s = scoreOf(makeCounter(term), sig, weight);
       if (s > 0) {
         score += s;
         hits.push(term);
@@ -364,6 +388,11 @@ export function classifyNode(node) {
     }
     if (!best || score > best.score) best = { id: rule.id, label: rule.label, score, hits: hits.slice(0, 4) };
   }
+  // 最低置信分：只有一个很弱的描述命中（1 分）时不硬塞进扇区，留给「其他」
+  if (best && best.score < MIN_SCORE) {
+    blocked = blocked ?? { id: best.id, label: best.label, reason: "置信分不足" };
+    best = null;
+  }
   if (!best) return { id: OTHER.id, label: OTHER.label, score: 0, hits: [], sub: null, blocked };
 
   // 细枝：在同一套词边界规则下，挑该扇区内部得分最高的细枝
@@ -373,17 +402,23 @@ export function classifyNode(node) {
     for (const rule of subs) {
       let score = 0;
       const hits = [];
+      let nameScore = 0;
       for (const [term, weight] of rule.terms) {
-        const count = makeCounter(term);
-        const s = count(sig.name) * weight * 2 + count(sig.desc) * weight + count(sig.topics) * weight;
+        const counter = makeCounter(term);
+        const s = scoreOf(counter, sig, weight);
         if (s > 0) {
           score += s;
           hits.push(term);
+          nameScore += counter(sig.name) + counter(sig.last);
         }
       }
-      if (score > 0 && (!sub || score > sub.score)) sub = { id: rule.id, label: rule.label, score, hits: hits.slice(0, 3) };
+      // 细枝更信名字里写了什么：名字有命中的细枝优先于只在描述里出现的
+      if (score > 0 && (!sub || nameScore > sub.nameScore || (nameScore === sub.nameScore && score > sub.score))) {
+        sub = { id: rule.id, label: rule.label, score, nameScore, hits: hits.slice(0, 3) };
+      }
     }
   }
+  if (sub && sub.score < MIN_SUB_SCORE) sub = null; // 细枝同理：太弱的归入「未细分」
   return { ...best, sub };
 }
 

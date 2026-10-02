@@ -4,14 +4,15 @@
  * 状态变更路径永远是：改 state -> applyHighlight() -> 重绘 / 重渲染面板。
  * 过滤一律「淡化」而非「移除」，保证同一份数据在任意过滤下位置一致、可对比。
  */
-import { loadMeshCached, prepare, matches, formatStars, groupColor } from "./mesh-data.js";
+import { loadMeshBest, prepare, prepareCore, precomputedLayout, matches, formatStars, groupColor, starThreshold, EDGE_STYLES } from "./mesh-data.js";
+import { createDetailStore } from "./details.js";
 import { createStore } from "./cache.js";
 import { startStats, formatCount } from "./stats.js";
 import { createSectorLayout } from "./layout-sector.js";
 import { PALETTES, themeOf, DEFAULT_PALETTE, DEFAULT_MODE } from "./palettes.js";
 import { buildLinks, countByType } from "./links.js";
 import { createGraphView } from "./graph.js";
-import { renderRail, renderInspector, renderTooltip, renderEdgeTypeChips, starThreshold } from "./panels.js";
+
 
 const dom = {
   rail: document.getElementById("rail"),
@@ -41,7 +42,7 @@ const state = {
   palette: DEFAULT_PALETTE,
   mode: DEFAULT_MODE,
   avatars: true,
-  labels: true,
+  labels: false, // v0.4.1：标签默认关闭（球太密时标签反而糊成一片）
   hideRail: false,
   hideDossier: false,
   groupBy: "category",
@@ -152,6 +153,8 @@ function buildLayout() {
 
 function buildLayoutUncached() {
   const focus = state.focusCategory;
+  // 全局视图且没有点过"重排"→ 直接用预计算坐标（这是加载慢/卡顿的主因，直接归零）
+  if (!focus && precomputed && !state.localLayout) return precomputed;
   if (focus) {
     // 单扇区放大：大扇区占满整个圆，扇区本身变成它的「细枝分类」
     const members = prepared.nodes.filter((n) => n.id === HUB_ID || groupKeyOf(n) === focus);
@@ -173,7 +176,8 @@ function buildLayoutUncached() {
 }
 
 function refreshLinks() {
-  links = buildLinks(prepared, layout);
+  // 预计算契约里连线已经是索引三元组，直接用；本地重排/放大后才需要重算
+  links = prepared.links && layout?.precomputed ? prepared.links : buildLinks(prepared, layout);
   if (view) view.setLinks(links);
   return links;
 }
@@ -270,7 +274,14 @@ function computeHighlight() {
     if (state.hideNoise && n.review) continue;
     if (state.archived === "hide" && n.archived) continue;
     if (state.archived === "only" && !n.archived) continue;
-    if (state.clusterFocus && groupKeyOf(n) !== state.clusterFocus) continue;
+    // 放大模式下 clusterFocus 是「细枝」id，必须用细枝键比较；
+    // 否则拿大类去比细枝永远不相等，会把所有节点都过滤掉（整个图被隐藏）。
+    if (state.clusterFocus) {
+      // 放大模式下 clusterFocus 是「细枝」id，必须用细枝键比较；
+      // 否则拿大类去比细枝永远不相等，会把所有节点都过滤掉（整张图被隐藏）。
+      const key = state.focusCategory ? (n.subcategory ?? "misc-" + (n.category ?? "other")) : groupKeyOf(n);
+      if (key !== state.clusterFocus) continue;
+    }
     if (neighborSet && !neighborSet.has(n.id)) continue;
     if (state.query && !matches(n, state.query)) continue;
     set.add(n.id);
@@ -286,10 +297,15 @@ function apply(options = {}) {
   view.setSelected(state.selectedId);
   updateStatus(highlight);
   const info = viewInfo();
+  // 放大模式下圆里全是该扇区，不需要再淡化别的
   if (view) view.setSectorFocus(state.focusCategory ? null : state.clusterFocus);
-  if (options.rail !== false) renderRail(dom.rail, prepared, state, actions, info);
-  if (options.inspector !== false) renderInspector(dom.inspector, prepared, state, actions, info);
-  if (options.edgeChips !== false) renderEdgeTypeChips(dom.edgeTypes, prepared, state, actions, info);
+  // 面板是动态载入的：还没就绪就先只画面布，就绪后 loadPanels 会再调一次 apply
+  if (panels) {
+    if (options.rail !== false) panels.renderRail(dom.rail, prepared, state, actions, info);
+    if (options.inspector !== false) panels.renderInspector(dom.inspector, prepared, state, actions, info);
+    // 连线开关已取消，这里改为「同作者 / 主题共现」的实时计数图例
+    if (options.edgeChips !== false) panels.renderLinkLegend(dom.edgeTypes, prepared, state, actions, { ...info, ...legendInfo() });
+  }
 }
 
 function updateStatus(highlight) {
@@ -340,7 +356,9 @@ const actions = {
     apply();
   },
   focusGroup(id) {
-    state.clusterFocus = id ?? null;
+    // 放大后默认显示该分类下的【全部】节点：clusterFocus 保持为空，
+    // 只有再点某个细枝（focusArm）才收窄到单支。
+    state.clusterFocus = null;
     // 只在「按功能分类」时放大：选中的分类铺满整圆，细枝成为新扇区
     state.focusCategory = id && state.groupBy === "category" ? id : null;
     layout = buildLayout();
@@ -353,6 +371,26 @@ const actions = {
     apply();
   },
   /** 放大模式下点细枝：只做高亮淡化，不换布局 */
+  /** 一键清空所有筛选（含放大与关联聚焦），回到干净的全景 */
+  resetFilters() {
+    resetView();
+    state.clusterFocus = null;
+    state.focusCategory = null;
+    state.neighborFocus = null;
+    state.query = "";
+    state.selectedId = null;
+    if (dom.search) dom.search.value = "";
+    if (dom.searchClear) dom.searchClear.hidden = true;
+    clearLayoutCache();
+    layout = buildLayout();
+    refreshLinks();
+    if (view) {
+      view.setData(prepared, layout);
+      view.setSectorFocus(null);
+      view.fit();
+    }
+    apply();
+  },
   focusArm(id) {
     state.clusterFocus = id ?? null;
     apply({ inspector: false });
@@ -383,7 +421,7 @@ const actions = {
     if (state.edgeTypes.has(type)) state.edgeTypes.delete(type);
     else state.edgeTypes.add(type);
     view.setEdgeTypes(state.edgeTypes);
-    renderEdgeTypeChips(dom.edgeTypes, prepared, state, actions, viewInfo());
+    refreshLegend(); // 连线开关已取消：这里只刷新计数图例
   },
 };
 
@@ -522,10 +560,39 @@ function bindChrome() {
 }
 
 let booted = false;
+let precomputed = null; // 预计算布局（核心优化：浏览器不再做上万节点的松弛计算）
+let details = null; // 详情分片（懒加载）
+let panels = null; // 面板模块（首屏画完后再动态载入）
+
+/** 面板是动态载入的：首屏先把画布画出来，不为了几个面板阻塞解析 */
+function loadPanels() {
+  if (panels) return;
+  import("./panels.js")
+    .then((mod) => {
+      panels = mod;
+      apply();
+    })
+    .catch((err) => {
+      console.warn("面板动态载入失败：", err && err.message);
+    });
+}
 
 /** 用一份数据把界面搭起来；后台校验拿到新数据时用 resetFilters=false 再跑一次 */
-function bootMesh(mesh, { resetFilters }) {
-  prepared = prepare(mesh);
+function bootMesh(mesh, { resetFilters, core }) {
+  prepared = core ? prepareCore(mesh) : prepare(mesh);
+  precomputed = core ? precomputedLayout(mesh) : null;
+  details = core ? createDetailStore(mesh.meta ?? {}) : null;
+  state.localLayout = false; // 换数据就回到"用预计算坐标"
+  if (core) {
+    // 空闲时把详情分片预取完，之后搜索描述、随意点选都不再等
+    details.prefetch((bucket) => {
+      for (const [id, detail] of Object.entries(bucket)) {
+        const node = prepared.byId.get(id);
+        if (node) Object.assign(node, detail);
+      }
+      if (state.selectedId) apply({ rail: false, edgeChips: false });
+    });
+  }
   if (resetFilters || state.tags.size === 0) resetView();
   pickTopLanguages();
   clearLayoutCache(); // 数据换了，旧布局不能复用
@@ -571,6 +638,18 @@ function syncView() {
   apply();
 }
 
+/** 图例专用的轻量 info：悬停时高频调用，不能走 viewInfo()（那会重算全量分组） */
+function legendInfo() {
+  return {
+    activeId: hoverNode?.id ?? state.selectedId ?? null,
+    colors: { accent: activeTheme?.canvas?.accent, topic: EDGE_STYLES.topic?.color },
+  };
+}
+
+function refreshLegend() {
+  if (panels && prepared) panels.renderLinkLegend(dom.edgeTypes, prepared, state, actions, legendInfo());
+}
+
 function viewHooks() {
   return {
     onSelect: (node) => {
@@ -579,12 +658,13 @@ function viewHooks() {
     },
     onHover: (node, pos) => {
       hoverNode = node;
+      refreshLegend(); // 计数跟着鼠标走（实时）
       const rect = dom.stage.getBoundingClientRect();
-      renderTooltip(dom.tooltip, node, pos ?? { x: 0, y: 0 }, rect);
+      panels?.renderTooltip(dom.tooltip, node, pos ?? { x: 0, y: 0 }, rect);
     },
     onHoverMove: (pos) => {
       if (dom.tooltip.hidden || !hoverNode) return;
-      renderTooltip(dom.tooltip, hoverNode, pos, dom.stage.getBoundingClientRect());
+      panels?.renderTooltip(dom.tooltip, hoverNode, pos, dom.stage.getBoundingClientRect());
     },
     onFocus: (id) => {
       actions.focusNeighbors(id);
@@ -643,8 +723,9 @@ async function main() {
 
   // 先吃缓存秒开，再带 ETag 后台校验；数据真的变了才重建
   const store = await createStore();
-  const { mesh, fromCache, revalidate } = await loadMeshCached("./data/mesh.json", { store });
-  bootMesh(mesh, { resetFilters: true });
+  const { mesh, core, fromCache, revalidate } = await loadMeshBest("./data/mesh.json", { store });
+  bootMesh(mesh, { resetFilters: true, core });
+  loadPanels(); // 画布已经出来了，面板随后动态载入
   if (fromCache) dom.hint.title = "已用本地缓存渲染，正在后台校验是否有新快照…";
 
   // 在线实时更新：数据每次核对都带 ETag，没变就是 304（几乎零成本），变了才重建
