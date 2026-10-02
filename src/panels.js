@@ -311,7 +311,8 @@ export function renderInspector(root, prepared, state, actions, view = {}) {
         el("div", {}, [el("em", { text: "许可证" }), el("b", { text: node.license ?? "—" })]),
       ]),
       el("div", { class: "links" }, [
-        el("a", { href: node.htmlUrl, target: "_blank", rel: "noreferrer", text: "在 GitHub 打开" }),
+        // 预计算契约里没有 htmlUrl（为省载荷丢弃），统一从 id 推导；老数据仍可用 htmlUrl
+        el("a", { href: node.htmlUrl ?? "https://github.com/" + node.id, target: "_blank", rel: "noreferrer", text: "在 GitHub 打开" }),
         node.homepage ? el("a", { href: node.homepage, target: "_blank", rel: "noreferrer", text: "项目主页" }) : null,
       ]),
       el("div", { class: "links" }, [

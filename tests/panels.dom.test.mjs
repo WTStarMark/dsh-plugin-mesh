@@ -181,3 +181,22 @@ test("starThreshold：0 到 maxStars 单调递增", () => {
   assert.equal(panels.starThreshold(0, prepared.maxStars), 0);
   assert.equal(panels.starThreshold(100, prepared.maxStars), prepared.maxStars);
 });
+
+test("回归：右栏「在 GitHub 打开」必须有真实 href（核心路径没有 htmlUrl 字段）", () => {
+  const root = new FakeNode();
+  const node = prepared.nodes.find((n) => !n.htmlUrl) ?? prepared.nodes[0]; // 模拟预计算契约：无 htmlUrl
+  const bare = { ...node };
+  delete bare.htmlUrl;
+  panels.renderInspector(root, prepared, { ...baseState(), selectedId: bare.id }, actions);
+  const link = root.all.find((n) => String(n.textContent ?? "") === "在 GitHub 打开");
+  assert.ok(link, "应渲染出「在 GitHub 打开」按钮");
+  assert.equal(link.attrs.href, "https://github.com/" + bare.id, "href 必须由 id 推导，实际 " + link.attrs.href);
+  assert.equal(link.attrs.target, "_blank");
+  // 老数据仍带 htmlUrl 时优先用它
+  const root2 = new FakeNode();
+  const withUrl = { ...bare, htmlUrl: "https://github.com/example/custom" };
+  const prepared2 = { ...prepared, byId: new Map(prepared.byId).set(bare.id, withUrl) };
+  panels.renderInspector(root2, prepared2, { ...baseState(), selectedId: bare.id }, actions);
+  const link2 = root2.all.find((n) => String(n.textContent ?? "") === "在 GitHub 打开");
+  assert.equal(link2.attrs.href, "https://github.com/example/custom", "有 htmlUrl 时应优先使用");
+});

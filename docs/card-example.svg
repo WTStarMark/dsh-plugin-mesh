@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="420" height="168" viewBox="0 0 420 168" role="img" aria-label="WTStarMark/dsh-myskin · 皮肤美化 · 主题皮肤">
+  <title>WTStarMark/dsh-myskin · 皮肤美化 · 主题皮肤</title>
+  <desc>点击卡片前往 http://104.129.51.126/</desc>
+  <style>.bg{transition:stroke .2s ease}.card:hover .bg{stroke:#8c959f}.nm:hover{text-decoration:underline}</style>
+  <a xlink:href="http://104.129.51.126/" href="http://104.129.51.126/" target="_blank">
+    <rect class="bg" x="0.5" y="0.5" width="419" height="167" rx="12" fill="#ffffff" stroke="#d0d7de"/>
+    <rect x="0.5" y="0.5" width="6" height="167" rx="3" fill="#51b1d6"/>
+  </a>
+  <g transform="translate(20 22) scale(1)" fill="#656d76"><path d="M2 2.5A2.5 2.5 0 0 1 4.5 0h8.75a.75.75 0 0 1 .75.75v12.5a.75.75 0 0 1-.75.75h-2.5a.75.75 0 0 1 0-1.5h1.75v-2h-8a1 1 0 0 0-.714 1.7.75.75 0 1 1-1.072 1.05A2.495 2.495 0 0 1 2 11.5Zm10.5-1h-8a1 1 0 0 0-1 1v6.708A2.486 2.486 0 0 1 4.5 9h8ZM5 12.25a.25.25 0 0 1 .25-.25h3.5a.25.25 0 0 1 .25.25v3.25a.25.25 0 0 1-.4.2l-1.45-1.087a.249.249 0 0 0-.3 0L5.4 15.7a.25.25 0 0 1-.4-.2Z"/></g>
+  <a xlink:href="https://github.com/WTStarMark/dsh-myskin" href="https://github.com/WTStarMark/dsh-myskin" target="_blank"><text x="42" y="37" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="16" font-weight="600"><tspan fill="#656d76">WTStarMark /</tspan><tspan fill="#0969da" class="nm">dsh-myskin</tspan></text></a>
+  <text x="20" y="66" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="13" fill="#656d76">DSH 通用皮肤框架：可视化自定义 + 实时预览 + 「皮肤管理」，</text>
+  <text x="20" y="85" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="13" fill="#656d76">可以随心设计你的专属皮肤，并通过分发皮肤包和你的小伙伴们…</text>
+  <circle cx="25" cy="104" r="5.5" fill="#f1e05a"/>
+  <text x="36" y="108" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="12.5" fill="#656d76">JavaScript</text>
+  <g transform="translate(120.75000000000001 97) scale(0.875)" fill="#656d76"><path d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.751.751 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25Z"/></g>
+  <text x="139.75" y="108" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="12.5" fill="#656d76">2</text>
+  <text x="162.625" y="108" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="12.5" fill="#656d76">更新于 23 小时前</text>
+  <rect x="20" y="129" width="135" height="22" rx="11" fill="#eff2f5" stroke="#d0d7de"/>
+  <text x="32" y="144" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="11.5" font-weight="500" fill="#51b1d6">皮肤美化 · 主题皮肤</text>
+  <a xlink:href="http://104.129.51.126/" href="http://104.129.51.126/" target="_blank"><text x="400" y="144" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="11.5" text-anchor="end" class="nm" fill="#0969da">插件生态图 · 104.129.51.126 ↗</text></a>
+</svg>

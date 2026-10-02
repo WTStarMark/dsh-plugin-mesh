@@ -1,0 +1,9 @@
+fix: 右栏「在 GitHub 打开」死链 + 「最近推送」筛选清空
+
+预计算契约丢掉了 htmlUrl（按钮没有 href，点了没反应）；pushedAt 被挪进详情分片，
+导致核心路径下按最近推送筛选时 ts=0 会把所有节点过滤掉。
+
+- panels.js：GitHub 链接改为 node.htmlUrl ?? 由 id 推导（老数据仍优先用原字段）
+- precompute：pushedAt 移回核心字段（筛选/悬浮提示/相对时间都依赖它）
+- 新增 tests/core-contract.test.mjs：机器化检查「前端在读的字段必须存在于 core 或详情分片」
+- 新增 panels 回归用例：无 htmlUrl 时按钮仍必须有真实 href
