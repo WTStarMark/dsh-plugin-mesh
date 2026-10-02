@@ -22,3 +22,6 @@ tools/.git-askpass.sh
 
 data/mesh-core.json
 data/details/
+
+# 部署包（构建产物）
+dist/
