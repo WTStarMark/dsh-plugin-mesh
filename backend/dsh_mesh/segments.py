@@ -44,6 +44,17 @@ def segment_query(segment: dict) -> str:
     return " ".join(parts)
 
 
+def owner_of(record: dict) -> str:
+    """从原始 API 记录或裁剪过的记录里取作者名（两种形态都要认）。"""
+    owner = record.get("owner")
+    if isinstance(owner, dict):
+        return str(owner.get("login") or "")
+    if isinstance(owner, str):
+        return owner
+    full = str(record.get("full_name") or record.get("id") or "")
+    return full.split("/")[0] if "/" in full else ""
+
+
 def segment_key(topic: str, stars: str, created: str | None = None) -> str:
     return "|".join(["topic:" + topic, "stars:" + stars, "created:" + (created or "*")])
 
@@ -128,11 +139,13 @@ def subdivide(segment: dict, now: datetime | None = None) -> list[dict]:
 class SegmentStore:
     """段队列 + 累积索引。两个文件都可断点续跑。"""
 
-    def __init__(self, state_path: Path, repos_path: Path):
+    def __init__(self, state_path: Path, repos_path: Path, blacklist=None):
         self.state_path = state_path
         self.repos_path = repos_path
         self.state = self._load_state()
         self.repos: dict[str, dict] = self._load_repos()
+        # 噪声作者黑名单：这些 owner 的仓库一律不进累积索引（省配额、也省得再被剔除一次）
+        self.blacklist: set[str] = set(blacklist or ())
 
     def _load_state(self) -> dict:
         if self.state_path.exists():
@@ -286,10 +299,23 @@ class SegmentStore:
             rid = record.get("id")
             if not rid:
                 continue
+            if self.blacklist and owner_of(record) in self.blacklist:
+                continue  # 噪声作者：不进累积索引
             if rid not in self.repos:
                 added += 1
             self.repos[rid] = record
         return added
+
+    def drop_owners(self, owners) -> int:
+        """把噪声作者从累积索引里删掉，并长期拉黑：之后的构建、快照、前端都不会再看到它们。"""
+        targets = {str(o) for o in (owners or ()) if o}
+        if not targets:
+            return 0
+        removed = [rid for rid, record in self.repos.items() if owner_of(record) in targets]
+        for rid in removed:
+            self.repos.pop(rid, None)
+        self.blacklist |= targets
+        return len(removed)
 
     def coverage(self) -> dict:
         return {"segments": self.pending_summary(), "repos": len(self.repos)}

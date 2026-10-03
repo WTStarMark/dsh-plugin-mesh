@@ -15,7 +15,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createSectorLayout } from "../src/layout-sector.js";
 import { buildLinks } from "../src/links.js";
-import { prepare } from "../src/mesh-data.js";
+import { prepare, stripNoiseOwners } from "../src/mesh-data.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const argv = process.argv.slice(2);
@@ -36,7 +36,8 @@ const DETAIL_FIELDS = ["description", "topics", "license", "homepage", "sizeKb",
 /** 完全丢弃：能从 id 推出来，或者前端根本没用 */
 const DROP_FIELDS = ["htmlUrl"];
 
-const mesh = JSON.parse(await readFile(IN, "utf8"));
+// 噪声作者在这里就剔除：core 与详情分片都不该出现它们（详情分片按 id 索引，删了也不会留孤儿）
+const mesh = stripNoiseOwners(JSON.parse(await readFile(IN, "utf8")));
 const prepared = prepare(mesh);
 
 const t0 = performance.now();

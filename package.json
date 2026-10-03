@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-mesh",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "private": true,
   "type": "module",
   "description": "插件生态图：把带 dsh 系列 GitHub 标签的仓库画成生态网络，含扇区图与 3D 星云两种模式。独立前端原型（非 DSH 插件）。",

@@ -135,6 +135,51 @@ class BuildTest(unittest.TestCase):
         self.assertEqual(relevance_score(spam), 0)
         self.assertTrue(relevance_score({"name": "dsh-desktop", "description": "DSH 桌面版", "topics": ["dsh"]}) >= 5)
 
+    def test_analyze_relevance_three_way(self):
+        """三档结论：related / noise / manual，且 review 只在 manual 档为真。"""
+        from dsh_mesh.build import analyze_relevance
+
+        def repo(**over):
+            base = {"name": "x", "description": "", "topics": [], "matchedTags": ["dsh"], "stars": 0}
+            base.update(over)
+            return base
+
+        cases = {
+            "related": [
+                repo(name="dsh-skin-pack"),
+                repo(name="my-plugin", description="A plugin for DeepSeek Harness"),
+                repo(name="cool", topics=["deepseek-harness"]),
+            ],
+            "noise": [
+                repo(name="reactive-resume", description="A one-of-a-kind resume builder", stars=43705),
+                repo(name="enterprise-compliance", description="enterprise-compliance", matchedTags=["dsh", "dsh-plugin", "dsh-plugins", "dsh-plugin-market"]),
+                repo(name="marketplace", description="plugin marketplace", topics=["claude-code-plugin", "codex-plugin", "dsh-plugin"]),
+                repo(name="law-thesis-review", description="", matchedTags=["dsh-plugin", "dsh-plugins", "dsh-plugin-market"]),
+            ],
+            "manual": [
+                repo(name="task-board-plugin", description="A task board plugin for agents", matchedTags=["dsh-plugin"]),
+                repo(name="browser-skill", description="Let agents use your real browser"),
+            ],
+        }
+        for expect, items in cases.items():
+            for item in items:
+                got = analyze_relevance(item)
+                self.assertEqual(got["verdict"], expect, f"{item['name']} 应判 {expect}，实际 {got}")
+                self.assertEqual(got["review"], expect == "manual")
+                self.assertTrue(got["reason"])
+
+    def test_build_mesh_records_verdict_counts(self):
+        # 只挂最宽泛的 dsh 一个标签、正文与 DSH 无关 —— 正是线上那批蹭标签的流行项目
+        spam = fake_repo("bob", "reactive-resume", stars=900, topics=("dsh",))
+        spam["description"] = "A one-of-a-kind resume builder"
+        raws = [fake_repo("alice", "dsh-skin"), spam]
+        mesh = build_mesh(raws, {})
+        counts = mesh["meta"]["verdictCounts"]
+        self.assertEqual(sum(counts.values()), len(mesh["nodes"]))
+        self.assertEqual(counts["related"], 1, "dsh-skin 应判相关")
+        self.assertEqual(counts["noise"], 1, "蹭标签的流行项目应判噪声")
+        self.assertEqual(mesh["meta"]["reviewedAsNoise"], counts["manual"])
+
     def test_frontend_limit_keeps_hub_and_filters_edges(self):
         mesh = build_mesh(sample_raw(), {})
         total = len(mesh["nodes"])
@@ -147,6 +192,202 @@ class BuildTest(unittest.TestCase):
             self.assertIn(edge["target"], ids)
         self.assertEqual(mesh["meta"]["indexedNodes"], total)
         self.assertEqual(mesh["meta"]["frontendLimit"], 100)
+
+
+def fake_repo(owner: str, name: str, stars: int = 0, topics=("dsh", "dsh-plugin")) -> dict:
+    """造一条 GitHub 搜索接口形态的原始记录（build_mesh 会走 pick_repo 裁剪）。
+
+    id 用 full_name 代替真实接口的数字 id：累积索引就是按这个字段去重的。
+    """
+    return {
+        "id": f"{owner}/{name}",
+        "full_name": f"{owner}/{name}",
+        "name": name,
+        "owner": {"login": owner, "type": "User", "avatar_url": "https://example.com/a.png"},
+        "html_url": f"https://github.com/{owner}/{name}",
+        "stargazers_count": stars,
+        "forks_count": 0,
+        "open_issues_count": 0,
+        "created_at": "2026-01-01T00:00:00Z",
+        "pushed_at": "2026-01-02T00:00:00Z",
+        "updated_at": "2026-01-02T00:00:00Z",
+        "language": "JavaScript",
+        "license": None,
+        "archived": False,
+        "fork": False,
+        "description": "dsh 插件生态相关项目",
+        "homepage": None,
+        "size": 1,
+        "topics": list(topics),
+    }
+
+
+class NoiseBlacklistTest(unittest.TestCase):
+    """噪声黑名单：同一作者被收录 >200 个仓库、且每个仓库星标都 <1 => 剔除。"""
+
+    def test_owner_over_threshold_with_all_zero_stars_is_noise(self):
+        from dsh_mesh.build import find_noise_owners
+
+        raws = [fake_repo("spammer", f"dsh-spam-{i}") for i in range(201)]
+        raws.append(fake_repo("normal", "dsh-good", stars=7))
+        mesh = build_mesh(raws, {})
+        owners = {n["owner"] for n in mesh["nodes"]}
+        self.assertNotIn("spammer", owners, "噪声作者不该出现在契约里")
+        self.assertIn("normal", owners)
+        self.assertEqual(mesh["meta"]["noiseNodesRemoved"], 201)
+        self.assertIn("spammer", mesh["meta"]["noiseBlacklist"])
+        self.assertEqual(mesh["meta"]["noiseBlacklist"]["spammer"]["repos"], 201)
+        self.assertEqual(find_noise_owners([{"owner": "x", "stars": 0}] * 201)["x"]["maxStars"], 0)
+
+    def test_boundary_exactly_200_is_kept(self):
+        mesh = build_mesh([fake_repo("busy", f"dsh-{i}") for i in range(200)], {})
+        self.assertEqual(len(mesh["nodes"]), 200, "正好 200 个不算「超过」")
+        self.assertEqual(mesh["meta"]["noiseBlacklist"], {})
+
+    def test_one_star_saves_the_owner(self):
+        raws = [fake_repo("productive", f"dsh-{i}") for i in range(250)]
+        raws.append(fake_repo("productive", "dsh-hit", stars=1))
+        mesh = build_mesh(raws, {})
+        self.assertEqual(len(mesh["nodes"]), 251, "只要有一个仓库拿到星标就不判噪声")
+        self.assertEqual(mesh["meta"]["noiseBlacklist"], {})
+
+    def test_persisted_blacklist_always_wins(self):
+        """已判定的黑名单长期生效：下一轮只抓到它两三个仓库也不再收录。"""
+        blacklist = {"spammer": {"repos": 900, "maxStars": 0}}
+        raws = [fake_repo("spammer", f"dsh-spam-{i}", stars=3) for i in range(3)]
+        raws.append(fake_repo("normal", "dsh-good"))
+        mesh = build_mesh(raws, {}, blacklist=blacklist)
+        self.assertEqual([n["owner"] for n in mesh["nodes"]], ["normal"])
+        self.assertEqual(mesh["meta"]["noiseSkipped"], 3)
+        self.assertIn("spammer", mesh["meta"]["noiseBlacklist"])
+
+    def test_blacklist_file_round_trip(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "noise-blacklist.json"
+            self.assertEqual(snap.load_blacklist(path), {}, "文件不存在时应返回空表")
+            snap.write_blacklist({"spammer": {"repos": 201, "maxStars": 0}}, path)
+            loaded = snap.load_blacklist(path)
+            self.assertEqual(loaded, {"spammer": {"repos": 201, "maxStars": 0}})
+            path.write_text("{ 坏掉的 json", encoding="utf-8")
+            self.assertEqual(snap.load_blacklist(path), {}, "文件损坏时不能拖垮采集")
+
+
+class SegmentBlacklistTest(unittest.TestCase):
+    """扫描管道：黑名单作者的仓库不进累积索引，已收录的要被清掉。"""
+
+    def setUp(self):
+        shutil.rmtree(TMP, ignore_errors=True)
+        TMP.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self):
+        shutil.rmtree(TMP, ignore_errors=True)
+
+    def test_merge_skips_and_drop_purges(self):
+        from dsh_mesh.segments import SegmentStore
+
+        store = SegmentStore(TMP / "s8.json", TMP / "r8.json", blacklist={"spammer"})
+        added = store.merge([fake_repo("spammer", "a"), fake_repo("ok", "b")])
+        self.assertEqual(added, 1)
+        self.assertNotIn("spammer/a", store.repos, "黑名单作者不该进累积索引")
+
+        legacy = SegmentStore(TMP / "s9.json", TMP / "r9.json")
+        legacy.merge([fake_repo("bad", "x"), fake_repo("bad", "y"), fake_repo("ok", "z")])
+        self.assertEqual(len(legacy.repos), 3)
+        removed = legacy.drop_owners({"bad"})
+        self.assertEqual(removed, 2, "已收录的噪声仓库必须被清掉")
+        self.assertEqual(set(legacy.repos), {"ok/z"})
+        self.assertEqual(legacy.merge([fake_repo("bad", "w")]), 0, "拉黑后不再收录")
+        self.assertNotIn("bad/w", legacy.repos)
+
+    def test_owner_of_handles_both_record_shapes(self):
+        from dsh_mesh.segments import owner_of
+
+        self.assertEqual(owner_of({"owner": {"login": "a"}}), "a")
+        self.assertEqual(owner_of({"owner": "b"}), "b")
+        self.assertEqual(owner_of({"full_name": "c/d"}), "c")
+        self.assertEqual(owner_of({}), "")
+
+
+class PrecomputeRetryTest(unittest.TestCase):
+    """回归：node 偶发 libuv 断言崩溃时要重试一次，否则 core 会冻结在上一小时。"""
+
+    def test_retries_once_then_succeeds(self):
+        import collect
+
+        calls = []
+
+        class Result:
+            def __init__(self, code):
+                self.returncode = code
+                self.stdout = "预计算完成（布局 1ms）"
+                self.stderr = "node: uv__io_poll: Assertion failed" if code else ""
+
+        def fake_run(*_args, **_kwargs):
+            calls.append(1)
+            return Result(1) if len(calls) == 1 else Result(0)
+
+        logs: list[str] = []
+        with mock.patch("collect.subprocess.run", side_effect=fake_run), mock.patch(
+            "collect._core_looks_fresh", return_value=False
+        ), mock.patch("collect.time.sleep"):
+            collect.run_precompute(logs.append)
+        self.assertEqual(len(calls), 2, "第一次失败后必须重试一次")
+        self.assertTrue(any("重试" in line for line in logs), str(logs))
+        self.assertTrue(any("预计算完成" in line for line in logs), str(logs))
+
+    def test_gives_up_after_two_attempts(self):
+        import collect
+
+        calls = []
+
+        class Result:
+            returncode = 1
+            stdout = ""
+            stderr = "node: uv__io_poll: Assertion failed"
+
+        with mock.patch("collect.subprocess.run", side_effect=lambda *a, **k: (calls.append(1), Result())[1]), mock.patch(
+            "collect._core_looks_fresh", return_value=False
+        ), mock.patch("collect.time.sleep"):
+            logs: list[str] = []
+            collect.run_precompute(logs.append)
+        self.assertEqual(len(calls), 2, "只重试一次，不能无限重试")
+        self.assertTrue(any("不影响数据" in line for line in logs), str(logs))
+
+    def test_crash_after_writing_counts_as_success(self):
+        """回归：pm2 托管下 node 崩在退出阶段（uv__io_poll 断言），但 core 其实已经写好。
+        这种情况不能再报失败，否则每小时刷一条假告警，也没人知道地图其实已经更新。"""
+        import collect
+
+        calls = []
+
+        class Result:
+            returncode = 134
+            stdout = "  节点 18723 · 连线 24574 · 扇区 21"
+            stderr = "node: uv__io_poll: Assertion errno == EEXIST failed."
+
+        logs: list[str] = []
+        with mock.patch("collect.subprocess.run", side_effect=lambda *a, **k: (calls.append(1), Result())[1]), mock.patch(
+            "collect._core_looks_fresh", return_value=True
+        ), mock.patch("collect.time.sleep"):
+            collect.run_precompute(logs.append)
+        self.assertEqual(len(calls), 1, "产物已更新就不必重试")
+        self.assertTrue(any("预计算完成" in line and "产物已更新" in line for line in logs), str(logs))
+
+    def test_half_written_core_is_not_success(self):
+        """写到一半崩掉会留下半截 JSON —— 这种"产物"绝不能算成功。"""
+        import collect
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            core = Path(tmp) / "mesh-core.json"
+            core.write_text(json.dumps({"meta": {"layout": "precomputed"}, "nodes": [1, 2, 3]}), encoding="utf-8")
+            with mock.patch("dsh_mesh.config.MESH_JSON", Path(tmp) / "mesh.json"):
+                self.assertTrue(collect._core_looks_fresh(0, 3), "完整产物应判成功")
+                self.assertFalse(collect._core_looks_fresh(0, 18723), "节点数对不上不能算成功")
+                core.write_text('{"meta": {"layout": "precomputed"}, "nodes": [1, 2', encoding="utf-8")
+                self.assertFalse(collect._core_looks_fresh(0, None), "半截 JSON 不能算成功")
 
 
 class RunOnceOrderTest(unittest.TestCase):

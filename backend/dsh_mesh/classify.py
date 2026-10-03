@@ -136,11 +136,28 @@ CATEGORY_RULES = [
     {"id": "pet", "label": "桌宠娱乐", "priority": 19, "terms": [
         ("pet", 3), ("pokemon", 3), ("live2d", 3), ("game", 2), ("桌宠", 3), ("宠物", 3),
         ("养成", 3), ("游戏", 2), ("虚拟形象", 3)]},
+    # 「给整个生态定规矩」的那批仓库：dsh-std、插件互操作元协议、社区标准、接口契约…
+    # 坑在于"标准/协议/公约"全是泛词（最大公约数、标准差、身高标准、HTTP 协议、DevTools Protocol），
+    # 所以先过一道生态语境门槛，再靠精确词打分；priority 最后：同分让给更具体的扇区。
+    {"id": "spec", "label": "公约协议", "priority": 20,
+     "gate": {
+         "name": re.compile(r"((^|[-_])(std|spec|specs|convention|conventions|covenant|charter)([-_]|$))|((插件|生态)(规范|标准|公约|契约|协议))|(meta[-_]protocol)"),
+         "desc": re.compile(r"(插件|生态|社区)[^\n]{0,10}(规范|标准|公约|共识|契约|协议)|互操作|元协议|meta[- ]protocol|plugin[- ](standard|spec|specification|convention|contract|schema|manifest)|ecosystem[- ](standard|spec|specification|convention)|community[- ](standard|spec|consensus|convention)|conventions every plugin|(standard|specification|protocol)\s+for\s+(dsh|deepseek|plugins?)", re.I),
+     },
+     "terms": [
+        ("公约", 2), ("元协议", 3), ("互操作", 3), ("契约", 2), ("约定", 1), ("规范", 2), ("协议", 1), ("标准", 1),
+        ("convention", 2), ("specification", 2), ("interoperability", 3), ("interoperable", 3), ("schema", 1),
+        ("protocol", 1), ("standard", 1), ("rfc", 1), ("manifest", 1), ("接口定义", 3), ("插件规范", 3), ("插件标准", 3)]},
 ]
 
 # 细枝分类：与大分类同一套词边界规则，用于「选中扇区后铺满整圆」的二级扇区。
 # 由 tools/categories.mjs 的 SUBCATEGORY_RULES 生成，verify_parity.py 校验两边结果一致。
 SUBCATEGORY_RULES: dict[str, list[dict]] = {
+    "spec": [
+        {"id": "spec-interop", "label": "互操作协议", "terms": [("interop", 3), ("interoperability", 3), ("interoperable", 3), ("互操作", 3), ("元协议", 3), ("meta-protocol", 3), ("protocol", 2), ("协议", 2)]},
+        {"id": "spec-standard", "label": "生态标准", "terms": [("standard", 3), ("specification", 3), ("spec", 2), ("标准", 3), ("规范", 3), ("共识", 3), ("convention", 2)]},
+        {"id": "spec-contract", "label": "接口契约", "terms": [("contract", 3), ("schema", 3), ("manifest", 3), ("契约", 3), ("约定", 2), ("接口", 2)]},
+    ],
     "skin": [
         {"id": "skin-theme", "label": "主题皮肤", "terms": [("skin", 3), ("theme", 3), ("配色", 3), ("主题", 3), ("皮肤", 3)]},
         {"id": "skin-wallpaper", "label": "壁纸背景", "terms": [("wallpaper", 3), ("background", 2), ("壁纸", 3), ("背景", 2)]},
@@ -169,12 +186,18 @@ SUBCATEGORY_RULES: dict[str, list[dict]] = {
         {"id": "model-provider", "label": "模型供应商", "terms": [("provider", 3), ("openai", 3), ("claude", 3), ("gemini", 3), ("ollama", 3), ("模型", 3), ("供应商", 3)]},
         {"id": "model-gateway", "label": "网关代理", "terms": [("proxy", 3), ("gateway", 3), ("endpoint", 3), ("网关", 3), ("代理", 3), ("路由", 2), ("中转", 2)]},
         {"id": "model-multimodal", "label": "多模态", "terms": [("vision", 3), ("multimodal", 3), ("多模态", 3), ("视觉", 3), ("图像", 2), ("图片", 2)]},
+        {"id": "model-reasoning", "label": "推理思考", "terms": [("reasoning", 3), ("thinking", 3), ("thought", 2), ("推理", 3), ("思考", 3), ("思维链", 3), ("深思", 2)]},
+        {"id": "model-preset", "label": "参数预设", "terms": [("preset", 3), ("temperature", 3), ("parameter", 2), ("参数", 3), ("预设", 3), ("调参", 3), ("配置", 1)]},
+        {"id": "model-council", "label": "多模型协同", "terms": [("council", 3), ("ensemble", 3), ("multi-model", 3), ("voting", 3), ("会诊", 3), ("多模型", 3), ("投票", 3)]},
     ],
     "panel": [
         {"id": "panel-side", "label": "侧边面板", "terms": [("sidebar", 3), ("panel", 3), ("面板", 3), ("侧边", 3)]},
         {"id": "panel-editor", "label": "编辑器", "terms": [("editor", 3), ("编辑器", 3), ("画布", 2), ("canvas", 2)]},
         {"id": "panel-widget", "label": "悬浮组件", "terms": [("widget", 3), ("floating", 3), ("悬浮", 3), ("挂件", 3), ("小组件", 3)]},
         {"id": "panel-settings", "label": "设置仪表盘", "terms": [("settings", 3), ("dashboard", 3), ("设置", 3), ("仪表盘", 3), ("配置页", 2)]},
+        {"id": "panel-mobile", "label": "移动端界面", "terms": [("mobile", 3), ("android", 3), ("ios", 3), ("apk", 3), ("手机", 3), ("移动端", 3), ("窄屏", 3)]},
+        {"id": "panel-tui", "label": "终端界面", "terms": [("tui", 3), ("terminal", 3), ("终端", 3), ("ncurses", 3)]},
+        {"id": "panel-workbench", "label": "创作工作台", "terms": [("workbench", 3), ("studio", 3), ("creator", 2), ("创作", 3), ("工作台", 3), ("工坊", 3)]},
     ],
     "session": [
         {"id": "session-manage", "label": "会话管理", "terms": [("session", 3), ("history", 2), ("会话", 3), ("历史", 2)]},
@@ -186,12 +209,19 @@ SUBCATEGORY_RULES: dict[str, list[dict]] = {
         {"id": "agent-mcp", "label": "MCP 服务", "terms": [("mcp", 3), ("model context protocol", 3), ("mcp-server", 3)]},
         {"id": "agent-workflow", "label": "工作流编排", "terms": [("workflow", 3), ("automation", 3), ("工作流", 3), ("自动化", 3), ("编排", 3)]},
         {"id": "agent-sub", "label": "子代理", "terms": [("subagent", 3), ("agents", 2), ("多智能体", 3), ("子代理", 3)]},
+        {"id": "agent-coding", "label": "编码代理", "terms": [("coding", 3), ("engineer", 2), ("programming", 3), ("developer", 2), ("编码", 3), ("编程", 3), ("写代码", 3), ("软件工程", 3)]},
+        {"id": "agent-teams", "label": "多代理协作", "terms": [("team", 3), ("collaboration", 3), ("collaborative", 3), ("协作", 3), ("团队", 3), ("分工", 2), ("多代理", 3)]},
+        {"id": "agent-runtime", "label": "运行时预设", "terms": [("runtime", 3), ("preset", 3), ("scheduler", 3), ("loop", 2), ("运行时", 3), ("预设", 3), ("调度", 3)]},
     ],
     "tools": [
         {"id": "tools-cli", "label": "命令行", "terms": [("cli", 3), ("command", 3), ("shell", 2), ("命令行", 3), ("终端", 3)]},
         {"id": "tools-install", "label": "安装部署", "terms": [("install", 2), ("setup", 2), ("deploy", 3), ("安装", 3), ("部署", 3)]},
         {"id": "tools-script", "label": "脚本批量", "terms": [("script", 3), ("batch", 2), ("脚本", 3), ("批量", 3)]},
         {"id": "tools-gen", "label": "生成转换", "terms": [("generator", 3), ("converter", 3), ("export", 2), ("生成", 2), ("转换", 2), ("导出", 2)]},
+        {"id": "tools-search", "label": "检索搜索", "terms": [("search", 3), ("query", 3), ("检索", 3), ("搜索", 3), ("查询", 3)]},
+        {"id": "tools-git", "label": "版本控制", "terms": [("git", 3), ("github", 2), ("commit", 3), ("branch", 2), ("仓库", 2), ("版本", 2), ("代码托管", 3)]},
+        {"id": "tools-media", "label": "媒体处理", "terms": [("image", 2), ("video", 3), ("audio", 3), ("media", 3), ("图片", 3), ("图像", 3), ("视频", 3), ("音频", 3), ("截图", 3)]},
+        {"id": "tools-process", "label": "进程运行时", "terms": [("process", 2), ("runtime", 3), ("daemon", 3), ("restart", 3), ("watchdog", 3), ("进程", 3), ("守护", 3), ("重启", 3), ("定时", 2), ("运行时", 3)]},
     ],
     "dev": [
         {"id": "dev-debug", "label": "调试排查", "terms": [("debug", 3), ("调试", 3), ("排查", 3)]},
@@ -214,6 +244,8 @@ SUBCATEGORY_RULES: dict[str, list[dict]] = {
         {"id": "secure-cred", "label": "凭据密钥", "terms": [("auth", 3), ("oauth", 3), ("token", 3), ("credential", 3), ("密钥", 3), ("凭据", 3)]},
         {"id": "secure-sandbox", "label": "沙箱隔离", "terms": [("sandbox", 3), ("sandboxing", 3), ("沙箱", 3), ("隔离", 3)]},
         {"id": "secure-crypto", "label": "加密脱敏", "terms": [("encrypt", 3), ("privacy", 3), ("加密", 3), ("脱敏", 3), ("隐私", 3)]},
+        {"id": "secure-audit", "label": "审计扫描", "terms": [("audit", 3), ("scan", 3), ("scanner", 3), ("compliance", 3), ("审计", 3), ("扫描", 3), ("合规", 3), ("检测", 2)]},
+        {"id": "secure-guard", "label": "防护拦截", "terms": [("guard", 3), ("defend", 3), ("defense", 3), ("antivirus", 3), ("injection", 3), ("防护", 3), ("防御", 3), ("拦截", 3), ("注入", 3), ("病毒", 3)]},
     ],
     "bridge": [
         {"id": "bridge-bridge", "label": "桥接", "terms": [("bridge", 3), ("桥接", 3)]},
@@ -358,14 +390,23 @@ def classify_node(node: dict) -> dict:
     return {**best, "sub": sub}
 
 
-def apply_categories(nodes: list[dict], min_count: int = 10, max_sectors: int = 18) -> dict:
+# 语义上必须独立成扇区的分类：样本少也不并进「其他」
+# （「公约协议」天然是小样本，但它回答的是"这个生态的规则由谁定"）
+KEEP_ALWAYS = ("spec",)
+
+
+def apply_categories(nodes: list[dict], min_count: int = 10, max_sectors: int = 20, keep_ids=KEEP_ALWAYS) -> dict:
     """全量归类 + 长尾合并，语义与 JS 的 applyCategories 一致。"""
     raw = {node["id"]: classify_node(node) for node in nodes}
     counts: dict[str, int] = {}
     for result in raw.values():
         counts[result["id"]] = counts.get(result["id"], 0) + 1
 
-    kept = [cid for cid, n in counts.items() if cid != OTHER["id"] and n >= min_count]
+    always = set(keep_ids or ())
+    kept = [
+        cid for cid, n in counts.items()
+        if cid != OTHER["id"] and (n >= min_count or (cid in always and n > 0))
+    ]
     kept.sort(key=lambda cid: (-counts[cid], LABELS.get(cid, cid)))
     dropped = kept[max_sectors:]
     kept = kept[:max_sectors]

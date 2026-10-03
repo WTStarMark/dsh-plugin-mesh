@@ -11,6 +11,10 @@
     "source": "GitHub REST Search API",
     "sampleNodes": 593, "sampleEdges": 1006, "droppedEdges": 109,
     "hubThreshold": 8, "degreeCap": 14, "reviewedAsNoise": 120,
+    // 噪声黑名单（v0.4.2）：同一作者被收录 > 200 个仓库且每个仓库星标都 < 1 => 判为垃圾账号。
+    // 这类节点与它们的边不会出现在 nodes / edges 里；下面几个字段只是如实记账。
+    "noiseBlacklist": { "spammer": { "repos": 1285, "maxStars": 0 } },
+    "noiseBlacklistSize": 1, "noiseNodesRemoved": 1285, "noiseSkipped": 0,
     "queries": [ { "id", "q", "page", "sort", "totalCount", "fetched", "rateRemaining" } ],
     "errors": []
   },
@@ -36,6 +40,10 @@
 | `description` | string | 仅用于展示，前端一律 textContent 写入（不拼 HTML） |
 | `topics` | string[] | 仓库真实主题数组 |
 | `matchedTags` | string[] | **白名单里精确命中的标签**，至少 1 个 |
+| `relevance` / `noise` | number | 相关度评分（0~8）与噪声分（`1 - relevance/5`，仅展示用） |
+| `verdict` | `"related" \| "noise" \| "manual"` | **三档相关性结论**（v0.4.2）：确认相关 / 确认噪声（可一键隐藏）/ 仍需人工复核 |
+| `reason` | string | 上面那条结论的一句话原因，面板直接展示 |
+| `review` | boolean | 等价于 `verdict === "manual"`，保留给老前端 |
 | `primaryTag` | string | 最具体的命中标签（仅用于筛选与展示，**不再决定颜色与扇区**） |
 | `category` | string | **功能分类 id**（扇区归属），由 `tools/categories.mjs` 规则判定 |
 | `categoryLabel` | string | 功能分类中文名，如「皮肤美化」 |

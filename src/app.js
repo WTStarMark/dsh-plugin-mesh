@@ -4,7 +4,7 @@
  * 状态变更路径永远是：改 state -> applyHighlight() -> 重绘 / 重渲染面板。
  * 过滤一律「淡化」而非「移除」，保证同一份数据在任意过滤下位置一致、可对比。
  */
-import { loadMeshBest, prepare, prepareCore, precomputedLayout, matches, formatStars, groupColor, starThreshold, EDGE_STYLES } from "./mesh-data.js";
+import { loadMeshBest, prepare, prepareCore, precomputedLayout, matches, formatStars, groupColor, starThreshold, ownerSiblings, stripNoiseOwners, isConfirmedNoise, EDGE_STYLES } from "./mesh-data.js";
 import { createDetailStore } from "./details.js";
 import { createStore } from "./cache.js";
 import { startStats, formatCount } from "./stats.js";
@@ -56,6 +56,7 @@ const state = {
   clusterFocus: null,
   focusCategory: null, // 单扇区放大：非空时只铺该分类，扇区变成它的细枝分类
   query: "",
+  searchHits: null, // 搜索命中集合：画布据此从圆心画放射线
   neighborFocus: null,
   selectedId: null,
   // 默认只开"标签"与"头像"：连线一律默认关闭，想看哪类关系自己点开
@@ -189,9 +190,13 @@ function viewInfo() {
       arm.members.forEach((m, idx) => armOf.set(m.id, { id: arm.id, label: arm.label, rank: idx + 1, count: arm.count }));
     }
   }
-  const linkCounts = Object.fromEntries(
-    [...new Set(["neighbor", "owner", "topic"])].map((type) => [type, countByType(links, type)]),
-  );
+  // 同作者给的是"完整关系对数"：数据层为了控制载荷，超大作者只存星形拓扑，
+  // 直接数存边会少一大截（v0.4.2 起图例与画布都按完整关系走）。
+  const linkCounts = {
+    neighbor: countByType(links, "neighbor"),
+    owner: prepared.ownerPairs ?? countByType(links, "owner"),
+    topic: countByType(links, "topic"),
+  };
   const arms = (layout?.arms ?? []).map((arm) => ({ id: arm.id, label: arm.label, count: arm.count }));
   return {
     groupBy: state.groupBy,
@@ -258,10 +263,19 @@ function resetView() {
 function computeHighlight() {
   const now = Date.now();
   const neighborSet = state.neighborFocus
-    ? new Set([state.neighborFocus, ...(prepared.adjacency.get(state.neighborFocus) ?? []).map((n) => n.id)])
+    ? new Set([
+        state.neighborFocus,
+        ...(prepared.adjacency.get(state.neighborFocus) ?? []).map((n) => n.id),
+        // 同作者兄弟：数据层对大作者只存星形拓扑，这里按 owner 索引补齐
+        ...ownerSiblings(prepared, state.neighborFocus),
+      ])
     : null;
   const set = new Set();
+  // 搜索命中：单独记一份，不受其它筛选影响 —— 放射线指向的是"搜索命中的仓库"
+  let searchSet = null;
   for (const n of prepared.nodes) {
+    const hit = state.query ? matches(n, state.query) : false;
+    if (hit) (searchSet ??= new Set()).add(n.id);
     // 标签之间取"与"：仓库必须同时具备所有已开启的标签才高亮。
     // 用"或"会失效——标签高度重叠（多数仓库同时挂 dsh 与 dsh-plugin），关掉任何一个都几乎筛不掉东西。
     if (!n.matchedTags.every((t) => state.tags.has(t))) continue;
@@ -271,7 +285,8 @@ function computeHighlight() {
       if (!ts || now - ts > state.pushedDays * 86400000) continue;
     }
     if (state.language !== "all" && n.language !== state.language) continue;
-    if (state.hideNoise && n.review) continue;
+    // 「隐藏确认噪声」只隐藏三档结论里已确认的那批；待复核的仍然画出来（它们还没定性）
+    if (state.hideNoise && isConfirmedNoise(n)) continue;
     if (state.archived === "hide" && n.archived) continue;
     if (state.archived === "only" && !n.archived) continue;
     // 放大模式下 clusterFocus 是「细枝」id，必须用细枝键比较；
@@ -283,9 +298,10 @@ function computeHighlight() {
       if (key !== state.clusterFocus) continue;
     }
     if (neighborSet && !neighborSet.has(n.id)) continue;
-    if (state.query && !matches(n, state.query)) continue;
+    if (state.query && !hit) continue;
     set.add(n.id);
   }
+  state.searchHits = searchSet;
   state.lastHit = set.size;
   if (set.size === prepared.nodes.length) return null;
   return set;
@@ -294,6 +310,7 @@ function computeHighlight() {
 function apply(options = {}) {
   const highlight = computeHighlight();
   view.setHighlight(highlight);
+  view.setSearchHits(state.searchHits); // 搜索后从圆心放射指向命中仓库
   view.setSelected(state.selectedId);
   updateStatus(highlight);
   const info = viewInfo();
@@ -313,8 +330,13 @@ function updateStatus(highlight) {
   const arms = layout && Array.isArray(layout.arms) ? layout.arms.length : 0;
   const by = state.groupBy === "language" ? "语言" : "功能分类";
   const head = "圆心：" + HUB_ID + " · 共 " + arms + " 个扇区，每个 " + (arms ? (360 / arms).toFixed(1) : "0") + "°，按" + by + "划分";
-  dom.hint.textContent = head + " · 当前命中 " + hit + " / " + prepared.nodes.length + " 个仓库";
-  dom.hint.title = "滚轮缩放 · 拖拽平移 · 单击选中 · 双击聚焦其关联仓库";
+  // 搜索时把放射线也读出来：不然用户不知道那些线是搜索的结果
+  const rays = state.query && state.searchHits ? " · 放射线指向 " + state.searchHits.size + " 个搜索命中" : "";
+  dom.hint.textContent = head + " · 当前命中 " + hit + " / " + prepared.nodes.length + " 个仓库" + rays;
+  dom.hint.title =
+    "滚轮缩放 · 拖拽平移 · 单击选中 · 双击聚焦其关联仓库" +
+    (state.query ? " · 搜索命中的仓库有从圆心射出的放射线" : "") +
+    (state.neighborFocus ? " · 当前「只看关联仓库」：点画布空白处或按 Esc 即可退出" : "");
 }
 
 function rebuildLayout() {
@@ -413,9 +435,15 @@ const actions = {
   },
   selectRepo(id) {
     state.selectedId = id;
+    // 点空白处（id 为空）＝ 退出「只看关联仓库」。
+    // 双击聚焦关联仓库后，neighborFocus 会把无关节点一直压暗；之前点空白只清掉选中，
+    // 图还是暗的，只能靠 Esc 或「重置筛选」——这是个死路（v0.4.2 修复）。
+    if (!id) state.neighborFocus = null;
     if (id) revealDossier(); // 点项目 → 自动展开右栏（详情在里面）
     view.setSelected(id);
-    apply({ rail: false, edgeChips: false });
+    // 图例里的「同作者 / 主题共现」计数要跟着选中项走（回车搜索选中时没有 hover，
+    // 之前跳过渲染会让计数停在旧值上）
+    apply({ rail: false });
   },
   toggleEdgeType(type) {
     if (state.edgeTypes.has(type)) state.edgeTypes.delete(type);
@@ -579,6 +607,9 @@ function loadPanels() {
 
 /** 用一份数据把界面搭起来；后台校验拿到新数据时用 resetFilters=false 再跑一次 */
 function bootMesh(mesh, { resetFilters, core }) {
+  // 噪声黑名单：必须在 prepareCore / precomputedLayout 之前剔除，
+  // 否则预计算里的节点索引与扇区成员会对不上（旧快照兜底，新数据本就干净）。
+  mesh = stripNoiseOwners(mesh);
   prepared = core ? prepareCore(mesh) : prepare(mesh);
   precomputed = core ? precomputedLayout(mesh) : null;
   details = core ? createDetailStore(mesh.meta ?? {}) : null;

@@ -40,7 +40,17 @@ HUB_ID = "deepseek-ai/deepseek-harness"
 HUB_DF = 8            # 主题出现次数超过它 => 只展示不连线，避免毛线球
 DEGREE_CAP = 14       # 只裁剪"主题共现"边；"同作者"是硬关系，不裁剪
 OWNER_CLIQUE_MAX = 8  # 同作者成员不超过它就两两相连，超过则用星形拓扑
-REVIEW_THRESHOLD = 2  # 相关度评分 <= 它 => 进入待复核队列
+REVIEW_THRESHOLD = 2  # 旧口径（相关度 <= 它 => 待复核）已由 analyze_relevance 的三档结论取代，保留供参考
+
+# 噪声黑名单：同一作者被收录的仓库数【超过】NOISE_OWNER_MIN_REPOS，
+# 且每个仓库的星标都【低于】NOISE_OWNER_MAX_STARS（默认即全部 0 星）=> 判为垃圾账号。
+# 两个条件都刻意保守：既要有"一个人几百上千个仓库"的量，又要"一颗星都没有"，
+# 避免误伤高产但确实有受众的正常作者。命中后：
+#   1) 从累积索引与后续扫描管道里剔除（不再消耗请求配额）；
+#   2) 前端契约（mesh.json / mesh-core.json）里不再出现。
+NOISE_OWNER_MIN_REPOS = 200
+NOISE_OWNER_MAX_STARS = 1
+NOISE_BLACKLIST = DATA_DIR / "noise-blacklist.json"  # 已判定的噪声作者（人工可编辑）
 
 # 快照
 FRONTEND_LIMIT = 0      # 0 = 不限：所有索引到的仓库都进前端（配合 gzip + 浏览器缓存，避免卡顿）

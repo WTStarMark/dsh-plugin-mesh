@@ -10,7 +10,15 @@ import re
 from datetime import datetime, timezone
 
 from .classify import apply_categories
-from .config import DEGREE_CAP, HUB_DF, HUB_ID, OWNER_CLIQUE_MAX, REVIEW_THRESHOLD, WHITELIST_TAGS
+from .config import (
+    DEGREE_CAP,
+    HUB_DF,
+    HUB_ID,
+    NOISE_OWNER_MAX_STARS,
+    NOISE_OWNER_MIN_REPOS,
+    OWNER_CLIQUE_MAX,
+    WHITELIST_TAGS,
+)
 
 _NAME_RE = re.compile(r"(^|[^a-z])dsh([^a-z]|$)|dsh-|dsh_", re.I)
 _DESC_RE = re.compile(r"dsh|deepseek[- ]?harness|cordis", re.I)
@@ -71,14 +79,97 @@ def relevance_score(repo: dict) -> int:
     return score
 
 
-def build_mesh(raw_repos: list[dict], tag_totals: dict | None = None, *, source: str = "GitHub REST Search API") -> dict:
-    """主构图流程：精确命中 -> 去重 -> 功能分类 -> 主题/同作者连线 -> 度数裁剪。"""
+def find_noise_owners(
+    nodes: list[dict],
+    min_repos: int = NOISE_OWNER_MIN_REPOS,
+    max_stars: int = NOISE_OWNER_MAX_STARS,
+) -> dict[str, dict]:
+    """噪声作者：被收录的仓库【超过】min_repos 个，且每个仓库星标都【低于】max_stars。
+
+    这类账号通常是批量刷标签的垃圾号（一个人几百上千个 0 星仓库）。
+    两个条件必须同时满足，宁可漏判也不误伤正常作者。
+    """
+    groups: dict[str, list[dict]] = {}
+    for node in nodes:
+        groups.setdefault(node["owner"], []).append(node)
+    noise: dict[str, dict] = {}
+    for owner, group in groups.items():
+        if len(group) <= min_repos:
+            continue
+        top = max(int(n.get("stars") or 0) for n in group)
+        if top >= max_stars:
+            continue
+        noise[owner] = {"repos": len(group), "maxStars": top}
+    return noise
+
+
+# ---- 相关性判定（三档结论），与 tools/relevance.mjs 逐条一致 ----
+_DSH_NAME_RE = re.compile(r"(^|[^a-z0-9])dsh([^a-z0-9]|$)|dsh[-_]|deepseek[\s-]?harness|cordis", re.I)
+_DSH_DESC_RE = _DSH_NAME_RE
+# 主题里只有这几个是 DSH 专有的；单说 deepseek 只表示模型/公司
+_SPEC_TOPICS = {"deepseek-harness", "cordis", "cordis-plugin"}
+# 插件/技能形态的线索：正文里有这些词，说明它至少是"生态里的一件东西"
+_PLUGIN_SHAPED_RE = re.compile(r"plugin|插件|skill|技能|mcp|扩展|extension|皮肤|主题|面板|侧边栏|工作台", re.I)
+# 其他插件生态的标签：同时铺好几个生态的标签，基本是蹭标签
+OTHER_ECOSYSTEM_TAGS = {
+    "claude-code-plugin", "claude-plugin", "codex-plugin", "cursor-plugin",
+    "gemini-cli-extension", "openai-plugin", "vscode-extension", "jetbrains-plugin",
+}
+
+
+def analyze_relevance(repo: dict) -> dict:
+    """三档结论：related（有 DSH 专有线索）/ noise（与 DSH 无关、空壳、堆标签）/ manual（需人工）。
+
+    老版本只有一个 review = (相关度 <= 2)，一次把上千个仓库丢进"待复核"，
+    其中一大半一眼就能定性。这里把能定的先定掉，只把真正模糊的留给人工。
+    """
+    name = str(repo.get("name") or "")
+    desc = str(repo.get("description") or "").strip()
+    topics = [str(t).lower() for t in (repo.get("topics") or [])]
+    tags = repo.get("matchedTags") or []
+    relevance = relevance_score(repo)
+
+    def out(verdict: str, reason: str, review: bool) -> dict:
+        return {"relevance": relevance, "review": review, "verdict": verdict, "reason": reason}
+
+    if _DSH_NAME_RE.search(name) or _DSH_DESC_RE.search(desc) or any(t in _SPEC_TOPICS for t in topics):
+        return out("related", "名字/描述/主题里有 DSH 专有线索", False)
+    loose = bool(_PLUGIN_SHAPED_RE.search(name + " " + desc))
+    other_eco = sum(1 for t in topics if t in OTHER_ECOSYSTEM_TAGS)
+    if other_eco >= 2:
+        return out("noise", f"同时铺了 {other_eco} 个其他插件生态的标签", False)
+    if len(tags) >= 3 and not loose:
+        return out("noise", f"挂了 {len(tags)} 个 DSH 标签，正文却没有插件线索", False)
+    if len(desc) < 10 and (repo.get("stars") or 0) == 0 and not loose:
+        return out("noise", "空壳仓库：没有描述、0 星", False)
+    if len(tags) == 1 and not loose:
+        return out("noise", "只挂 1 个最宽泛的 dsh 标签，正文与 DSH 无关", False)
+    return out("manual", "正文像插件，但没提 DSH，需要人工确认" if loose else "线索不足，需要人工确认", True)
+
+
+def build_mesh(
+    raw_repos: list[dict],
+    tag_totals: dict | None = None,
+    *,
+    source: str = "GitHub REST Search API",
+    blacklist: dict | None = None,
+) -> dict:
+    """主构图流程：精确命中 -> 剔除黑名单/新识别的噪声作者 -> 去重 -> 分类 -> 连线 -> 裁剪。
+
+    blacklist 是【已判定】的噪声作者（owner -> 说明），来自 data/noise-blacklist.json：
+    一旦判定就长期生效，哪怕下一轮只抓到它几个仓库也不再收录。
+    """
     tag_totals = tag_totals or {}
+    blacklist = dict(blacklist or {})
     nodes: list[dict] = []
     seen: dict[str, dict] = {}
+    skipped_blacklisted = 0
 
     for raw in raw_repos:
         repo = normalize_repo(raw)
+        if repo.get("owner") in blacklist:
+            skipped_blacklisted += 1
+            continue
         matched = [t for t in WHITELIST_TAGS if t in repo["topics"]]
         if not matched or not repo["id"]:
             continue  # 精确命中：标签必须真的在它自己的 topics 里
@@ -87,14 +178,27 @@ def build_mesh(raw_repos: list[dict], tag_totals: dict | None = None, *, source:
             prev = seen[repo["id"]]
             prev["matchedTags"] = sorted(set(prev["matchedTags"]) | set(matched), key=WHITELIST_TAGS.index)
             continue
-        rel = relevance_score(repo)
         repo["matchedTags"] = matched
         repo["primaryTag"] = matched[0]
+        verdict = analyze_relevance(repo)
+        rel = verdict["relevance"]
         repo["relevance"] = rel
         repo["noise"] = min(1.0, max(0.0, 1 - rel / 5))
-        repo["review"] = rel <= REVIEW_THRESHOLD
+        repo["review"] = verdict["review"]
+        repo["verdict"] = verdict["verdict"]
+        repo["reason"] = verdict["reason"]
         seen[repo["id"]] = repo
         nodes.append(repo)
+
+    # 本轮新识别的噪声作者：连同它们的仓库一起剔除，并并入黑名单长期生效
+    detected = find_noise_owners(nodes)
+    noise_removed = 0
+    if detected:
+        keep = {owner: info for owner, info in detected.items() if owner not in blacklist}
+        blacklist.update(detected)
+        if keep:
+            noise_removed = sum(info["repos"] for info in keep.values())
+        nodes = [n for n in nodes if n["owner"] not in detected]
 
     categories = apply_categories(nodes)
 
@@ -192,6 +296,17 @@ def build_mesh(raw_repos: list[dict], tag_totals: dict | None = None, *, source:
             "hubThreshold": HUB_DF,
             "degreeCap": DEGREE_CAP,
             "reviewedAsNoise": sum(1 for n in nodes if n["review"]),
+            # 相关性三档结论的计数：待复核（manual）已从"疑似噪声"里收敛出来
+            "verdictCounts": {
+                "related": sum(1 for n in nodes if n.get("verdict") == "related"),
+                "noise": sum(1 for n in nodes if n.get("verdict") == "noise"),
+                "manual": sum(1 for n in nodes if n.get("verdict") == "manual"),
+            },
+            # 噪声黑名单：长期生效，人工可从 data/noise-blacklist.json 里删条目解除
+            "noiseBlacklist": dict(sorted(blacklist.items())),
+            "noiseBlacklistSize": len(blacklist),
+            "noiseNodesRemoved": noise_removed,
+            "noiseSkipped": skipped_blacklisted,
             "categories": {
                 "classified": categories["classified"],
                 "unclassified": categories["unclassified"],

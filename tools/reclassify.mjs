@@ -10,6 +10,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyCategories, DEFAULT_OPTIONS } from "./categories.mjs";
+import { analyzeRelevance } from "./relevance.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const FILE = resolve(ROOT, "data/mesh.json");
@@ -19,6 +20,17 @@ const before = new Map(mesh.nodes.map((n) => [n.id, n.category]));
 const nodeCount = mesh.nodes.length;
 
 const stats = applyCategories(mesh.nodes, { ...DEFAULT_OPTIONS });
+
+// 相关性判定也一并重算：老数据只有 review 一个布尔，看不到"确认噪声 / 仍需人工"的区分
+const verdicts = { related: 0, noise: 0, manual: 0 };
+for (const node of mesh.nodes) {
+  const v = analyzeRelevance(node);
+  node.relevance = v.relevance;
+  node.review = v.review;
+  node.verdict = v.verdict;
+  node.reason = v.reason;
+  verdicts[v.verdict] += 1;
+}
 
 const moves = new Map();
 for (const node of mesh.nodes) {
@@ -33,11 +45,21 @@ for (const node of mesh.nodes) {
 mesh.meta.categories = {
   classified: stats.classified,
   unclassified: stats.unclassified,
-  minCount: 10,
-  maxSectors: 18,
+  minCount: DEFAULT_OPTIONS.minCount,
+  maxSectors: DEFAULT_OPTIONS.maxSectors,
+  keepIds: DEFAULT_OPTIONS.keepIds,
   merged: stats.merged,
   distribution: stats.counts,
 };
+mesh.meta.review = {
+  ...(mesh.meta.review ?? {}),
+  reviewedAsNoise: verdicts.manual,
+  related: verdicts.related,
+  noise: verdicts.noise,
+  manual: verdicts.manual,
+};
+mesh.meta.reviewedAsNoise = verdicts.manual;
+mesh.meta.verdictCounts = { related: verdicts.related, noise: verdicts.noise, manual: verdicts.manual };
 mesh.clusters = stats.counts.map((c) => ({ id: c.id, label: c.label, count: c.count }));
 
 await writeFile(FILE, JSON.stringify(mesh), "utf8");
@@ -48,6 +70,7 @@ if (mesh.nodes.length !== nodeCount) {
 }
 console.log("节点数（应保持不变）:", mesh.nodes.length);
 console.log("归类:", stats.classified, "| 未分类:", stats.unclassified);
+console.log("相关性判定：相关", verdicts.related, "| 确认噪声", verdicts.noise, "| 仍需人工", verdicts.manual);
 console.log("扇区分布:", stats.counts.map((c) => c.id + "(" + c.count + ")").join(" "));
 console.log("分类发生变化的节点:", [...moves.values()].reduce((a, b) => a + b, 0));
 const top = [...moves.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12);

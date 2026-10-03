@@ -17,14 +17,18 @@ const SECTOR_COUNT = mesh.clusters.length;
 const SECTOR_DEG = (360 / SECTOR_COUNT).toFixed(1).replace(".", "\\.");
 const atFull = new RegExp("命中 " + NODE_COUNT + " / " + NODE_COUNT);
 
-const drawCalls = { fillRect: 0, arc: 0, stroke: 0, fill: 0, fillText: 0, closePath: 0, clip: 0, drawImage: 0, curve: 0 };
+const drawCalls = { fillRect: 0, arc: 0, stroke: 0, fill: 0, fillText: 0, closePath: 0, clip: 0, drawImage: 0, curve: 0, lineTo: 0, segments: [], strokeWidths: [] };
+
+/** 记录每段直线的起止点：用来验证放射线确实"从圆心射出"（不只是数调用次数） */
+let stubMove = [0, 0];
 
 function makeCtx() {
   const ctx = {
     fillStyle: "", strokeStyle: "", lineWidth: 1, font: "", textAlign: "", textBaseline: "",
     setTransform() {}, save() {}, restore() {}, setLineDash() {}, beginPath() {},
     translate() {}, rotate() {}, scale() {}, measureText() { return { width: 40 }; },
-    moveTo() {}, lineTo() {},
+    moveTo(x, y) { stubMove = [x, y]; },
+    lineTo(x, y) { drawCalls.lineTo++; drawCalls.segments.push([stubMove[0], stubMove[1], x, y]); },
     fillRect() { drawCalls.fillRect++; },
     arc() { drawCalls.arc++; },
     closePath() { drawCalls.closePath++; },
@@ -32,7 +36,7 @@ function makeCtx() {
     quadraticCurveTo() { drawCalls.curve++; },
     drawImage() { drawCalls.drawImage++; },
     fill() { drawCalls.fill++; },
-    stroke() { drawCalls.stroke++; },
+    stroke() { drawCalls.stroke++; drawCalls.strokeWidths.push(this.lineWidth); },
     fillText() { drawCalls.fillText++; },
     strokeText() {},
     createRadialGradient() { return { addColorStop() {} }; },
@@ -442,7 +446,8 @@ test("点选项目后画出两类连线，且颜色不同", () => {
       canvas.fire("pointermove", { clientX: x, clientY: y });
       if (!tooltip.hidden) {
         const text = tooltip.all.map((n) => n.textContent).join(" ");
-        const id = [...siblings].find((sid) => text.includes(sid.split("/")[1]));
+        // 必须按【完整 id】匹配：只用仓库名做子串匹配会点到同名片段的其他仓库（曾误点后断言失败）
+        const id = [...siblings].find((sid) => text.includes(sid));
         if (id) {
           hit = { x, y, id };
           break outer;
@@ -557,4 +562,139 @@ test("回归：放大到分类后，点选节点仍能画出该分类内的连�
   const back2 = registry.get("rail").find((n) => n.className?.includes("focus-banner"));
   const backBtn2 = back2 && back2.all.find((n) => String(n.textContent ?? "").includes("返回全局"));
   if (backBtn2) { backBtn2.fire("click"); pump(10); }
+});
+
+test("右上角作者入口指向本项目仓库", () => {
+  const m = /class="author"[^>]*href="([^"]+)"/.exec(indexHtml);
+  assert.equal(m?.[1], "https://github.com/WTStarMark/dsh-plugin-mesh", "作者入口应指向本仓库，实际 " + m?.[1]);
+});
+
+test("v0.4.2 双击聚焦关联仓库后，点空白处必须恢复全图", () => {
+  const canvas = registry.get("graph");
+  const hits = () => {
+    const m = /当前命中 (\d+) \/ (\d+)/.exec(hint.textContent);
+    return m ? Number(m[1]) : -1;
+  };
+  hudButtons.find((b) => b.dataset.act === "fit").fire("click");
+  canvas.fire("pointerdown", { clientX: 5, clientY: 5, pointerId: 92 });
+  canvas.fire("pointerup", { clientX: 5, clientY: 5, pointerId: 92 });
+  canvas.fire("pointerleave");
+  pump(10);
+  const full = hits();
+  assert.ok(full > 0, "初始应命中一批节点，实际：" + hint.textContent);
+
+  // 扫画布找一个节点，双击它 → 只看关联仓库
+  let hit = null;
+  outer: for (let y = 20; y < 600; y += 10) {
+    for (let x = 20; x < 900; x += 10) {
+      canvas.fire("pointermove", { clientX: x, clientY: y });
+      if (!tooltip.hidden) { hit = { x, y }; break outer; }
+    }
+  }
+  assert.ok(hit, "画布上应能找到节点");
+  tooltip.hidden = true;
+  canvas.fire("dblclick", { clientX: hit.x, clientY: hit.y });
+  pump(20);
+  const focused = hits();
+  assert.ok(focused < full, "双击后应只剩关联仓库，实际 " + focused + " / " + full);
+
+  // 旧 bug：点空白只清掉选中，neighborFocus 还在，整张图永远暗着
+  canvas.fire("pointerdown", { clientX: 5, clientY: 5, pointerId: 91 });
+  canvas.fire("pointerup", { clientX: 5, clientY: 5, pointerId: 91 });
+  pump(20);
+  assert.equal(hits(), full, "点空白处应恢复到全图，实际：" + hint.textContent);
+});
+
+test("v0.4.2 搜索：从圆心放射出指向命中仓库的直线，清空后消失", () => {
+  const search = registry.get("search");
+  const canvas = registry.get("graph");
+  const fitBtn = hudButtons.find((b) => b.dataset.act === "fit");
+  assert.ok(fitBtn, "应有「适应窗口」按钮");
+  fitBtn.fire("click"); // 先回到全景，保证命中球都在屏内
+  canvas.fire("pointerdown", { clientX: 5, clientY: 5, pointerId: 94 });
+  canvas.fire("pointerup", { clientX: 5, clientY: 5, pointerId: 94 }); // 取消选中，避免把关联连线算进来
+  pump(10);
+
+  const before = drawCalls.lineTo;
+  const segStart = drawCalls.segments.length;
+  const widthStart = drawCalls.strokeWidths.length;
+  search.value = "tauri";
+  search.fire("input");
+  pump(30);
+  const rays = drawCalls.lineTo - before;
+  assert.ok(rays > 0, "搜索后应画出指向光束（lineTo），实际新增 " + rays);
+  // 光束必须够粗：低倍率（缩小看全景）下 1px 细线等于看不见
+  const widths = drawCalls.strokeWidths.slice(widthStart);
+  assert.ok(widths.length > 0, "光晕/光芯应当有描边");
+  assert.ok(Math.max(...widths) >= 3, "光束主描边应明显变粗，实际最粗 " + Math.max(...widths) + "px");
+
+  const m = /放射线指向 (\d+) 个搜索命中/.exec(hint.textContent);
+  assert.ok(m, "状态栏应报出放射线指向的命中数，实际：" + hint.textContent);
+  const hits = Number(m[1]);
+  assert.ok(hits > 0 && hits < NODE_COUNT, "搜索命中数应在 0 与总数之间，实际 " + hits);
+  assert.ok(rays >= hits, "每个命中至少一条放射线：命中 " + hits + "，实际 lineTo 新增 " + rays);
+
+  // 几何验证：所有放射线必须从同一个点（圆心）射出，而不是各画各的
+  const byOrigin = new Map();
+  for (const [x1, y1] of drawCalls.segments.slice(segStart)) {
+    const key = x1.toFixed(2) + "," + y1.toFixed(2);
+    byOrigin.set(key, (byOrigin.get(key) ?? 0) + 1);
+  }
+  const shared = Math.max(...byOrigin.values());
+  assert.ok(shared >= hits, "应有 " + hits + " 条线从同一个圆心射出，实际最多只有 " + shared + " 条（起点种类 " + byOrigin.size + "）");
+
+  search.value = "";
+  search.fire("input");
+  pump(30);
+  const cleared = drawCalls.lineTo;
+  pump(30);
+  assert.equal(drawCalls.lineTo, cleared, "清空搜索后不应再画放射线");
+});
+
+test("v0.4.2 同作者：点选大作者成员也连到其余全部同作者仓库", () => {
+  const coreNodes = coreJson.nodes ?? [];
+  const byOwner = new Map();
+  for (const n of coreNodes) {
+    if (!byOwner.has(n.owner)) byOwner.set(n.owner, []);
+    byOwner.get(n.owner).push(n);
+  }
+  // 成员 > 8 的作者：数据层只写星形拓扑，正是「有的连得全、有的只连一个」的那批
+  const big = [...byOwner.entries()].filter(([, list]) => list.length > 8).sort((a, b) => b[1].length - a[1].length)[0];
+  assert.ok(big, "样本里应有成员超过 8 的作者");
+  const [owner, list] = big;
+
+  const stored = new Map();
+  for (const e of coreJson.edges ?? []) {
+    if (e[2] !== 0) continue; // 0 = owner
+    stored.set(coreNodes[e[0]].id, (stored.get(coreNodes[e[0]].id) ?? 0) + 1);
+    stored.set(coreNodes[e[1]].id, (stored.get(coreNodes[e[1]].id) ?? 0) + 1);
+  }
+  const victim = list.find((n) => (stored.get(n.id) ?? 0) < list.length - 1);
+  assert.ok(victim, owner + " 组里应有一个成员在存边里连不全（星形拓扑）");
+
+  const search = registry.get("search");
+  const canvas = registry.get("graph");
+  hudButtons.find((b) => b.dataset.act === "fit").fire("click");
+  canvas.fire("pointerdown", { clientX: 5, clientY: 5, pointerId: 93 });
+  canvas.fire("pointerup", { clientX: 5, clientY: 5, pointerId: 93 });
+  canvas.fire("pointerleave"); // 清掉上一条用例残留的 hover：图例优先跟随悬停
+  pump(10);
+
+  const before = drawCalls.curve;
+  search.value = victim.id;
+  search.fire("input");
+  search.fire("keydown", { key: "Enter" }); // 回车选中该仓库
+  pump(40);
+  const drawn = drawCalls.curve - before;
+  const expected = list.length - 1;
+  assert.ok(drawn >= expected, "点选 " + victim.id + " 应画出 " + expected + " 条同作者连线，实际 " + drawn);
+
+  const legend = registry.get("edge-types").all.map((n) => n.textContent).join(" ");
+  const m = /同作者 (\d+)/.exec(legend);
+  assert.ok(m, "图例应有同作者计数，实际 " + legend);
+  assert.equal(Number(m[1]), expected, "同作者计数必须是完整关系（" + owner + " 共 " + list.length + " 个仓库）");
+
+  search.value = "";
+  search.fire("input");
+  pump(10);
 });
