@@ -31,6 +31,7 @@ from dsh_mesh.config import (
     KEEP_SNAPSHOTS,
     LAST_CRAWL,
     MESH_JSON,
+    NOISE_BLACKLIST,
     REFRESH_HOURS,
     REPO_CACHE,
     SAMPLE_RAW,
@@ -51,11 +52,16 @@ def tag_totals_from(state: dict) -> dict[str, int]:
     return totals
 
 
-def fetch_live(args, log):
+def fetch_live(args, log, blacklist=None):
     """分段抓取：每轮只刷新一批段，结果并入累积索引，最终覆盖全部仓库。"""
     token = load_token()
     client = GitHubClient(token=token)
-    store = SegmentStore(SEGMENT_STATE, REPO_CACHE)
+    store = SegmentStore(SEGMENT_STATE, REPO_CACHE, blacklist=set(blacklist or ()))
+    # 已判定的噪声作者：从累积索引里清掉，并让后续 merge 直接跳过（不再占配额）
+    purged = store.drop_owners(set(blacklist or ()))
+    if purged:
+        log("噪声黑名单：从累积索引剔除 " + str(purged) + " 个仓库（作者 " + str(len(blacklist)) + " 个）")
+        store.save()
     seeded = store.ensure_seeded(args.tags)
     if seeded:
         log("分段队列初始化：新增 " + str(seeded) + " 个待抓分段")
@@ -95,6 +101,7 @@ def fetch_live(args, log):
         "addedThisRound": added_this_round,
         "splitChildren": split_children,
         "coveredRepos": after["repos"],
+        "noisePurged": purged,
     }
 
 
@@ -126,10 +133,34 @@ def seconds_until_next(now: float, interval: int) -> float:
     return max(60.0, interval - (now % interval))
 
 
-def run_precompute(log) -> None:
+def _core_looks_fresh(started: float, expected_nodes: int | None = None) -> bool:
+    """mesh-core.json 是否在这次尝试之后被完整重写过。
+
+    只看 mtime 不够：子进程可能在写文件写到一半时崩，留下半截 JSON。
+    所以还要能解析、节点数对得上、layout 标记正确，才认这次预计算成功。
+    """
+    from dsh_mesh.config import MESH_JSON
+
+    path = MESH_JSON.parent / "mesh-core.json"
+    try:
+        if not path.exists() or path.stat().st_mtime < started - 1:
+            return False
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    nodes = data.get("nodes")
+    if not isinstance(nodes, list) or not nodes:
+        return False
+    if expected_nodes is not None and len(nodes) != expected_nodes:
+        return False
+    return data.get("meta", {}).get("layout") == "precomputed"
+
+
+def run_precompute(log, expected_nodes: int | None = None) -> None:
     """调 Node 工具预计算布局并给载荷瘦身（mesh-core.json + 详情分片）。
 
     失败不影响数据本身：前端拿不到 core 会自动回退到本地计算布局。
+    expected_nodes：本轮 mesh.json 的节点数，用来校验产物是否完整（防半截文件）。
     """
     from dsh_mesh.config import ROOT
 
@@ -144,28 +175,60 @@ def run_precompute(log) -> None:
     if not script.exists():
         log("未找到预计算脚本，跳过")
         return
-    try:
-        result = subprocess.run(
-            [node, str(script)], cwd=str(ROOT), capture_output=True, text=True, timeout=900
-        )
+
+    def attempt() -> tuple[bool, str]:
+        """跑一次预计算。成功 / 产物已更新都算成功。"""
+        started = time.time()
+        try:
+            result = subprocess.run(
+                [node, str(script)],
+                cwd=str(ROOT),
+                capture_output=True,
+                text=True,
+                timeout=900,
+                # pm2 托管下 node 偶发 libuv 断言（uv__io_poll: errno == EEXIST）；
+                # 独立会话 + 空 stdin 能避开父进程进程组/信号带来的干扰
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except Exception as exc:  # noqa: BLE001 - 预计算失败不该拖垮采集
+            return False, str(exc)[:160]
         if result.returncode == 0:
             lines = [line for line in result.stdout.strip().splitlines() if line.strip()]
-            log("预计算完成：" + (lines[-1].strip() if lines else ""))
+            return True, (lines[-1].strip() if lines else "")
+        # 崩在退出阶段也不影响产物：core 完整重写过（能解析、节点数对得上）就算成功
+        if _core_looks_fresh(started, expected_nodes):
+            return True, "产物已更新（子进程退出码 " + str(result.returncode) + "，退出阶段崩溃不影响结果）"
+        return False, result.stderr.strip()[:160] or ("退出码 " + str(result.returncode))
+
+    # 重试一次：core 冻结在上一小时就等于前端地图不再更新
+    for index in (1, 2):
+        ok, detail = attempt()
+        if ok:
+            log("预计算完成：" + detail)
+            return
+        if index == 1:
+            log("预计算失败（不影响数据），5 秒后重试一次：" + detail)
+            time.sleep(5)
         else:
-            log("预计算失败（不影响数据）：" + (result.stderr.strip()[:160] or "退出码 " + str(result.returncode)))
-    except Exception as exc:  # noqa: BLE001 - 预计算失败不该拖垮采集
-        log("预计算异常（不影响数据）：" + str(exc)[:160])
+            log("预计算失败（不影响数据）：" + detail)
 
 
 def run_once(args, log) -> dict:
     started = time.time()
     log(f"=== 采集开始 {utcnow()} ===")
+    # 噪声作者黑名单：长期生效。命中者既不进累积索引、也不进前端契约。
+    blacklist = snap.load_blacklist(NOISE_BLACKLIST)
+    if blacklist:
+        log("噪声黑名单：" + str(len(blacklist)) + " 个作者（" + "、".join(sorted(blacklist)[:5]) + ("…" if len(blacklist) > 5 else "") + "）")
     if args.from_raw:
         raws, tag_totals, stats, env = load_from_raw(log)
     else:
-        raws, tag_totals, stats, env = fetch_live(args, log)
+        raws, tag_totals, stats, env = fetch_live(args, log, blacklist)
 
-    mesh = build_mesh(raws, tag_totals)
+    mesh = build_mesh(raws, tag_totals, blacklist=blacklist)
+    noise_now = mesh["meta"].get("noiseBlacklist") or {}
+    new_noise = {owner: info for owner, info in noise_now.items() if owner not in blacklist}
     mesh["meta"]["kind"] = "sample-seed" if args.from_raw else "hourly-crawl"
     mesh["meta"]["builtFrom"] = "data/sample-raw.json（离线复算）" if args.from_raw else "GitHub REST Search API"
     total_indexed = len(mesh["nodes"])
@@ -185,15 +248,31 @@ def run_once(args, log) -> dict:
         "seconds": round(elapsed, 1),
     }
 
+    summary["noiseBlacklistSize"] = len(noise_now)
+    summary["noiseNodesRemoved"] = mesh["meta"].get("noiseNodesRemoved", 0)
+    summary["noisePurged"] = env.get("noisePurged", 0)
+    if new_noise:
+        log(
+            "⚠ 新判定噪声作者 " + str(len(new_noise)) + " 个："
+            + "、".join(f"{owner}（{info['repos']} 个仓库 · 最高 {info['maxStars']} 星）" for owner, info in sorted(new_noise.items())[:5])
+        )
+
     if args.dry_run:
         log("dry-run：不写任何文件")
         log(f"索引 {total_indexed} 个仓库 · 前端 {len(mesh['nodes'])} 个节点 / {len(mesh['edges'])} 条连线")
         summary["dryRun"] = True
         return summary
 
-    # 缩水保护：分段扫描预热期累积索引必然很小，绝不能拿它覆盖已有的完整索引
+    # 黑名单落盘：下一轮抓取会直接跳过这些作者（人工删条目即可解除）
+    if new_noise or (noise_now and not NOISE_BLACKLIST.exists()):
+        snap.write_blacklist(noise_now, NOISE_BLACKLIST)
+        log("噪声黑名单已写入 data/noise-blacklist.json（共 " + str(len(noise_now)) + " 个作者）")
+
+    # 缩水保护：分段扫描预热期累积索引必然很小，绝不能拿它覆盖已有的完整索引。
+    # 但被黑名单剔除的仓库不算"缩水"——它们本来就不该再展示，否则第一次拉黑会被这道保护挡住。
+    explained = total_indexed + int(mesh["meta"].get("noiseNodesRemoved") or 0) + int(env.get("noisePurged") or 0)
     previous = previous_index_size()
-    if previous and total_indexed < previous * args.min_ratio:
+    if previous and explained < previous * args.min_ratio:
         log(
             f"⚠ 本次只构建出 {total_indexed} 个仓库，低于现有索引 {previous} 的 {int(args.min_ratio * 100)}%，"
             "拒绝覆盖前端数据与快照（分段扫描预热期属正常，等累积索引涨上来再写）"
@@ -201,6 +280,7 @@ def run_once(args, log) -> dict:
         summary["skippedWrite"] = True
         summary["previousIndex"] = previous
         summary["minRatio"] = args.min_ratio
+        summary["explainedIndex"] = explained
         snap.write_last_crawl(summary, LAST_CRAWL)
         return summary
 
@@ -223,7 +303,7 @@ def run_once(args, log) -> dict:
     snap.write_last_crawl(summary, LAST_CRAWL)
 
     log(f"索引 {total_indexed} 个仓库 · 前端 {len(mesh['nodes'])} 个节点 / {len(mesh['edges'])} 条连线")
-    run_precompute(log)
+    run_precompute(log, len(mesh["nodes"]))
     if path is None:
         log("索引与上一份快照一致，本次不生成新快照")
     else:

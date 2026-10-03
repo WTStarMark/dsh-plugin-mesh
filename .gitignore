@@ -22,6 +22,8 @@ tools/.git-askpass.sh
 
 data/mesh-core.json
 data/details/
+# 噪声作者黑名单：由采集器维护（远端有自己的副本，不走代码同步）
+data/noise-blacklist.json
 
 # 部署包（构建产物）
 dist/

@@ -132,14 +132,19 @@ export function prepareCore(core) {
   }
 
   const review = nodes.filter((n) => n.review).sort((a, b) => b.stars - a.stars);
+  const noise = nodes.filter(isConfirmedNoise).sort((a, b) => b.stars - a.stars);
+  const ownerIndex = indexByOwner(nodes);
   return {
     mesh: core,
+    noise,
     core: true,
     nodes,
     edges: triples,
     links,
     byId,
     adjacency,
+    ownerIndex,
+    ownerPairs: countOwnerPairs(ownerIndex),
     languages: [...new Set(nodes.map((n) => n.language).filter(Boolean))].sort(),
     owners: new Set(nodes.map((n) => n.owner)),
     maxStars: nodes.reduce((m, n) => Math.max(m, n.stars || 0), 0),
@@ -217,12 +222,163 @@ export function precomputedLayout(core) {
   };
 }
 
+/**
+ * 作者索引：owner -> 该作者的全部仓库 id（星标降序）。
+ *
+ * 为什么需要单独建索引：数据层为了控制载荷，同一作者成员超过 OWNER_CLIQUE_MAX 时
+ * 只存"星形拓扑"（枢纽连所有人、其余人只连枢纽）。只看存下来的边就会出现
+ * 「几个同作者仓库里，有的能指到其余全部、有的只指到一个」。这里按 owner 还原
+ * 完整关系，渲染与面板一律以它为准 —— 不论几个同作者仓库，彼此都能指到。
+ */
+function indexByOwner(nodes) {
+  const groups = new Map();
+  for (const n of nodes) {
+    if (!n.owner) continue;
+    const list = groups.get(n.owner);
+    if (list) list.push(n);
+    else groups.set(n.owner, [n]);
+  }
+  const index = new Map();
+  for (const [owner, list] of groups) {
+    list.sort((a, b) => (b.stars || 0) - (a.stars || 0) || (a.id < b.id ? -1 : 1));
+    index.set(owner, list.map((n) => n.id));
+  }
+  return index;
+}
+
+/** 完整同作者关系对数（每个作者 C(n,2) 累加）：图例与统计用，不含星形拓扑的省略 */
+function countOwnerPairs(ownerIndex) {
+  let pairs = 0;
+  for (const list of ownerIndex.values()) pairs += (list.length * (list.length - 1)) / 2;
+  return pairs;
+}
+
+const EMPTY_IDS = [];
+
+/** 噪声作者阈值：与后端 backend/dsh_mesh/config.py 保持一致（两边都拦一道） */
+export const NOISE_OWNER_MIN_REPOS = 200;
+export const NOISE_OWNER_MAX_STARS = 1;
+
+/**
+ * 噪声作者：被收录的仓库【超过】NOISE_OWNER_MIN_REPOS 个，且每个仓库星标都【低于】
+ * NOISE_OWNER_MAX_STARS（默认即全部 0 星）。典型的批量刷标签垃圾号。
+ * 两个条件必须同时满足 —— 宁可漏判，也不误伤高产但确实有受众的作者。
+ */
+export function noiseOwners(nodes, options = {}) {
+  const minRepos = options.minRepos ?? NOISE_OWNER_MIN_REPOS;
+  const maxStars = options.maxStars ?? NOISE_OWNER_MAX_STARS;
+  const groups = new Map();
+  for (const n of nodes ?? []) {
+    if (!n.owner) continue;
+    let group = groups.get(n.owner);
+    if (!group) groups.set(n.owner, (group = { repos: 0, maxStars: 0 }));
+    group.repos += 1;
+    group.maxStars = Math.max(group.maxStars, n.stars || 0);
+  }
+  const noise = new Map();
+  for (const [owner, group] of groups) {
+    if (group.repos > minRepos && group.maxStars < maxStars) noise.set(owner, group);
+  }
+  return noise;
+}
+
+/**
+ * 把噪声作者从一份数据里剔除（两种契约都支持）：
+ *   mesh.json      —— edges 是 {source,target,type}，按 id 过滤即可
+ *   mesh-core.json —— edges 是 [索引,索引,类型码]，删了节点必须重排索引
+ * 没有噪声作者时原样返回（零成本，正常路径不受影响）。
+ *
+ * 采集管道已经会剔除它们；这里再拦一道，是为了让**已经写出去的旧快照**也不再展示。
+ */
+export function stripNoiseOwners(mesh) {
+  const nodes = mesh?.nodes ?? [];
+  const noise = noiseOwners(nodes);
+  if (noise.size === 0) return mesh;
+
+  const keep = [];
+  const remap = new Map(); // 旧下标 -> 新下标
+  const droppedIds = new Set();
+  for (let i = 0; i < nodes.length; i++) {
+    if (noise.has(nodes[i].owner)) {
+      droppedIds.add(nodes[i].id);
+      continue;
+    }
+    remap.set(i, keep.length);
+    keep.push(nodes[i]);
+  }
+
+  const indexed = Array.isArray(mesh.edges?.[0]);
+  const edges = [];
+  for (const e of mesh.edges ?? []) {
+    if (indexed) {
+      const a = remap.get(e[0]);
+      const b = remap.get(e[1]);
+      if (a === undefined || b === undefined) continue;
+      edges.push([a, b, e[2]]);
+    } else if (!droppedIds.has(e.source) && !droppedIds.has(e.target)) {
+      edges.push(e);
+    }
+  }
+
+  // 预计算契约里的扇区成员是节点索引，必须跟着重排；否则面板会指到别人的球上
+  const arms = Array.isArray(mesh.arms)
+    ? mesh.arms
+        .map((arm) => {
+          if (!Array.isArray(arm.members)) return arm;
+          const members = [];
+          for (const i of arm.members) {
+            const mapped = remap.get(i);
+            if (mapped !== undefined) members.push(mapped);
+          }
+          return { ...arm, members, count: members.length };
+        })
+        .filter((arm) => !Array.isArray(arm.members) || arm.members.length > 0)
+    : null;
+
+  const clusterCounts = new Map();
+  for (const n of keep) clusterCounts.set(n.category, (clusterCounts.get(n.category) ?? 0) + 1);
+  const clusters = Array.isArray(mesh.clusters)
+    ? mesh.clusters
+        .map((c) => ({ ...c, count: clusterCounts.get(c.id) ?? 0 }))
+        .filter((c) => c.count > 0)
+    : null;
+
+  const removed = nodes.length - keep.length;
+  const meta = { ...(mesh.meta ?? {}) };
+  meta.sampleNodes = keep.length;
+  meta.sampleEdges = edges.length;
+  if (typeof meta.indexedNodes === "number") meta.indexedNodes = Math.max(keep.length, meta.indexedNodes - removed);
+  meta.noiseBlacklist = Object.fromEntries([...noise].map(([owner, g]) => [owner, { repos: g.repos, maxStars: g.maxStars }]));
+  meta.noiseBlacklistSize = noise.size;
+  meta.noiseNodesRemoved = removed;
+
+  const out = { ...mesh, nodes: keep, edges, meta };
+  if (arms) out.arms = arms;
+  if (clusters) out.clusters = clusters;
+  return out;
+}
+
+/**
+ * 同作者兄弟：与 id 同一个作者（owner）的其它仓库，按星标降序。
+ * 这是"完整"的同作者关系，不从存下来的边推导；没有伙伴时返回空数组。
+ */
+export function ownerSiblings(prepared, id) {
+  if (!prepared?.byId || !prepared.ownerIndex) return EMPTY_IDS;
+  const node = prepared.byId.get(id);
+  const group = node ? prepared.ownerIndex.get(node.owner) : null;
+  if (!group || group.length < 2) return EMPTY_IDS;
+  const out = [];
+  for (const other of group) if (other !== id) out.push(other);
+  return out;
+}
+
 /** 星标分位阈值：给「最少星标」滑块用（纯函数，放数据层免得为了它加载整个面板模块） */
 export function starThreshold(pct, maxStars) {
   return Math.round(maxStars * Math.pow(pct / 100, 3));
 }
 
 export function prepare(mesh) {
+  mesh = stripNoiseOwners(mesh); // 噪声作者不展示（旧快照兜底，正常数据是空操作）
   const nodes = mesh.nodes ?? [];
   const edges = mesh.edges ?? [];
   const byId = new Map(nodes.map((n) => [n.id, n]));
@@ -240,13 +396,18 @@ export function prepare(mesh) {
   const owners = new Set(nodes.map((n) => n.owner));
   const maxStars = nodes.reduce((m, n) => Math.max(m, n.stars || 0), 0);
   const review = nodes.filter((n) => n.review).sort((a, b) => b.stars - a.stars);
+  const noise = nodes.filter(isConfirmedNoise).sort((a, b) => b.stars - a.stars);
+  const ownerIndex = indexByOwner(nodes);
 
   return {
     mesh,
+    noise,
     nodes,
     edges,
     byId,
     adjacency,
+    ownerIndex,
+    ownerPairs: countOwnerPairs(ownerIndex),
     languages,
     owners,
     maxStars,
@@ -257,6 +418,17 @@ export function prepare(mesh) {
     hubs: mesh.hubs ?? [],
     edgeTypes: [...new Set(edges.map((e) => e.type))],
   };
+}
+
+/**
+ * 是否"确认噪声"：采集器给出的三档结论里的 noise 档
+ * （名字/描述/主题都没有 DSH 专有线索，且空壳、堆标签或只挂最宽泛的 dsh 标签）。
+ * 老数据（没有 verdict 字段）退回到"相关度 0 且在待复核里"，其余仍按待复核处理。
+ */
+export function isConfirmedNoise(node) {
+  if (!node) return false;
+  if (node.verdict) return node.verdict === "noise";
+  return !!node.review && !(node.relevance > 0);
 }
 
 /** 搜索匹配：仓库名 / 作者 / 描述 / 标签 */

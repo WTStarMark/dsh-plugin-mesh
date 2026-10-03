@@ -3,7 +3,7 @@
  * 右栏（仓库档案 / 命中标签 / 仓库主题 / 关联）、悬浮提示、连线开关。
  * 界面文案一律使用规范中文；专有名词（GitHub、DSH、仓库 id）保持原样。
  */
-import { colorOfTag, EDGE_STYLES, formatStars, formatDate } from "./mesh-data.js";
+import { colorOfTag, EDGE_STYLES, formatStars, formatDate, ownerSiblings, isConfirmedNoise, NOISE_OWNER_MIN_REPOS, NOISE_OWNER_MAX_STARS } from "./mesh-data.js";
 
 const EDGE_ORDER = ["neighbor", "owner", "topic", "fork"];
 
@@ -61,6 +61,7 @@ function starText(value) {
 
 export function renderRail(root, prepared, state, actions, view = {}) {
   const { meta, nodes, edges, owners, review, tags, hubs } = prepared;
+  const confirmed = prepared.noise ?? [];
   const hit = state.lastHit ?? null;
   const groups = view.groups ?? prepared.clusters;
   const hubId = view.hubId ?? "—";
@@ -180,6 +181,20 @@ export function renderRail(root, prepared, state, actions, view = {}) {
         text: meta.note ?? (meta.kind === "sample-seed" ? "当前为抽样数据（每个标签按星标取前若干页），并非全量索引。" : "数据来源：" + (meta.source ?? "未知")),
       }),
       hit !== null ? el("div", { class: "note", text: "当前筛选命中 " + hit + " / " + nodes.length + " 个仓库" }) : null,
+      el("div", {
+        class: "note",
+        text:
+          "相关性判定：已确认相关 " + Math.max(0, nodes.length - review.length - confirmed.length)
+          + " · 确认噪声 " + confirmed.length + "（可一键隐藏）· 仍需人工复核 " + review.length + "。",
+      }),
+      (meta.noiseBlacklistSize ?? 0) > 0
+        ? el("div", {
+            class: "note",
+            text:
+              "噪声黑名单：" + meta.noiseBlacklistSize + " 个作者（" + (meta.noiseNodesRemoved ?? 0)
+              + " 个仓库）已被剔除，不再展示 —— 判据是同一作者收录超过 " + NOISE_OWNER_MIN_REPOS + " 个仓库且每个仓库星标都低于 " + NOISE_OWNER_MAX_STARS + "。",
+          })
+        : null,
     ]),
     sec("扇区划分依据", [
       field(
@@ -205,7 +220,7 @@ export function renderRail(root, prepared, state, actions, view = {}) {
       field("归档状态", archivedSelect),
       el("label", { class: "switch" }, [
         el("input", { type: "checkbox", checked: state.hideNoise, on: { change: (ev) => actions.setHideNoise(ev.target.checked) } }),
-        "隐藏疑似噪声（" + review.length + " 个）",
+        "隐藏确认噪声（" + confirmed.length + " 个）",
       ]),
       el("div", { class: "row" }, [
         el("button", { class: "key", text: "重置筛选", title: "清空标签/语言/归档/星标/搜索，并退出放大与关联聚焦", on: { click: () => actions.resetFilters() } }),
@@ -248,7 +263,8 @@ export function renderInspector(root, prepared, state, actions, view = {}) {
         prepared.review.slice(0, 8).map((n) =>
           el("div", { class: "review-item", on: { click: () => actions.selectRepo(n.id) } }, [
             el("b", { text: n.id }),
-            el("p", { text: "星标 " + formatStars(n.stars) + " · " + reviewReason(n) }),
+            // reason 来自采集器的三档判定；老数据没有这个字段时退回本地启发式
+            el("p", { text: "星标 " + formatStars(n.stars) + " · " + (n.reason ?? reviewReason(n)) }),
           ]),
         ),
       ),
@@ -261,11 +277,16 @@ export function renderInspector(root, prepared, state, actions, view = {}) {
             const n = counts[type] ?? prepared.edges.filter((e) => e.type === type).length;
             return el("div", { class: "row" }, [
               el("span", { class: "line", style: { borderTopColor: style.color ?? "var(--accent)", borderTopStyle: style.dash?.length ? "dashed" : "solid" } }),
-              el("span", { text: style.label + "（" + n + "）" }),
+              // 同作者这类完整关系数可能上十万，用紧凑写法免得撑破侧栏
+              el("span", { text: style.label + "（" + (n >= 10000 ? formatStars(n) : n) + "）" }),
             ]);
           }),
         ),
         el("div", { class: "note", text: "连线一律画成背离圆心的弧线，交叉时绕开圆心，不会在中心糊成一团。" }),
+        el("div", {
+          class: "note",
+          text: "同作者按完整关系计数：点选任意仓库都会连到它全部同作者仓库。因此这里的数比数据文件里存的边多 —— 超大作者在数据层只存「枢纽连线」的星形拓扑，否则载荷会爆。",
+        }),
         el("div", { class: "note", text: "节点配色表示功能分类，半径表示星标（对数）。" }),
       ]),
     );
@@ -278,6 +299,11 @@ export function renderInspector(root, prepared, state, actions, view = {}) {
     if (!byType.has(nb.type)) byType.set(nb.type, []);
     byType.get(nb.type).push(nb);
   }
+  // 同作者（v0.4.2）：以 owner 索引为准。数据层对大作者只存星形拓扑，
+  // 只看存边会让大部分兄弟"消失"（画布上也是同一个毛病）。
+  const ownerIds = ownerSiblings(prepared, node.id);
+  if (ownerIds.length > 0) byType.set("owner", ownerIds.map((id) => ({ id, type: "owner", weight: 1, via: [] })));
+  const relatedCount = [...byType.values()].reduce((sum, list) => sum + list.length, 0);
 
   root.replaceChildren(
     el("section", { class: "sec" }, [
@@ -290,7 +316,11 @@ export function renderInspector(root, prepared, state, actions, view = {}) {
       ]),
       node.description ? el("p", { class: "desc", text: node.description }) : null,
       el("div", { class: "pills" }, [
-        node.review ? el("span", { class: "badge warn", text: "疑似噪声" }) : el("span", { class: "badge ok", text: "相关度 " + node.relevance + " / 8" }),
+        isConfirmedNoise(node)
+          ? el("span", { class: "badge warn", text: "确认噪声：" + (node.reason ?? "与 DSH 无关") })
+          : node.review
+            ? el("span", { class: "badge warn", text: "待复核：" + (node.reason ?? "线索不足") })
+            : el("span", { class: "badge ok", text: "相关度 " + node.relevance + " / 8" }),
         el("span", { class: "badge", text: "所属扇区：" + (node.categoryLabel ?? node.category ?? "未分类") }),
         node.archived ? el("span", { class: "badge", text: "已归档" }) : null,
         node.fork ? el("span", { class: "badge", text: "复刻仓库" }) : null,
@@ -332,7 +362,7 @@ export function renderInspector(root, prepared, state, actions, view = {}) {
     sec("命中标签", el("div", { class: "pills" }, node.matchedTags.map((t) => el("span", { class: "pill hit", text: t })))),
     sec("仓库主题（" + (node.topics?.length ?? 0) + " 个）", el("div", { class: "pills" }, (node.topics ?? []).slice(0, 18).map((t) => el("span", { class: "pill", text: t })))),
     sec(
-      "关联（" + neighbors.length + " 个）",
+      "关联（" + relatedCount + " 个）",
       [...byType.entries()].flatMap(([type, list]) => [
         el("div", { class: "note", text: (EDGE_STYLES[type]?.label ?? type) + " · " + list.length + " 个" }),
         ...list.slice(0, 14).map((nb) => {
@@ -340,9 +370,19 @@ export function renderInspector(root, prepared, state, actions, view = {}) {
           return el("div", { class: "neigh", on: { click: () => actions.selectRepo(nb.id) } }, [
             el("span", { class: "dot", style: { background: colorOfTag(other?.primaryTag) } }),
             el("span", { class: "nm", text: nb.id }),
-            el("span", { class: "w", text: nb.via?.length ? "共同主题：" + nb.via.slice(0, 2).join("、") : "权重 ×" + nb.weight }),
+            el("span", {
+              class: "w",
+              text:
+                type === "owner"
+                  ? "同一作者：" + node.owner
+                  : nb.via?.length
+                    ? "共同主题：" + nb.via.slice(0, 2).join("、")
+                    : "权重 ×" + nb.weight,
+            }),
           ]);
         }),
+        // 同作者动辄几十上百个，列全了右栏就没法看；如实说明只列了前 14 个
+        list.length > 14 ? el("div", { class: "note", text: "以上按星标取前 14 个，共 " + list.length + " 个" }) : null,
       ]),
     ),
   );
@@ -398,7 +438,10 @@ export function renderLinkLegend(root, prepared, state, actions, view = {}) {
     ]);
 
   const linked = (type) => {
-    if (!id || !prepared.adjacency) return 0;
+    if (!id) return 0;
+    // 同作者以 owner 索引计数：数据层对大作者只存星形拓扑，数存边会少一大截（v0.4.2）
+    if (type === "owner") return ownerSiblings(prepared, id).length;
+    if (!prepared.adjacency) return 0;
     const list = prepared.adjacency.get(id);
     if (!list) return 0;
     let n = 0;

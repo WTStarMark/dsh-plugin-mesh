@@ -127,3 +127,28 @@ def prune_snapshots(directory: Path, keep: int) -> list[str]:
 
 def write_last_crawl(payload: dict, path: Path) -> int:
     return _write_json(path, payload)
+
+
+def load_blacklist(path: Path) -> dict:
+    """读噪声作者黑名单。文件不存在/损坏都当空表处理，绝不因此中断采集。"""
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    owners = data.get("owners") if isinstance(data, dict) else None
+    if not isinstance(owners, dict):
+        return {}
+    return {str(owner): info for owner, info in owners.items() if owner}
+
+
+def write_blacklist(owners: dict, path: Path, *, updated_at: str | None = None) -> int:
+    """写黑名单。人工删掉某个 owner 再跑一轮即可解除拉黑。"""
+    payload = {
+        "updatedAt": updated_at or utcnow(),
+        "count": len(owners),
+        "note": "噪声作者（同一作者被收录超过阈值个仓库、且每个仓库星标都低于阈值）。删除条目即可解除拉黑。",
+        "owners": dict(sorted(owners.items())),
+    }
+    return _write_json(path, payload)

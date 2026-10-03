@@ -10,6 +10,7 @@
 
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { stripNoiseOwners } from "../src/mesh-data.js";
 
 const DATA_TTL_MS = 5 * 60 * 1000;
 /** 卡片默认去处：线上站点（可用 SITE_URL 环境变量或 ?link= 覆盖） */
@@ -164,7 +165,8 @@ export function createApi({ root }) {
     const now = Date.now();
     if (cache.mesh && now - cache.at < DATA_TTL_MS) return cache.mesh;
     const raw = await readFile(join(root, "data", "mesh.json"), "utf8");
-    const mesh = JSON.parse(raw);
+    // 噪声黑名单兜底：旧快照里若还留着垃圾账号，接口也不该再吐出来（无噪声时是空操作）
+    const mesh = stripNoiseOwners(JSON.parse(raw));
     cache = { at: now, mesh };
     return mesh;
   }
@@ -190,6 +192,8 @@ export function createApi({ root }) {
       pushedAt: n.pushedAt ?? null,
       archived: !!n.archived,
       review: !!n.review,
+      verdict: n.verdict ?? (n.review ? "manual" : "related"),
+      reason: n.reason ?? null,
       url: "https://github.com/" + n.id,
     };
   }
@@ -280,11 +284,13 @@ export function createApi({ root }) {
   async function one(owner, name) {
     const mesh = await load();
     const id = owner + "/" + name;
-    const node = (mesh.nodes ?? []).find((n) => n.id.toLowerCase() === id.toLowerCase());
+    const nodes = mesh.nodes ?? [];
+    const node = nodes.find((n) => n.id.toLowerCase() === id.toLowerCase());
     if (!node) return null;
-    const byId = new Map((mesh.nodes ?? []).map((n) => [n.id, n]));
+    const byId = new Map(nodes.map((n) => [n.id, n]));
     const links = [];
     const counts = {};
+    const seen = new Set();
     for (const e of mesh.edges ?? []) {
       if (e.source !== node.id && e.target !== node.id) continue;
       const other = e.source === node.id ? e.target : e.source;
@@ -297,6 +303,28 @@ export function createApi({ root }) {
         url: "https://github.com/" + other,
       });
       counts[e.type] = (counts[e.type] ?? 0) + 1;
+      seen.add(e.type + "|" + other);
+    }
+    // 同作者：数据层为了控制载荷，对成员超过阈值的作者只写"星形拓扑"（枢纽连所有人），
+    // 直接返回存边会让其余成员的同作者连线只剩一条。这里按 owner 补齐完整关系，
+    // 与前端画布（ownerSiblings）保持同一套语义。
+    if (node.owner) {
+      const siblings = nodes
+        .filter((n) => n.owner === node.owner && n.id !== node.id)
+        .sort((a, b) => (b.stars ?? 0) - (a.stars ?? 0));
+      for (const s of siblings) {
+        const key = "owner|" + s.id;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        links.push({
+          type: "owner",
+          id: s.id,
+          stars: s.stars ?? 0,
+          categoryLabel: s.categoryLabel ?? null,
+          url: "https://github.com/" + s.id,
+        });
+        counts.owner = (counts.owner ?? 0) + 1;
+      }
     }
     return { repo: publicNode(node), links, linkCounts: counts };
   }

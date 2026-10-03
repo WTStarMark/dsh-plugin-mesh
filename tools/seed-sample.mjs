@@ -11,6 +11,8 @@
  */
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { applyCategories, DEFAULT_OPTIONS } from "./categories.mjs";
+// 相关性判定与采集器同一套口径（三档结论：related / noise / manual）
+import { analyzeRelevance } from "./relevance.mjs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -71,18 +73,6 @@ function pickRepo(it) {
   };
 }
 
-/** 朴素相关度启发式：正式设计待后端阶段重做，这里只用于原型演示「疑似噪声」概念 */
-function relevanceScore(r) {
-  let s = 0;
-  if (/(^|[^a-z])dsh([^a-z]|$)|dsh-|dsh_/i.test(r.name)) s += 3;
-  if (/dsh|deepseek[- ]?harness|cordis/i.test(r.description)) s += 2;
-  if (r.topics.includes("deepseek-harness")) s += 1;
-  const family = r.topics.filter((t) => WHITELIST.includes(t)).length;
-  if (family >= 2) s += 1;
-  if (/cordis/i.test(r.description) || r.topics.includes("cordis")) s += 1;
-  return s; // 0..8
-}
-
 function buildMesh(rawRepos, queryMeta) {
   const nodes = [];
   const seen = new Map();
@@ -96,14 +86,17 @@ function buildMesh(rawRepos, queryMeta) {
       );
       continue;
     }
-    const rel = relevanceScore(r);
+    const verdict = analyzeRelevance({ ...r, matchedTags });
+    const rel = verdict.relevance;
     const node = {
       ...r,
       matchedTags,
       primaryTag: WHITELIST.find((t) => matchedTags.includes(t)) ?? "dsh",
       relevance: rel,
       noise: clamp(1 - rel / 5, 0, 1),
-      review: rel <= 2,
+      review: verdict.review,
+      verdict: verdict.verdict,
+      reason: verdict.reason,
     };
     seen.set(r.id, node);
     nodes.push(node);

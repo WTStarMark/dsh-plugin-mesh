@@ -5,6 +5,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApi, categoryColor, xmlEscape, validNamePart, apiIndex, MAX_LIMIT, textWidth, wrapText, DEFAULT_SITE } from "../tools/api.mjs";
@@ -57,6 +58,27 @@ test("单仓库详情：连线两端都指向它，计数与列表一致", async
   const counts = Object.values(one.linkCounts).reduce((a, b) => a + b, 0);
   assert.equal(counts, one.links.length, "连线计数应与列表长度一致");
   assert.ok(one.links.every((l) => l.id !== id), "不应出现自环");
+});
+
+test("v0.4.2 单仓库详情：同作者连线是完整关系（不受数据层星形拓扑省略影响）", async () => {
+  const mesh = JSON.parse(await readFile(resolve(ROOT, "data/mesh.json"), "utf8"));
+  const byOwner = new Map();
+  for (const n of mesh.nodes ?? []) {
+    if (!byOwner.has(n.owner)) byOwner.set(n.owner, []);
+    byOwner.get(n.owner).push(n);
+  }
+  // 成员超过 8 的作者：数据层只写星形拓扑，正是"有的连得全、有的只连一个"的那批
+  const [owner, list] = [...byOwner.entries()].filter(([, g]) => g.length > 8).sort((a, b) => b[1].length - a[1].length)[0] ?? [];
+  assert.ok(owner, "样本里应有成员超过 8 的作者");
+
+  const target = list[0];
+  const one = await api.one(owner, target.name);
+  assert.ok(one, "应能查到 " + target.id);
+  const ownerLinks = one.links.filter((l) => l.type === "owner");
+  assert.equal(ownerLinks.length, list.length - 1, owner + " 的同作者连线应为 " + (list.length - 1) + " 条");
+  assert.equal(one.linkCounts.owner, ownerLinks.length, "同作者计数应与列表一致");
+  assert.ok(ownerLinks.every((l) => l.id !== target.id), "同作者连线不应指向自己");
+  assert.ok(ownerLinks.every((l) => l.id.startsWith(owner + "/")), "同作者连线必须同属一个作者");
 });
 
 test("卡片：合法 SVG、含关键信息、转义正确", async () => {
@@ -149,8 +171,8 @@ test("颜色与名称校验：稳定、可预期", () => {
 });
 
 test("API 自描述：端点清单完整", () => {
-  const index = apiIndex("0.4.1");
-  assert.equal(index.version, "0.4.1");
+  const index = apiIndex("0.4.2");
+  assert.equal(index.version, "0.4.2");
   const paths = index.endpoints.map((e) => e.path).join(" ");
   for (const need of ["/api/health", "/api/categories", "/api/repos", "/api/card", "/card/"]) {
     assert.ok(paths.includes(need), "清单应包含 " + need);

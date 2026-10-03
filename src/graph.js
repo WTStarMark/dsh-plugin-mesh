@@ -5,7 +5,7 @@
  * 球体在足够大时显示作者头像（并发受限、按 URL 去重、失败不重试）。
  * 画法刻意保持克制：细线、低对比、柔和光点与柔和扇区光。
  */
-import { colorOfTag, groupColor, EDGE_STYLES } from "./mesh-data.js";
+import { colorOfTag, groupColor, EDGE_STYLES, ownerSiblings } from "./mesh-data.js";
 import { themeOf } from "./palettes.js";
 import { createAvatarStore } from "./avatars.js";
 
@@ -34,6 +34,13 @@ export function createGraphView(canvas, hooks = {}) {
   let layout = null;
   let prepared = null;
   let highlight = null;
+  let searchHits = null; // 搜索命中集合：从圆心向它们画放射线
+  // 同作者兄弟缓存：一帧可能要画上千条线，别每帧都重新过滤一遍 owner 索引
+  let siblingCache = { id: null, ids: null };
+  function siblingsOf(id) {
+    if (siblingCache.id !== id) siblingCache = { id, ids: ownerSiblings(prepared, id) };
+    return siblingCache.ids;
+  }
   let selectedId = null;
   let hoverId = null;
   let showLabels = true;
@@ -195,10 +202,10 @@ export function createGraphView(canvas, hooks = {}) {
     });
   }
 
-  /** 一条边：向"远离圆心"的方向鼓起的二次曲线，避免所有线穿过中心 */
-  function edgePath(l, curv) {
-    const [x1, y1] = toScreen(layout.x[l.a], layout.y[l.a]);
-    const [x2, y2] = toScreen(layout.x[l.b], layout.y[l.b]);
+  /** 一条边：向"远离圆心"的方向鼓起的二次曲线，避免所有线穿过中心（只建路径，不描边） */
+  function edgePath(a, b, curv) {
+    const [x1, y1] = toScreen(layout.x[a], layout.y[a]);
+    const [x2, y2] = toScreen(layout.x[b], layout.y[b]);
     const mx = (x1 + x2) / 2;
     const my = (y1 + y2) / 2;
     const len = Math.hypot(x2 - x1, y2 - y1) || 1;
@@ -220,32 +227,139 @@ export function createGraphView(canvas, hooks = {}) {
   }
 
   function drawEdges() {
-    if (!layout || links.length === 0) return;
-    // v0.4.1：连线不再常驻。只有点选某个仓库时，才画它自己的两类连线——
+    if (!layout) return;
+    // 连线不再常驻：只有点选某个仓库时，才画它自己的两类连线——
     // 同作者（主题主色 · 实线）与主题共现（琥珀色 · 虚线），颜色区分开。
     if (selectedId == null) return;
     const center = layout.index.get(selectedId);
     if (center === undefined) return;
     // 注意：拖拽/缩放中也照样画选中节点的连线（数量很少，而且正是用户要看的东西）
 
-    const ownerColor = p().accent;
-    const topicColor = EDGE_STYLES.topic?.color ?? "#e08a00";
-    for (const l of links) {
-      if (l.a !== center && l.b !== center) continue;
-      const isOwner = l.type === "owner";
-      const isTopic = l.type === "topic";
-      if (!isOwner && !isTopic) continue; // 其它类型不再绘制
-      const other = l.a === center ? l.b : l.a;
-      if (!layout.nodes[other]) continue;
+    // 同作者（v0.4.2）：以 owner 索引为准，不再只看数据里存的边——
+    // 大作者在数据层是星形拓扑，只看存边会出现"有的能连到其余全部、有的只连到一个"。
+    // 成批建路径后一次描边：同作者可能几十上百个，逐条 stroke 会明显掉帧。
+    const ownerTargets = [];
+    for (const sibling of siblingsOf(selectedId)) {
+      const i = layout.index.get(sibling);
+      if (i !== undefined && i !== center) ownerTargets.push(i);
+    }
+    if (ownerTargets.length > 0) {
       ctx.save();
-      ctx.setLineDash(isOwner ? [] : [5, 4]);
-      ctx.lineWidth = isOwner ? 1.7 : 1.2;
+      ctx.setLineDash([]);
+      ctx.lineWidth = 1.7;
+      ctx.strokeStyle = hexA(p().accent, 0.85);
       ctx.beginPath();
-      ctx.strokeStyle = hexA(isOwner ? ownerColor : topicColor, isOwner ? 0.85 : 0.55);
-      edgePath(l, isOwner ? 0.16 : 0.22);
+      for (const i of ownerTargets) edgePath(center, i, 0.16);
       ctx.stroke();
       ctx.restore();
     }
+
+    // 主题共现：稀有主题共享，仍是数据里的存边
+    let topicOn = false;
+    ctx.save();
+    ctx.setLineDash([5, 4]);
+    ctx.lineWidth = 1.2;
+    ctx.strokeStyle = hexA(EDGE_STYLES.topic?.color ?? "#e08a00", 0.55);
+    ctx.beginPath();
+    for (const l of links) {
+      if (l.type !== "topic") continue;
+      if (l.a !== center && l.b !== center) continue;
+      const other = l.a === center ? l.b : l.a;
+      if (other === center || !layout.nodes[other]) continue;
+      edgePath(center, other, 0.22);
+      topicOn = true;
+    }
+    if (topicOn) ctx.stroke();
+    ctx.restore();
+  }
+
+  /**
+   * 搜索指向（v0.4.2）：从圆心打出一道光，照向每一个命中的仓库球。
+   * 与"点选后的关联连线"是两回事：这道光只说明「搜索命中了它」，不表示两者有关系。
+   * 画在扇区光之上、节点之下，命中球本身由 highlight 负责压暗其余节点来凸显。
+   *
+   * 三道叠加（都成批描边，几千个命中也只有 3 次 stroke）：
+   *   1. 外层光晕：粗、半透明、带 shadowBlur —— 低倍率下也能看见
+   *   2. 内层光芯：细一些、更亮 —— 近看像一道光束
+   *   3. 落点光斑：命中球上的一圈光，说明光"打"在了它身上
+   * 光束用【一个以圆心为中心的径向渐变】着色：靠近圆心处淡、越接近目标越亮，
+   * 一个渐变对象服务所有光束，不必逐个建渐变（那会拖垮帧率）。
+   */
+  function drawSearchRays() {
+    if (!layout || !searchHits || searchHits.size === 0) return;
+    const hub = layout.center && layout.center.index >= 0 ? layout.center.index : -1;
+    const [cx, cy] = hub >= 0 ? toScreen(layout.x[hub], layout.y[hub]) : toScreen(0, 0);
+
+    const targets = [];
+    let reach = 1;
+    for (const id of searchHits) {
+      const i = layout.index.get(id);
+      if (i === undefined || i === hub) continue;
+      const [sx, sy] = toScreen(layout.x[i], layout.y[i]);
+      // 屏外的命中不画：既看不见，也白白吃描边开销
+      if (sx < -24 || sy < -24 || sx > cssW + 24 || sy > cssH + 24) continue;
+      const len = Math.hypot(sx - cx, sy - cy);
+      if (len < 6) continue;
+      const r = Math.max(2, layout.radius[i] * view.k);
+      reach = Math.max(reach, len);
+      targets.push({ sx, sy, r, ux: (sx - cx) / len, uy: (sy - cy) / len, len });
+    }
+    if (targets.length === 0) return;
+
+    const accent = p().accent;
+    const many = targets.length > 220;
+    const mid = targets.length > 60;
+    // 光束宽度：按"屏幕上恒定偏粗"来定，低倍率（缩小看全景）时反而更宽，
+    // 否则 1px 细线在 k≈0.3 的全景下等于看不见。
+    const width = Math.min(14, Math.max(2.2, 3.4 / Math.max(view.k, 0.12)));
+
+    // 一个径向渐变服务所有光束：圆心处淡、命中球方向亮
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(1, reach));
+    grad.addColorStop(0, hexA(accent, many ? 0.25 : 0.4));
+    grad.addColorStop(0.45, hexA(accent, many ? 0.5 : 0.8));
+    grad.addColorStop(1, hexA(accent, 1));
+
+    const beam = () => {
+      ctx.beginPath();
+      for (const t of targets) {
+        const stop = Math.max(0, (t.len - Math.max(2, t.r + 2)) / t.len); // 停在球边上，不插进球里
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(cx + (t.sx - cx) * stop, cy + (t.sy - cy) * stop);
+      }
+    };
+
+    ctx.save();
+    ctx.setLineDash([]);
+    ctx.lineCap = "round";
+    ctx.strokeStyle = grad;
+
+    // 1) 外层光晕
+    ctx.globalAlpha = many ? 0.22 : mid ? 0.34 : 0.5;
+    ctx.lineWidth = width * (many ? 1.6 : 2.3);
+    if (!many) {
+      ctx.shadowColor = hexA(accent, 0.55);
+      ctx.shadowBlur = 12 + width * 1.6;
+    }
+    beam();
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // 2) 内层光芯
+    ctx.globalAlpha = many ? 0.5 : 0.8;
+    ctx.lineWidth = Math.max(1.1, width * 0.55);
+    beam();
+    ctx.stroke();
+
+    // 3) 落点光斑：光打在命中球上亮一圈（命中太多就省略，免得糊成一片）
+    ctx.globalAlpha = many ? 0.3 : 0.55;
+    ctx.fillStyle = hexA(accent, 0.5);
+    ctx.beginPath();
+    for (const t of targets) {
+      ctx.moveTo(t.sx + t.r + width * 0.9, t.sy);
+      ctx.arc(t.sx, t.sy, t.r + width * 0.9, 0, Math.PI * 2);
+    }
+    ctx.fill();
+    ctx.restore();
   }
 
   /** 节点：柔和光点（填充核 + 淡外环）；悬停/选中用柔光而非硬框 */
@@ -293,7 +407,7 @@ export function createGraphView(canvas, hooks = {}) {
       ctx.lineWidth = glow ? 1.6 : 1.1;
       ctx.strokeStyle = hexA(color, active ? (glow ? 0.95 : inFocus ? 0.62 : 0.16) : 0.1);
       ctx.stroke();
-      if (node.review && active && r > 2.6) {
+      if ((node.review || node.verdict === "noise") && active && r > 2.6) {
         ctx.beginPath();
         ctx.arc(sx, sy, r + 4.5, 0, Math.PI * 2);
         ctx.setLineDash([2, 3]);
@@ -403,6 +517,8 @@ export function createGraphView(canvas, hooks = {}) {
       if (a.id === focus) set.add(b.id);
       else if (b.id === focus) set.add(a.id);
     }
+    // 同作者同样以 owner 索引为准：存边对大作者只是星形拓扑，会漏掉大部分兄弟
+    if (edgeTypes.has("owner")) for (const sibling of siblingsOf(focus)) set.add(sibling);
     // 该仓库在已开启的连线里没有任何关联时，不做全场压暗（否则会出现"只剩它一个亮"的突兀效果）
     return set.size > 1 ? set : null;
   }
@@ -413,6 +529,7 @@ export function createGraphView(canvas, hooks = {}) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     drawBackdrop();
     drawSectors();
+    drawSearchRays();
     drawEdges();
     drawNodes();
     drawHub();
@@ -607,12 +724,18 @@ export function createGraphView(canvas, hooks = {}) {
     setData(nextPrepared, nextLayout) {
       prepared = nextPrepared;
       layout = nextLayout;
+      siblingCache = { id: null, ids: null }; // 数据换了，兄弟缓存必须作废
       resize();
       fit();
       wake();
     },
     setHighlight(set) {
       highlight = set;
+      invalidate();
+    },
+    /** 搜索命中集合：非空时从圆心画放射线指向每一个命中的仓库球 */
+    setSearchHits(set) {
+      searchHits = set && set.size ? set : null;
       invalidate();
     },
     setGroupColors(map) {

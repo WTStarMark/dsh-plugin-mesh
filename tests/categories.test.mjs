@@ -57,6 +57,19 @@ test("长尾合并：小类并入其他并记录原因", () => {
   assert.equal(nodes[0].category, "skin");
 });
 
+test("公约协议：样本再少也不会被并进「其他」（keepIds）", () => {
+  const nodes = [];
+  for (let i = 0; i < 20; i++) nodes.push({ id: "a/" + i, name: "dsh-skin-" + i, description: "皮肤", topics: [] });
+  nodes.push({ id: "s/1", name: "dsh-std", description: "DSH 插件互操作元协议", topics: [] });
+  nodes.push({ id: "s/2", name: "dsh-plugin-standard", description: "Open specification for plugins", topics: [] });
+  const stats = applyCategories(nodes, DEFAULT_OPTIONS);
+  const spec = stats.counts.find((c) => c.id === "spec");
+  assert.ok(spec, "公约协议应独立成扇区，实际：" + JSON.stringify(stats.counts.map((c) => c.id)));
+  assert.equal(spec.count, 2);
+  assert.equal(stats.merged.find((m) => m.id === "spec"), undefined, "不该被当成小类并掉");
+  assert.equal(nodes.filter((n) => n.category === "spec").length, 2);
+});
+
 test("真实样本：归类率与分类精度都达标", () => {
   const copy = mesh.nodes.map((n) => ({ ...n }));
   const stats = applyCategories(copy, DEFAULT_OPTIONS);
@@ -65,7 +78,10 @@ test("真实样本：归类率与分类精度都达标", () => {
   // 精度优先：新规则刻意收紧，宁可把模糊的留给「其他」，也不硬塞进扇区。
   // 所以这里的下限是 78%，真正的质量保证靠下面的精度断言。
   assert.ok(rate >= 0.78, "归类率应不低于 78%，实际 " + (rate * 100).toFixed(1) + "%");
-  assert.ok(stats.counts.length >= 8 && stats.counts.length <= 20, "扇区数应在 8~20 之间（19 类 + 其他），实际 " + stats.counts.length);
+  assert.ok(
+    stats.counts.length >= 8 && stats.counts.length <= DEFAULT_OPTIONS.maxSectors + 1,
+    "扇区数应在 8~" + (DEFAULT_OPTIONS.maxSectors + 1) + " 之间（上限 + 其他），实际 " + stats.counts.length,
+  );
   assert.equal(stats.counts.reduce((s, c) => s + c.count, 0), stats.total);
 
   // 精度①：桌面客户端扇区里不允许出现"客户端插件"
