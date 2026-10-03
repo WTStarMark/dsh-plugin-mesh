@@ -6,7 +6,9 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import { classifyNode, applyCategories, CATEGORY_RULES, SUBCATEGORY_RULES, DEFAULT_OPTIONS, WHITELIST_TAGS } from "../tools/categories.mjs";
+import { classifyNode, applyCategories, CATEGORY_RULES, SUBCATEGORY_RULES, DEFAULT_OPTIONS, WHITELIST_TAGS, nonPluginReason } from "../tools/categories.mjs";
+// 策展认定的生态基座（tools/ecosystem.json）：管线会把它们直接归入协议基座
+import ecosystem from "../tools/ecosystem.json" with { type: "json" };
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const mesh = JSON.parse(await readFile(resolve(ROOT, "data/mesh.json"), "utf8"));
@@ -57,6 +59,70 @@ test("长尾合并：小类并入其他并记录原因", () => {
   assert.equal(nodes[0].category, "skin");
 });
 
+test("协议基座：基座自述（底座/框架紧邻生态词）强命中，直接胜出", () => {
+  const rule = CATEGORY_RULES.find((r) => r.id === "spec");
+  assert.equal(rule.label, "协议基座", "分类已更名为「协议基座」");
+  // 侧边栏底座：正文同时有 sidebar/侧边栏，但"底座"自述应当直接胜出
+  const sidebar = classifyNode({
+    name: "DSH-better-sidebar",
+    description: "开放的侧边栏底座，支持三方拓展注册新侧边栏页面。Open sidebar foundation, supports third-party extensions",
+    topics: ["dsh-plugin", "sidebar"],
+  });
+  assert.equal(sidebar.id, "spec");
+  assert.equal(sidebar.strong, true, "应标记为强命中");
+  // 皮肤框架：正文里"皮肤"分值更高，但"皮肤框架"这个自述要能压过去
+  const skin = classifyNode({ name: "dsh-myskin", description: "DSH 通用皮肤框架：可视化自定义 + 实时预览", topics: ["dsh-plugin"] });
+  assert.equal(skin.id, "spec");
+  assert.equal(skin.strong, true);
+  // 反例：只说 framework、没有生态语境的，不许被扫进来
+  assert.notEqual(classifyNode({ name: "web-framework", description: "A general purpose framework for building websites", topics: [] }).id, "spec");
+  // 反例：跨标点的巧合不算相邻（"插件：10 条内置思维框架"）
+  assert.notEqual(classifyNode({ name: "preset-prompts", description: "插件：10 条内置思维框架", topics: [] }).id, "spec");
+});
+
+test("非插件语境排除：DSH 是别的意思的仓库不进索引", () => {
+  const deepHash = {
+    name: "some-deep-hash-baseline",
+    description: "Implementation of Some Deep Hash Algorithms, Including DPSH、DSH、DHN",
+    topics: ["deep-hashing", "pytorch", "dsh"],
+  };
+  assert.match(String(nonPluginReason(deepHash)), /深度哈希/);
+  assert.equal(nonPluginReason({ name: "dsh-skin", description: "DSH 皮肤插件", topics: ["dsh-plugin"] }), null);
+  // 只按 topic 也能认出来
+  assert.ok(nonPluginReason({ name: "x", description: "y", topics: ["deep-hashing"] }));
+});
+
+test("桌宠：鲸鱼娘/小鲸鱼/看板娘这类「角色陪伴」能压过界面面板", () => {
+  const widget = classifyNode({
+    name: "DeepSeek-Balance-Whale-Widget",
+    description: "DeepSeek Harness（DSH）一只住在 DSH 界面右下角的小鲸鱼娘，帮你盯着 DeepSeek 账户余额",
+    topics: ["dsh-plugin", "floating-widget"],
+  });
+  assert.equal(widget.id, "pet", "应判为桌宠娱乐：" + JSON.stringify(widget));
+  // 反例：桌面客户端顺带提一句桌宠，仍然应该是桌面客户端（客户端证据更足）
+  const client = classifyNode({
+    name: "DSH-Desktop",
+    description: "🐬 DeepSeek Harness 桌面全栈工作台：内置小鲸鱼姬桌宠、多源 MCP 调试沙箱、持久化终端",
+    topics: ["dsh-desktop", "deepseek-harness-desktop", "electron"],
+  });
+  assert.equal(client.id, "desktop", "客户端不该被桌宠词抢走：" + JSON.stringify(client));
+});
+
+test("策展基座：人工点名（baseIds）直接归入协议基座", () => {
+  const nodes = [];
+  for (let i = 0; i < 20; i++) nodes.push({ id: "a/" + i, name: "dsh-skin-" + i, description: "皮肤", topics: [] });
+  // 正文完全看不出"基座"（就像 TUI 基座只自称"官方首推插件"），靠策展认定
+  nodes.push({ id: "x/tui", name: "dsh-TUI", description: "DSH's officially top-recommended TUI plugin", topics: [] });
+  const stats = applyCategories(nodes, { ...DEFAULT_OPTIONS, baseIds: ["x/tui"] });
+  const tui = nodes.find((n) => n.id === "x/tui");
+  assert.equal(tui.category, "spec", "策展基座应归入协议基座，实际 " + tui.category);
+  assert.equal(tui.categoryCurated, true);
+  assert.ok(stats.counts.some((c) => c.id === "spec"), "协议基座扇区应存在");
+  // 不传 baseIds 时不受影响（规则优先，人工点名是可选的）
+  const again = applyCategories(nodes.map((n) => ({ ...n })), DEFAULT_OPTIONS);
+  assert.ok(again.counts.some((c) => c.id === "spec" || c.id === "tools" || c.id === "other"));
+});
+
 test("公约协议：样本再少也不会被并进「其他」（keepIds）", () => {
   const nodes = [];
   for (let i = 0; i < 20; i++) nodes.push({ id: "a/" + i, name: "dsh-skin-" + i, description: "皮肤", topics: [] });
@@ -84,20 +150,32 @@ test("真实样本：归类率与分类精度都达标", () => {
   );
   assert.equal(stats.counts.reduce((s, c) => s + c.count, 0), stats.total);
 
-  // 精度①：桌面客户端扇区里不允许出现"客户端插件"
+  // 精度①：桌面客户端扇区里不允许出现"客户端插件"。
+  // 判定要与规则一致：desktop 规则本身声明了 override —— 正文自述"本仓库是桌面客户端"的可以救回
+  // （例如名字里带 plugin 的"插件管理器客户端"，它自己就是一个 Electron 桌面客户端）。
   const clientPlugin = /(plugin|extension|skill|theme|skin|preset|插件|扩展|技能|皮肤|主题)/;
-  const badDesktop = copy.filter((n) => n.category === "desktop" && clientPlugin.test(String(n.name).toLowerCase()));
+  const selfClaimClient = /(桌面客户端|客户端应用|桌面应用|是一个?(桌面)?客户端|desktop\s+(app|client))/i;
+  const badDesktop = copy.filter(
+    (n) =>
+      n.category === "desktop" &&
+      clientPlugin.test(String(n.name).toLowerCase()) &&
+      !selfClaimClient.test(String(n.description ?? "")),
+  );
   assert.equal(badDesktop.length, 0, "桌面客户端扇区混入了客户端插件：" + badDesktop.slice(0, 3).map((n) => n.id).join(", "));
 
   // 精度②：插件市场扇区里每个仓库都必须命中「汇总类」词（查分类器自己的命中记录）
-  const aggregationHits = new Set(["market", "marketplace", "registry", "store", "awesome", "directory", "catalog", "hub", "市场", "商店", "集市", "商城", "索引", "合集", "汇总", "收录", "导航"]);
+  // 这份白名单要与 market 规则里的"汇总类"词表保持一致（规则新增词时这里也要加）。
+  // collection 是权重 1 的弱词，但 gate 要求它必须以 "collection of" 出现在描述里，
+  // 所以 "A collection of plugins for deepseek-harness" 这类合集仓库是正当成员。
+  const aggregationHits = new Set(["market", "marketplace", "registry", "store", "awesome", "directory", "catalog", "collection", "hub", "市场", "商店", "集市", "商城", "索引", "合集", "汇总", "收录", "导航"]);
   const badMarket = copy.filter((n) => n.category === "market" && !(n.categoryHits ?? []).some((h) => aggregationHits.has(h)));
   assert.equal(badMarket.length, 0, "插件市场扇区混入了非汇总仓库：" + badMarket.slice(0, 3).map((n) => n.id).join(", "));
 });
 
 test("真实样本：分类结果与 mesh.json 一致（可复跑）", () => {
   const copy = mesh.nodes.map((n) => ({ ...n }));
-  applyCategories(copy, DEFAULT_OPTIONS);
+  // 与管线同口径：规则 + 策展基座清单
+  applyCategories(copy, { ...DEFAULT_OPTIONS, baseIds: ecosystem.bases.map((b) => b.id) });
   for (const node of copy) {
     const original = mesh.nodes.find((n) => n.id === node.id);
     assert.equal(node.category, original.category, node.id + " 的分类与已发布数据不一致");

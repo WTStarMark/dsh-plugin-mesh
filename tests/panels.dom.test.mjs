@@ -84,6 +84,44 @@ test("renderRail：渲染统计、标签色块与聚类条", () => {
   assert.ok(flat.some((n) => n.tagName === "input" && n.attrs.type === "range"), "应有星标滑块");
 });
 
+test("左栏顺序（v0.4.3）：总览 → 功能扇区 → 筛选 → 其余", () => {
+  const root = new FakeNode("aside");
+  panels.renderRail(root, prepared, baseState(), actions);
+  const titles = root.children.filter((c) => c.className === "sec").map((c) => c.children[0].textContent);
+  assert.deepEqual(
+    titles.slice(0, 3),
+    ["总览", "功能扇区", "筛选"],
+    "左栏前三段必须是 总览 / 功能扇区 / 筛选，实际：" + titles.join(" → "),
+  );
+  // 其余照常：保持原来的相对顺序
+  assert.deepEqual(titles.slice(3), ["扇区划分依据", "捕获标签", ...(titles.includes("高频共享标签") ? ["高频共享标签"] : [])]);
+  // 单扇区放大时，第二段变成「细枝分类」，位置不变
+  const focused = new FakeNode("aside");
+  panels.renderRail(focused, prepared, baseState(), actions, { focusCategory: prepared.clusters[0].id, focusLabel: prepared.clusters[0].label, arms: [] });
+  const ftitles = focused.children.filter((c) => c.className === "sec").map((c) => c.children[0].textContent);
+  assert.equal(ftitles[0], "总览");
+  assert.equal(ftitles[1], "细枝分类");
+  assert.equal(ftitles[2], "筛选");
+});
+
+test("右栏顺序（v0.4.3）：图例 → 操作提示 → 其余；选中仓库后同样如此", () => {
+  const empty = new FakeNode("aside");
+  panels.renderInspector(empty, prepared, baseState(), actions, { linkCounts: { owner: 3, topic: 2, resonance: 1 } });
+  const emptyTitles = empty.children.filter((c) => c.className === "sec").map((c) => c.children[0].textContent);
+  assert.equal(emptyTitles[0], "图例", "右栏第一段应是图例，实际：" + emptyTitles.join(" → "));
+  assert.equal(emptyTitles[1], "操作提示", "右栏第二段应是操作提示，实际：" + emptyTitles.join(" → "));
+
+  const picked = prepared.nodes.find((n) => (prepared.adjacency.get(n.id) ?? []).length > 0);
+  const filled = new FakeNode("aside");
+  panels.renderInspector(filled, prepared, { ...baseState(), selectedId: picked.id }, actions, { linkCounts: { owner: 3, topic: 2, resonance: 1 } });
+  const titles = filled.children.map((c) => c.children[0]?.textContent);
+  assert.equal(titles[0], "图例");
+  assert.equal(titles[1], "操作提示");
+  // 第三段起是仓库档案（它的首个子节点是头像/名字所在的 d-head，没有 h3 标题）
+  assert.equal(filled.children[2].className, "sec", "第三段应是仓库档案小节");
+  assert.ok(titles.some((t) => /^关联（/.test(t ?? "")), "仓库档案之后应仍是命中标签/关联等小节，实际：" + titles.join(" → "));
+});
+
 test("面板里不允许出现 [object ...] 这类拼接事故", () => {
   const root = new FakeNode("aside");
   panels.renderRail(root, prepared, baseState(), actions);

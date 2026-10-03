@@ -15,6 +15,11 @@
     // 这类节点与它们的边不会出现在 nodes / edges 里；下面几个字段只是如实记账。
     "noiseBlacklist": { "spammer": { "repos": 1285, "maxStars": 0 } },
     "noiseBlacklistSize": 1, "noiseNodesRemoved": 1285, "noiseSkipped": 0,
+    // 非 DSH 语境排除（v0.4.3）：挂着 dsh 标签但 DSH 是别的意思（深度哈希…），不进索引
+    "excludedNotPlugin": { "owner/repo": "深度哈希类：这里的 DSH 是 Deep Supervised Hashing…" },
+    "excludedNotPluginCount": 1,
+    // 生态共鸣（v0.4.3）：人工策展的边数，清单在 tools/ecosystem.json
+    "resonanceEdges": 24, "ecosystemBases": ["omdsh-dev/DSH-better-sidebar"],
     "queries": [ { "id", "q", "page", "sort", "totalCount", "fetched", "rateRemaining" } ],
     "errors": []
   },
@@ -59,7 +64,7 @@
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `source` / `target` | string | 必须是已存在的 `node.id`，且不得自环 |
-| `type` | `"topic" \| "owner" \| "fork"` | 主题共现 / 同作者 / fork 血缘 |
+| `type` | `"topic" \| "owner" \| "fork" \| "resonance"` | 主题共现 / 同作者 / fork 血缘 / **生态共鸣**（人工策展：基座 → 长在它上面的插件，见 `tools/ecosystem.json`） |
 | `weight` | number > 0 | 共现次数或权重，决定线宽与粗细 |
 | `via` | string[] | 产生这条边的中间实体（主题名或作者名），用于"为什么它们连着" |
 

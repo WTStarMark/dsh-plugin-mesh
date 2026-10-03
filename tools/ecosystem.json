@@ -1,0 +1,822 @@
+{
+ "generatedAt": "2026-10-03T12:28:49.440Z",
+ "mesh": "data/mesh.json",
+ "bases": [
+  {
+   "id": "omdsh-dev/DSH-better-sidebar",
+   "label": "侧边栏底座",
+   "tag": "dsh-better-sidebar",
+   "enabled": true,
+   "verified": [
+    {
+     "id": "anywhere-labs/dsh-desktop",
+     "signals": [
+      "README搜索:dsh-better-sidebar"
+     ],
+     "readme": "omdsh-dev/dsh-better-sidebar",
+     "depend": true,
+     "stars": 29839
+    },
+    {
+     "id": "myYangyunfan/dsh_desktop",
+     "signals": [
+      "README搜索:dsh-better-sidebar"
+     ],
+     "readme": "omdsh-dev/dsh-better-sidebar",
+     "depend": true,
+     "stars": 686
+    },
+    {
+     "id": "vibeinging/dsh-desktop",
+     "signals": [
+      "README搜索:dsh-better-sidebar"
+     ],
+     "readme": "omdsh-dev/dsh-better-sidebar",
+     "depend": true,
+     "stars": 591
+    },
+    {
+     "id": "elysia395/dsh-wallpaper-engine",
+     "signals": [
+      "README搜索:dsh-better-sidebar"
+     ],
+     "readme": "dsh-better-sidebar",
+     "depend": true,
+     "stars": 517
+    },
+    {
+     "id": "flymysql/dsh-remote",
+     "signals": [
+      "README搜索:dsh-better-sidebar"
+     ],
+     "readme": "dsh-better-sidebar",
+     "depend": true,
+     "stars": 115
+    },
+    {
+     "id": "HuanLinOTO/dsh-plugin-better-sidebar-plugin-office",
+     "signals": [
+      "生态签:dsh-better-sidebar",
+      "README搜索:dsh-better-sidebar"
+     ],
+     "readme": "dsh-better-sidebar",
+     "depend": true,
+     "stars": 53
+    },
+    {
+     "id": "ChenRuoT/dsh-sidebar-qa",
+     "signals": [
+      "生态签:dsh-better-sidebar",
+      "名字/描述提及",
+      "README搜索:dsh-better-sidebar"
+     ],
+     "readme": "dsh-better-sidebar",
+     "depend": true,
+     "stars": 46
+    },
+    {
+     "id": "PolinniZhong/dsh-knit",
+     "signals": [
+      "生态签:dsh-better-sidebar"
+     ],
+     "readme": "dsh-better-sidebar",
+     "depend": true,
+     "stars": 38
+    },
+    {
+     "id": "WEP-56/DSH-Launcher",
+     "signals": [
+      "README搜索:dsh-better-sidebar"
+     ],
+     "readme": "omdsh-dev/dsh-better-sidebar",
+     "depend": true,
+     "stars": 33
+    },
+    {
+     "id": "Suiwan/whale-purse",
+     "signals": [
+      "README搜索:dsh-better-sidebar"
+     ],
+     "readme": "omdsh-dev/dsh-better-sidebar",
+     "depend": true,
+     "stars": 30
+    },
+    {
+     "id": "CanglongCl/dsh-web-review",
+     "signals": [
+      "README搜索:dsh-better-sidebar"
+     ],
+     "readme": "dsh-better-sidebar",
+     "depend": true,
+     "stars": 25
+    },
+    {
+     "id": "Iwctwbh/dsh-flowglass",
+     "signals": [
+      "生态签:dsh-better-sidebar",
+      "README搜索:dsh-better-sidebar"
+     ],
+     "readme": "dsh-better-sidebar",
+     "depend": true,
+     "stars": 23
+    },
+    {
+     "id": "fredalxin/dsh-solo-thinking",
+     "signals": [
+      "README搜索:dsh-better-sidebar"
+     ],
+     "readme": "omdsh-dev/dsh-better-sidebar",
+     "depend": true,
+     "stars": 23
+    },
+    {
+     "id": "chumingjun/dsh-harness-one",
+     "signals": [
+      "README搜索:dsh-better-sidebar"
+     ],
+     "readme": "omdsh-dev/dsh-better-sidebar",
+     "depend": true,
+     "stars": 22
+    },
+    {
+     "id": "fuhefei/dsh-sentinel",
+     "signals": [
+      "生态签:dsh-better-sidebar",
+      "README搜索:dsh-better-sidebar"
+     ],
+     "readme": "omdsh-dev/dsh-better-sidebar",
+     "depend": true,
+     "stars": 17
+    },
+    {
+     "id": "euanguo/dsh-studio",
+     "signals": [
+      "README搜索:dsh-better-sidebar"
+     ],
+     "readme": "omdsh-dev/dsh-better-sidebar",
+     "depend": true,
+     "stars": 12
+    },
+    {
+     "id": "lai-133/dsh-integration",
+     "signals": [
+      "名字/描述提及",
+      "README搜索:dsh-better-sidebar"
+     ],
+     "readme": "omdsh-dev/dsh-better-sidebar",
+     "depend": true,
+     "stars": 10
+    },
+    {
+     "id": "g-yixuan/dsh-sidenote",
+     "signals": [
+      "生态签:dsh-better-sidebar",
+      "README搜索:dsh-better-sidebar"
+     ],
+     "readme": "dsh-better-sidebar",
+     "depend": true,
+     "stars": 8
+    },
+    {
+     "id": "meyaomiao/dsh-server-deck",
+     "signals": [
+      "生态签:dsh-better-sidebar"
+     ],
+     "readme": "omdsh-dev/dsh-better-sidebar",
+     "depend": true,
+     "stars": 8
+    },
+    {
+     "id": "GULI-lab/DSH-element-source",
+     "signals": [
+      "生态签:dsh-better-sidebar",
+      "名字/描述提及",
+      "README搜索:dsh-better-sidebar"
+     ],
+     "readme": "omdsh-dev/dsh-better-sidebar",
+     "depend": true,
+     "stars": 7
+    },
+    {
+     "id": "mlosun/dsh-docs-panel",
+     "signals": [
+      "生态签:dsh-better-sidebar",
+      "README搜索:dsh-better-sidebar"
+     ],
+     "readme": "omdsh-dev/dsh-better-sidebar",
+     "depend": true,
+     "stars": 7
+    },
+    {
+     "id": "zengweicheng666/dsh-svn-tools",
+     "signals": [
+      "名字/描述提及",
+      "README搜索:dsh-better-sidebar"
+     ],
+     "readme": "omdsh-dev/dsh-better-sidebar",
+     "depend": true,
+     "stars": 5
+    },
+    {
+     "id": "1985899182/dsh-harness-chat-control",
+     "signals": [
+      "README搜索:dsh-better-sidebar"
+     ],
+     "readme": "dsh-better-sidebar",
+     "depend": true,
+     "stars": 5
+    },
+    {
+     "id": "meyaomiao/dsh-github-workbench",
+     "signals": [
+      "生态签:dsh-better-sidebar",
+      "README搜索:dsh-better-sidebar"
+     ],
+     "readme": "omdsh-dev/dsh-better-sidebar",
+     "depend": true,
+     "stars": 4
+    },
+    {
+     "id": "yh4922/dsh-workspace",
+     "signals": [
+      "README搜索:dsh-better-sidebar"
+     ],
+     "readme": "omdsh-dev/dsh-better-sidebar",
+     "depend": true,
+     "stars": 4
+    },
+    {
+     "id": "lnyuqian/dsh-skill-sidebar",
+     "signals": [
+      "生态签:dsh-better-sidebar"
+     ],
+     "readme": "dsh-better-sidebar",
+     "depend": true,
+     "stars": 3
+    },
+    {
+     "id": "Sunday2Mo/dsh-file-quote",
+     "signals": [
+      "生态签:dsh-better-sidebar",
+      "名字/描述提及",
+      "README搜索:dsh-better-sidebar"
+     ],
+     "readme": "omdsh-dev/dsh-better-sidebar",
+     "depend": true,
+     "stars": 2
+    },
+    {
+     "id": "Awoodwhale/dsh-agent-persona",
+     "signals": [
+      "生态签:dsh-better-sidebar"
+     ],
+     "readme": "dsh-better-sidebar",
+     "depend": true,
+     "stars": 2
+    },
+    {
+     "id": "momo20012002/dsh-hmos-emulator",
+     "signals": [
+      "生态签:dsh-better-sidebar"
+     ],
+     "readme": "omdsh-dev/dsh-better-sidebar",
+     "depend": true,
+     "stars": 2
+    },
+    {
+     "id": "Hoemr/dsh-better-overleaf",
+     "signals": [
+      "生态签:dsh-better-sidebar",
+      "README搜索:dsh-better-sidebar"
+     ],
+     "readme": "dsh-better-sidebar",
+     "depend": true,
+     "stars": 2
+    },
+    {
+     "id": "pick1e-morty/dsh-suggest-reply",
+     "signals": [
+      "生态签:dsh-better-sidebar",
+      "名字/描述提及"
+     ],
+     "readme": "omdsh-dev/dsh-better-sidebar",
+     "depend": true,
+     "stars": 1
+    },
+    {
+     "id": "Lukeknow0/dsh-markdown-link-preview",
+     "signals": [
+      "生态签:dsh-better-sidebar"
+     ],
+     "readme": "omdsh-dev/dsh-better-sidebar",
+     "depend": true,
+     "stars": 1
+    },
+    {
+     "id": "2017java/dsh-md-overlay",
+     "signals": [
+      "生态签:dsh-better-sidebar"
+     ],
+     "readme": "dsh-better-sidebar",
+     "depend": true,
+     "stars": 1
+    },
+    {
+     "id": "zhangkkkai/dsh-spec-panel",
+     "signals": [
+      "生态签:dsh-better-sidebar",
+      "名字/描述提及"
+     ],
+     "readme": "omdsh-dev/dsh-better-sidebar",
+     "depend": true,
+     "stars": 1
+    },
+    {
+     "id": "Khellendros97/dsh-launch",
+     "signals": [
+      "名字/描述提及"
+     ],
+     "readme": "dsh-better-sidebar",
+     "depend": true,
+     "stars": 1
+    },
+    {
+     "id": "AnakinCao/dsh-md-export",
+     "signals": [
+      "名字/描述提及"
+     ],
+     "readme": "dsh-better-sidebar",
+     "depend": true,
+     "stars": 1
+    },
+    {
+     "id": "Ghz114514/dsh-refpics",
+     "signals": [
+      "生态签:dsh-better-sidebar"
+     ],
+     "readme": "omdsh-dev/dsh-better-sidebar",
+     "depend": true,
+     "stars": 0
+    },
+    {
+     "id": "tianyagk/dsh-tradewatcher",
+     "signals": [
+      "生态签:dsh-better-sidebar"
+     ],
+     "readme": "dsh-better-sidebar",
+     "depend": true,
+     "stars": 0
+    },
+    {
+     "id": "2017java/dsh-md-viewer",
+     "signals": [
+      "生态签:dsh-better-sidebar",
+      "名字/描述提及",
+      "README搜索:dsh-better-sidebar"
+     ],
+     "readme": "omdsh-dev/dsh-better-sidebar",
+     "depend": true,
+     "stars": 0
+    },
+    {
+     "id": "YZDame/dsh-suhuang-scroll",
+     "signals": [
+      "生态签:dsh-better-sidebar"
+     ],
+     "readme": "omdsh-dev/dsh-better-sidebar",
+     "depend": true,
+     "stars": 0
+    },
+    {
+     "id": "jaikensai888/dsh-skillui",
+     "signals": [
+      "生态签:dsh-better-sidebar"
+     ],
+     "readme": "dsh-better-sidebar",
+     "depend": true,
+     "stars": 0
+    },
+    {
+     "id": "dong-victor/dsh-better-sidebar-terminal-plus",
+     "signals": [
+      "生态签:dsh-better-sidebar",
+      "名字/描述提及"
+     ],
+     "readme": "dsh-better-sidebar",
+     "depend": true,
+     "stars": 0
+    },
+    {
+     "id": "PaidaxingTuT/dsh-code-runner",
+     "signals": [
+      "名字/描述提及",
+      "README搜索:dsh-better-sidebar"
+     ],
+     "readme": "omdsh-dev/dsh-better-sidebar",
+     "depend": true,
+     "stars": 0
+    },
+    {
+     "id": "mastereal/dsh-sidebar-enhancement-search",
+     "signals": [
+      "名字/描述提及"
+     ],
+     "readme": "omdsh-dev/dsh-better-sidebar",
+     "depend": true,
+     "stars": 0
+    },
+    {
+     "id": "mastereal/dsh-sidebar-enhancement-folder",
+     "signals": [
+      "名字/描述提及"
+     ],
+     "readme": "omdsh-dev/dsh-better-sidebar",
+     "depend": true,
+     "stars": 0
+    },
+    {
+     "id": "zijun-T/dsh-sidebar-remote",
+     "signals": [
+      "名字/描述提及"
+     ],
+     "readme": "dsh-better-sidebar",
+     "depend": true,
+     "stars": 0
+    },
+    {
+     "id": "drscrewdriver/dsh-docx-sidebar",
+     "signals": [
+      "名字/描述提及"
+     ],
+     "readme": "omdsh-dev/dsh-better-sidebar",
+     "depend": true,
+     "stars": 0
+    },
+    {
+     "id": "drscrewdriver/dsh-opensheet-sidebar",
+     "signals": [
+      "名字/描述提及"
+     ],
+     "readme": "omdsh-dev/dsh-better-sidebar",
+     "depend": true,
+     "stars": 0
+    }
+   ]
+  },
+  {
+   "id": "ccch1mneyyy/dsh-TUI",
+   "label": "TUI 基座",
+   "tag": "dsh-tui-ecosystem",
+   "enabled": true,
+   "verified": [
+    {
+     "id": "LiPu-jpg/Openwrite",
+     "signals": [
+      "README搜索:dsh-tui"
+     ],
+     "readme": "ccch1mneyyy/dsh-tui",
+     "depend": true,
+     "stars": 773
+    },
+    {
+     "id": "corrinehu/dsh-workbuddy-connect",
+     "signals": [
+      "README搜索:dsh-tui"
+     ],
+     "readme": "@deepseek-harness-tui/dsh-tui",
+     "depend": true,
+     "stars": 274
+    },
+    {
+     "id": "NoNameLeGo/dsh-catppuccin-theme",
+     "signals": [
+      "README搜索:dsh-tui"
+     ],
+     "readme": "dsh-tui",
+     "depend": true,
+     "stars": 53
+    },
+    {
+     "id": "JunNanLYS/dsh-layered-memory",
+     "signals": [
+      "README搜索:dsh-tui"
+     ],
+     "readme": "ccch1mneyyy/dsh-tui",
+     "depend": true,
+     "stars": 18
+    },
+    {
+     "id": "baobaolaodie/dsh-tui-vscode",
+     "signals": [
+      "名字/描述提及",
+      "README搜索:dsh-tui"
+     ],
+     "readme": "ccch1mneyyy/dsh-tui",
+     "depend": true,
+     "stars": 14
+    },
+    {
+     "id": "masknull/dsh-workbuddy-connect",
+     "signals": [
+      "README搜索:dsh-tui"
+     ],
+     "readme": "@deepseek-harness-tui/dsh-tui",
+     "depend": true,
+     "stars": 11
+    },
+    {
+     "id": "chiro2001/dsh-oc",
+     "signals": [
+      "README搜索:dsh-tui"
+     ],
+     "readme": "@deepseek-harness-tui/dsh-tui",
+     "depend": true,
+     "stars": 7
+    },
+    {
+     "id": "T-Auto/dsh-dpx",
+     "signals": [
+      "README搜索:dsh-tui"
+     ],
+     "readme": "@deepseek-harness-tui/dsh-tui",
+     "depend": true,
+     "stars": 3
+    },
+    {
+     "id": "Nagi-ovo/dsh-music-tui",
+     "signals": [
+      "名字/描述提及",
+      "README搜索:dsh-tui",
+      "README搜索:dsh-tui-ecosystem"
+     ],
+     "readme": "ccch1mneyyy/dsh-tui",
+     "depend": true,
+     "stars": 2
+    },
+    {
+     "id": "ArcaneOrion/dsh-tui",
+     "signals": [
+      "名字/描述提及"
+     ],
+     "readme": "dsh-tui",
+     "depend": true,
+     "stars": 0
+    },
+    {
+     "id": "wlz6/dsh-ide-ipc",
+     "signals": [
+      "名字/描述提及"
+     ],
+     "readme": "dsh-tui",
+     "depend": true,
+     "stars": 0
+    },
+    {
+     "id": "0N3-0/dsh-tui-mcp-manager",
+     "signals": [
+      "名字/描述提及"
+     ],
+     "readme": "ccch1mneyyy/dsh-tui",
+     "depend": true,
+     "stars": 0
+    }
+   ]
+  },
+  {
+   "id": "T-Auto/dsh-std",
+   "label": "互操作元协议",
+   "tag": null,
+   "enabled": true,
+   "verified": [
+    {
+     "id": "ExplorerZYzhou/DSH-freeweb",
+     "signals": [
+      "README搜索:dsh-std"
+     ],
+     "readme": "dsh-std",
+     "depend": true,
+     "stars": 2
+    },
+    {
+     "id": "toujianjian/dsh-do",
+     "signals": [
+      "README搜索:dsh-std"
+     ],
+     "readme": "dsh-std",
+     "depend": true,
+     "stars": 2
+    },
+    {
+     "id": "liaowenqi123/dsh-meeting-coordinator",
+     "signals": [
+      "名字/描述提及",
+      "README搜索:dsh-std"
+     ],
+     "readme": "dsh-std",
+     "depend": true,
+     "stars": 1
+    },
+    {
+     "id": "yhPrime/dsh-theme-picker",
+     "signals": [
+      "README搜索:dsh-std"
+     ],
+     "readme": "dsh-std",
+     "depend": true,
+     "stars": 1
+    },
+    {
+     "id": "FEOH333/dsh-delegate",
+     "signals": [
+      "README搜索:dsh-std"
+     ],
+     "readme": "dsh-std",
+     "depend": true,
+     "stars": 1
+    },
+    {
+     "id": "lasdrder0705/dsh-pro-vision-std",
+     "signals": [
+      "名字/描述提及",
+      "README搜索:dsh-std"
+     ],
+     "readme": "dsh-std",
+     "depend": true,
+     "stars": 0
+    },
+    {
+     "id": "lasdrder0705/dsh-chat-zone-std",
+     "signals": [
+      "名字/描述提及",
+      "README搜索:dsh-std"
+     ],
+     "readme": "dsh-std",
+     "depend": true,
+     "stars": 0
+    },
+    {
+     "id": "yhPrime/dsh-github-installer",
+     "signals": [
+      "README搜索:dsh-std"
+     ],
+     "readme": "dsh-std",
+     "depend": true,
+     "stars": 0
+    },
+    {
+     "id": "fplj-fplj/dsh-ua-headers",
+     "signals": [
+      "README搜索:dsh-std"
+     ],
+     "readme": "dsh-std",
+     "depend": true,
+     "stars": 0
+    },
+    {
+     "id": "TheHeartFickle/dsh-session-manager",
+     "signals": [
+      "README搜索:dsh-std"
+     ],
+     "readme": "dsh-std",
+     "depend": true,
+     "stars": 0
+    },
+    {
+     "id": "yajiangandchenchen/dsh-sandbox-permissions-not-strictly-wider-justification-empty-fix",
+     "signals": [
+      "README搜索:dsh-std"
+     ],
+     "readme": "dsh-std",
+     "depend": true,
+     "stars": 0
+    },
+    {
+     "id": "S-AN-Shu/dsh-skill-manager",
+     "signals": [
+      "README搜索:dsh-std"
+     ],
+     "readme": "dsh-std",
+     "depend": true,
+     "stars": 0
+    },
+    {
+     "id": "neltharion11/dsh-luxar-embedded",
+     "signals": [
+      "README搜索:dsh-std"
+     ],
+     "readme": "dsh-std",
+     "depend": true,
+     "stars": 0
+    }
+   ]
+  },
+  {
+   "id": "T-Auto/dsh-ecosystem-spec",
+   "label": "生态共识规范",
+   "tag": null,
+   "enabled": true,
+   "verified": [
+    {
+     "id": "penglai-doll/LocalWhale",
+     "signals": [
+      "README搜索:dsh-ecosystem-spec"
+     ],
+     "readme": "t-auto/dsh-ecosystem-spec",
+     "depend": true,
+     "stars": 3
+    },
+    {
+     "id": "Whatsmore-nf/dsh-pdf-edit",
+     "signals": [
+      "README搜索:dsh-ecosystem-spec"
+     ],
+     "readme": "t-auto/dsh-ecosystem-spec",
+     "depend": true,
+     "stars": 3
+    },
+    {
+     "id": "ExplorerZYzhou/DSH-freeweb",
+     "signals": [
+      "README搜索:dsh-ecosystem-spec"
+     ],
+     "readme": "t-auto/dsh-ecosystem-spec",
+     "depend": true,
+     "stars": 2
+    },
+    {
+     "id": "fplj-fplj/dsh-ua-headers",
+     "signals": [
+      "名字/描述提及",
+      "README搜索:dsh-ecosystem-spec"
+     ],
+     "readme": "t-auto/dsh-ecosystem-spec",
+     "depend": true,
+     "stars": 0
+    },
+    {
+     "id": "heshuren371/dsh-music-player-tui",
+     "signals": [
+      "README搜索:dsh-ecosystem-spec"
+     ],
+     "readme": "t-auto/dsh-ecosystem-spec",
+     "depend": true,
+     "stars": 0
+    }
+   ]
+  },
+  {
+   "id": "WTStarMark/dsh-myskin",
+   "label": "皮肤框架",
+   "tag": null,
+   "enabled": false,
+   "verified": [
+    {
+     "id": "realMisakaMikoto/dsh-skin-studio",
+     "signals": [
+      "README搜索:dshskin"
+     ],
+     "readme": ".dshskin",
+     "depend": true,
+     "stars": 3
+    },
+    {
+     "id": "LeemanCheung/dsh-skin-studio",
+     "signals": [
+      "README搜索:dshskin"
+     ],
+     "readme": ".dshskin",
+     "depend": true,
+     "stars": 2
+    },
+    {
+     "id": "mysn777/dsh-skin-kit",
+     "signals": [
+      "README搜索:dshskin"
+     ],
+     "readme": ".dshskin",
+     "depend": true,
+     "stars": 2
+    },
+    {
+     "id": "LeemanCheung/dsh-vibe-pack",
+     "signals": [
+      "README搜索:dshskin"
+     ],
+     "readme": ".dshskin",
+     "depend": true,
+     "stars": 1
+    },
+    {
+     "id": "hardcandydemoralisation573/dsh-xiaoyao-skins",
+     "signals": [
+      "README搜索:dshskin"
+     ],
+     "readme": ".dshskin",
+     "depend": true,
+     "stars": 0
+    }
+   ]
+  }
+ ],
+ "note": "生态共鸣是人工确认的生态关系（基座 → 长在它上面的插件），不参与自动分类规则；判据见 tools/curate-ecosystem.mjs 顶部注释。"
+}

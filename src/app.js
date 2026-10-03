@@ -4,7 +4,7 @@
  * 状态变更路径永远是：改 state -> applyHighlight() -> 重绘 / 重渲染面板。
  * 过滤一律「淡化」而非「移除」，保证同一份数据在任意过滤下位置一致、可对比。
  */
-import { loadMeshBest, prepare, prepareCore, precomputedLayout, matches, formatStars, groupColor, starThreshold, ownerSiblings, stripNoiseOwners, isConfirmedNoise, EDGE_STYLES } from "./mesh-data.js";
+import { loadMeshBest, prepare, prepareCore, precomputedLayout, matches, formatStars, groupColor, starThreshold, ownerSiblings, stripNoiseOwners, isConfirmedNoise, EDGE_TYPE_BY_CODE, EDGE_STYLES } from "./mesh-data.js";
 import { createDetailStore } from "./details.js";
 import { createStore } from "./cache.js";
 import { startStats, formatCount } from "./stats.js";
@@ -196,6 +196,9 @@ function viewInfo() {
     neighbor: countByType(links, "neighbor"),
     owner: prepared.ownerPairs ?? countByType(links, "owner"),
     topic: countByType(links, "topic"),
+    resonance: prepared.edges
+      ? prepared.edges.filter((e) => (Array.isArray(e) ? EDGE_TYPE_BY_CODE[e[2]] === "resonance" : e.type === "resonance")).length
+      : countByType(links, "resonance"),
   };
   const arms = (layout?.arms ?? []).map((arm) => ({ id: arm.id, label: arm.label, count: arm.count }));
   return {

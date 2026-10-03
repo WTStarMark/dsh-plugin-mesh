@@ -27,6 +27,26 @@ export const WHITELIST_TAGS = [
 /** 未归类 / 长尾合并后的桶 */
 export const OTHER = { id: "other", label: "其他" };
 
+/**
+ * 非插件语境排除：这些仓库确实挂着 dsh 标签，但 DSH 在它们那里是【别的意思】。
+ * 典型：DeepHash-pytorch 的 DSH 是 Deep Supervised Hashing（深度哈希算法），
+ * 与 DeepSeek Harness 毫无关系。这类仓库不进索引、不进前端。
+ * 判据刻意写窄：只认"另一个 DSH 全称"的直接证据（哈希/检索/信号处理…），
+ * 不靠"看起来不像插件"这种模糊感觉，免得误伤描述写得少的真插件。
+ */
+export const NOT_PLUGIN_PATTERNS = [
+  { re: /deep\s*hash|deephash|deep hashing|深度哈希|哈希算法|image retrieval|检索演示/i, why: "深度哈希类：这里的 DSH 是 Deep Supervised Hashing，不是 DeepSeek Harness" },
+  { re: /digital\s*signal\s*processing|离散时间信号/i, why: "数字信号处理类：DSH 是别的缩写" },
+];
+/** 命中即"不是 DSH 插件"，返回原因；没命中返回 null */
+export function nonPluginReason(node) {
+  const text = (node.name ?? "") + " " + (node.description ?? "") + " " + (node.topics ?? []).join(" ");
+  for (const { re, why } of NOT_PLUGIN_PATTERNS) if (re.test(text)) return why;
+  const topics = (node.topics ?? []).map((t) => String(t).toLowerCase());
+  if (topics.includes("deep-hashing")) return "深度哈希类：topic 直接写着 deep-hashing";
+  return null;
+}
+
 const ASCII_WORD = /^[a-z0-9][a-z0-9 .+-]*$/;
 const RE_SPECIALS = /[.*+?^$(){}|[\]\\]/g;
 
@@ -55,6 +75,22 @@ export function makeCounter(term) {
   const pattern = new RegExp("\\b" + escapeRegExp(term) + "(?:s|es)?\\b", "g");
   return (text) => (text ? (text.match(pattern) ?? []).length : 0);
 }
+
+/**
+ * 「基座」自述：基座/底座/框架/脚手架… 紧邻插件生态词（插件/扩展/皮肤/面板/侧边栏/工作台…）。
+ * 刻意要求"相邻"：单说 framework 的仓库满大街都是，只有"给插件生态当底座"的自述才算数。
+ */
+const BASE_WORDS = "底座|基座|脚手架|基础设施|框架|foundation|framework|scaffold|infrastructure";
+const ECO_WORDS = "插件|扩展|拓展|生态|三方|宿主|皮肤|面板|侧边栏|工作台|工具链|plugin|extension|ecosystem|host";
+// 中间最多 4 个字符，且不能跨标点 —— 否则"插件：10 条内置思维框架""框架逻辑可测试。dsh-plugin"
+// 这种跨小句的巧合也会算成"基座自述"
+const GAP = "[^，。；：、,.;:!?|()（）\\n]{0,4}";
+const BASE_SELF_SRC = "(" + BASE_WORDS + ")" + GAP + "(" + ECO_WORDS + ")|(" + ECO_WORDS + ")" + GAP + "(" + BASE_WORDS + ")";
+const BASE_SELF_DESC = new RegExp(BASE_SELF_SRC, "i");
+
+/** 「协议/规范」自述（原来的公约协议判据，原样保留） */
+const SPEC_SELF_SRC =
+  "(插件|生态|社区)[^\\n]{0,10}(规范|标准|公约|共识|契约|协议)|互操作|元协议|meta[- ]protocol|plugin[- ](standard|spec|specification|convention|contract|schema|manifest)|ecosystem[- ](standard|spec|specification|convention)|community[- ](standard|spec|consensus|convention)|conventions every plugin|(standard|specification|protocol)\\s+for\\s+(dsh|deepseek|plugins?)";
 
 /** 规则表：可直接手改。priority 越小优先级越高（仅用于同分裁决） */
 export const CATEGORY_RULES = [
@@ -189,26 +225,37 @@ export const CATEGORY_RULES = [
     id: "pet",
     label: "桌宠娱乐",
     priority: 19,
-    terms: [["pet", 3], ["pokemon", 3], ["live2d", 3], ["game", 2], ["桌宠", 3], ["宠物", 3], ["养成", 3], ["游戏", 2], ["虚拟形象", 3]],
+    // "鲸鱼娘/小鲸鱼/看板娘" 是 DSH 桌宠的通用说法（官方吉祥物是鲸鱼），
+    // 但权重给得克制：只有当它确实是"陪着你的角色"时才压得过别的扇区分数
+    terms: [
+      ["pet", 3], ["pokemon", 3], ["live2d", 3], ["game", 2], ["桌宠", 3], ["宠物", 3], ["养成", 3], ["游戏", 2], ["虚拟形象", 3],
+      // 「娘」在这批语料里就是"角色/看板娘"的标记（鲸鱼娘/看板娘/女仆娘），不是"姑娘"那种泛用
+      ["小鲸鱼", 6], ["鲸鱼娘", 5], ["娘", 3], ["看板娘", 3], ["mascot", 3], ["吉祥物", 3], ["陪伴", 2],
+    ],
   },
   {
     id: "spec",
-    label: "公约协议",
+    label: "协议基座",
     priority: 20,
-    // 「给整个生态定规矩」的那批仓库：dsh-std、插件互操作元协议、社区标准、接口契约…
-    // 这里的坑是"标准/协议/公约"全是泛词：最大公约数、标准差、身高标准、HTTP 协议、
-    // Chrome DevTools Protocol、RFC 文档阅读……都会被误抓。
-    // 所以先过一道【生态语境门槛】：名字本身是 std/spec/convention 之类的规范名，
-    // 或者描述里出现"插件规范/生态标准/社区共识/互操作/元协议/plugin standard"这类短语。
-    // priority 排最后：同分时让给更具体的扇区。
+    // 两件事合起来回答"这个生态的规则与地基由谁定"：
+    //   1) 协议/规范/标准：dsh-std、插件互操作元协议、社区共识、接口契约…
+    //   2) 基座/框架：侧边栏底座、皮肤框架、工作台基座…（别的插件往上长的那种）
+    // 坑一："标准/协议/公约"全是泛词（最大公约数、标准差、身高标准、HTTP 协议、RFC 文档阅读）；
+    // 坑二："framework/infrastructure" 也满大街（NocoBase、各种 AI 基础设施）。
+    // 所以 gate 要求【生态语境】或【基座自述】，strong 让"底座/基座/皮肤框架"这类自述直接胜出。
     gate: {
-      name: /((^|[-_])(std|spec|specs|convention|conventions|covenant|charter)([-_]|$))|((插件|生态)(规范|标准|公约|契约|协议))|(meta[-_]protocol)/,
-      desc: /(插件|生态|社区)[^\n]{0,10}(规范|标准|公约|共识|契约|协议)|互操作|元协议|meta[- ]protocol|plugin[- ](standard|spec|specification|convention|contract|schema|manifest)|ecosystem[- ](standard|spec|specification|convention)|community[- ](standard|spec|consensus|convention)|conventions every plugin|(standard|specification|protocol)\s+for\s+(dsh|deepseek|plugins?)/i,
+      name: /((^|[-_])(std|spec|specs|convention|conventions|covenant|charter)([-_]|$))|((插件|生态)(规范|标准|公约|契约|协议))|(meta[-_]protocol)|(基座|底座)/,
+      // 两路取"或"：协议/规范自述，或"给插件生态当基座"的自述
+      desc: new RegExp(SPEC_SELF_SRC + "|" + BASE_SELF_SRC, "i"),
     },
+    // 自述是"生态基座"的，直接胜出（否则会被 panel/skin 的分数分走）
+    strong: { name: /(基座|底座)/, desc: BASE_SELF_DESC },
     terms: [
       ["公约", 2], ["元协议", 3], ["互操作", 3], ["契约", 2], ["约定", 1], ["规范", 2], ["协议", 1], ["标准", 1],
       ["convention", 2], ["specification", 2], ["interoperability", 3], ["interoperable", 3], ["schema", 1],
       ["protocol", 1], ["standard", 1], ["rfc", 1], ["manifest", 1], ["接口定义", 3], ["插件规范", 3], ["插件标准", 3],
+      ["基座", 4], ["底座", 4], ["脚手架", 3], ["基础设施", 3], ["框架", 3], ["中间件", 2], ["内核", 2],
+      ["foundation", 3], ["framework", 2], ["scaffold", 3], ["infrastructure", 2],
     ],
   },
 ];
@@ -407,6 +454,22 @@ function isExcluded(rule, sig) {
   return true;
 }
 
+/**
+ * 强命中判定：规则可声明 strong（name/desc/topics 三个正则）。
+ * 命中即【直接胜出】，不再比分数 —— 只给语义无歧义的"自述"用，
+ * 例如「侧边栏底座」「皮肤框架」：这类仓库的定位就是生态基座，
+ * 不该因为正文里同时出现 sidebar/皮肤 等词就被分流去界面面板或皮肤美化。
+ */
+function strongHit(rule, sig) {
+  const strong = rule.strong;
+  if (!strong) return false;
+  return Boolean(
+    (strong.name && strong.name.test(sig.name)) ||
+      (strong.desc && strong.desc.test(sig.desc)) ||
+      (strong.topics && strong.topics.test(sig.topics)),
+  );
+}
+
 /** 单仓库分类：返回 {id,label,score,hits,blocked} */
 export function classifyNode(node) {
   const sig = textSignals(node);
@@ -430,6 +493,10 @@ export function classifyNode(node) {
     if (isExcluded(rule, sig)) {
       blocked = blocked ?? { id: rule.id, label: rule.label, reason: "被排除规则拦下" };
       continue;
+    }
+    if (strongHit(rule, sig)) {
+      best = { id: rule.id, label: rule.label, score, hits: hits.slice(0, 3), strong: true };
+      break; // 强命中：直接胜出
     }
     if (!best || score > best.score) best = { id: rule.id, label: rule.label, score, hits: hits.slice(0, 4) };
   }
@@ -476,8 +543,20 @@ export function applyCategories(nodes, options = {}) {
   const minCount = options.minCount ?? DEFAULT_OPTIONS.minCount;
   const maxSectors = options.maxSectors ?? DEFAULT_OPTIONS.maxSectors; // 20 个扇区：上限要够，否则新的小类会被并进「其他」
   const keepIds = new Set(options.keepIds ?? DEFAULT_OPTIONS.keepIds ?? []);
+  // 策展认定的生态基座（tools/ecosystem.json 的 bases）直接归入协议基座：
+  // 它们是"别人长在上面"的那批（侧边栏底座 / TUI 基座 / 互操作元协议…），
+  // 但正文未必写着"基座"二字（例如 TUI 基座的描述只说自己是官方首推插件），
+  // 靠人工策展 + README 证据认定，比硬编码某个仓库名可审计。
+  const baseIds = new Set(options.baseIds ?? []);
+  const specRule = CATEGORY_RULES.find((r) => r.id === "spec");
   const raw = new Map();
-  for (const node of nodes) raw.set(node.id, classifyNode(node));
+  for (const node of nodes) {
+    if (baseIds.has(node.id)) {
+      raw.set(node.id, { id: "spec", label: specRule?.label ?? "协议基座", score: 0, hits: ["策展基座"], strong: true, curatedBase: true });
+      continue;
+    }
+    raw.set(node.id, classifyNode(node));
+  }
 
   const counts = new Map();
   for (const result of raw.values()) counts.set(result.id, (counts.get(result.id) ?? 0) + 1);
@@ -502,6 +581,10 @@ export function applyCategories(nodes, options = {}) {
     node.categoryLabel = keep ? result.label : OTHER.label;
     node.categoryScore = result.score;
     node.categoryHits = result.hits;
+    if (result.strong) node.categoryStrong = true;
+    else delete node.categoryStrong;
+    if (result.curatedBase) node.categoryCurated = true;
+    else delete node.categoryCurated;
     node.subcategory = keep && result.sub ? result.sub.id : null;
     node.subcategoryLabel = keep && result.sub ? result.sub.label : null;
     if (keep) delete node.categoryRaw;

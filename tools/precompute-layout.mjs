@@ -73,7 +73,7 @@ const nodes = prepared.nodes.map((node, i) => {
 });
 
 // 连线：id 字符串 → 索引三元组，体积掉到十分之一
-const TYPE_CODE = { owner: 0, topic: 1, fork: 2, neighbor: 3 };
+const TYPE_CODE = { owner: 0, topic: 1, fork: 2, neighbor: 3, resonance: 4 };
 const edges = [];
 for (const l of links) {
   edges.push([l.a, l.b, TYPE_CODE[l.type] ?? 3]);

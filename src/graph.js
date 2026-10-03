@@ -11,6 +11,23 @@ import { createAvatarStore } from "./avatars.js";
 
 const LABEL_MAX = 90;
 const RING_STEPS = [200, 500, 1000, 2000, 4000, 8000];
+
+/**
+ * 线段两端各退让 stopA / stopB（纯几何，独立出来便于单测）。
+ *
+ * 用途：被指向的球外面套着同色光圈，连线要停在【光圈外沿】而不是画到球心，
+ * 否则线会从球里穿出来压在光圈上。退让量按弦长的一半夹住，两球贴太近时线也不会被翻过来。
+ */
+export function trimSegment(x1, y1, x2, y2, stopA = 0, stopB = 0) {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const len = Math.hypot(dx, dy) || 1;
+  const ux = dx / len;
+  const uy = dy / len;
+  const sa = Math.min(Math.max(0, stopA), len * 0.45);
+  const sb = Math.min(Math.max(0, stopB), len * 0.45);
+  return { ax: x1 + ux * sa, ay: y1 + uy * sa, bx: x2 - ux * sb, by: y2 - uy * sb, len, ux, uy, sa, sb };
+}
 const FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
 
 /** #rrggbb -> "r,g,b"（用于 rgba() 拼 alpha） */
@@ -43,6 +60,8 @@ export function createGraphView(canvas, hooks = {}) {
   }
   let selectedId = null;
   let hoverId = null;
+  // 被连线指向的球（按边类型分组）：点选后给它们套同色光圈（见 drawTargetRings）
+  const linkTargets = { owner: [], topic: [], resonance: [] };
   let showLabels = true;
   let edgeTypes = new Set(["topic", "owner"]);
   let groupColors = new Map();
@@ -202,22 +221,38 @@ export function createGraphView(canvas, hooks = {}) {
     });
   }
 
-  /** 一条边：向"远离圆心"的方向鼓起的二次曲线，避免所有线穿过中心（只建路径，不描边） */
-  function edgePath(a, b, curv) {
+  /**
+   * 一条边：向"远离圆心"的方向鼓起的二次曲线，避免所有线穿过中心（只建路径，不描边）。
+   *
+   * stopA / stopB 是两端各自要退让的屏幕距离（v0.4.3）：
+   * 被指向的球外面套着同色光圈，线要是还画到球心，就会从球里穿出来、压在光圈上——
+   * 所以两端各退让到【光圈外沿】，看起来才是"线接到光圈上"。
+   */
+  function edgePath(a, b, curv, stopA = 0, stopB = 0) {
     const [x1, y1] = toScreen(layout.x[a], layout.y[a]);
     const [x2, y2] = toScreen(layout.x[b], layout.y[b]);
-    const mx = (x1 + x2) / 2;
-    const my = (y1 + y2) / 2;
-    const len = Math.hypot(x2 - x1, y2 - y1) || 1;
+    const { ax, ay, bx, by, len, sa, sb } = trimSegment(x1, y1, x2, y2, stopA, stopB);
+    const mx = (ax + bx) / 2;
+    const my = (ay + by) / 2;
     const [ox, oy] = toScreen(0, 0);
     let nx = mx - ox;
     let ny = my - oy;
     const nl = Math.hypot(nx, ny) || 1;
     nx /= nl;
     ny /= nl;
-    const bulge = curv * len;
-    ctx.moveTo(x1, y1);
-    ctx.quadraticCurveTo(mx + nx * bulge, my + ny * bulge, x2, y2);
+    const bulge = curv * Math.max(1, len - sa - sb);
+    ctx.moveTo(ax, ay);
+    ctx.quadraticCurveTo(mx + nx * bulge, my + ny * bulge, bx, by);
+  }
+
+  /** 目标球光圈外沿的屏幕距离：公式必须与 drawTargetRings 的半径一致，线才正好接到光圈上 */
+  function ringStop(i, slot) {
+    return Math.max(2, layout.radius[i] * view.k) + 3 + slot * 2.4 + 1;
+  }
+
+  /** 出发端：从选中项自己的球外侧起步（不画到球心，省得在球里藏一截线） */
+  function sourceStop(i) {
+    return Math.max(2, layout.radius[i] * view.k) + 2;
   }
 
   function edgeColor(l, style) {
@@ -243,13 +278,17 @@ export function createGraphView(canvas, hooks = {}) {
       const i = layout.index.get(sibling);
       if (i !== undefined && i !== center) ownerTargets.push(i);
     }
+    linkTargets.owner = ownerTargets;
+    linkTargets.topic = [];
+    linkTargets.resonance = [];
     if (ownerTargets.length > 0) {
       ctx.save();
       ctx.setLineDash([]);
       ctx.lineWidth = 1.7;
       ctx.strokeStyle = hexA(p().accent, 0.85);
       ctx.beginPath();
-      for (const i of ownerTargets) edgePath(center, i, 0.16);
+      const from = sourceStop(center);
+      for (const i of ownerTargets) edgePath(center, i, 0.16, from, ringStop(i, 0));
       ctx.stroke();
       ctx.restore();
     }
@@ -266,11 +305,75 @@ export function createGraphView(canvas, hooks = {}) {
       if (l.a !== center && l.b !== center) continue;
       const other = l.a === center ? l.b : l.a;
       if (other === center || !layout.nodes[other]) continue;
-      edgePath(center, other, 0.22);
+      edgePath(center, other, 0.22, sourceStop(center), ringStop(other, 1));
+      linkTargets.topic.push(other);
       topicOn = true;
     }
     if (topicOn) ctx.stroke();
     ctx.restore();
+
+    // 生态共鸣：人工策展的"基座 → 长在它上面的插件"（紫罗兰实线，与规则推导的两类区分）
+    const reso = EDGE_STYLES.resonance ?? {};
+    let resoOn = false;
+    ctx.save();
+    ctx.setLineDash(reso.dash ?? []);
+    ctx.lineWidth = 1.9;
+    ctx.strokeStyle = hexA(reso.color ?? "#a86bff", reso.alpha ?? 0.75);
+    ctx.beginPath();
+    for (const l of links) {
+      if (l.type !== "resonance") continue;
+      if (l.a !== center && l.b !== center) continue;
+      const other = l.a === center ? l.b : l.a;
+      if (other === center || !layout.nodes[other]) continue;
+      edgePath(center, other, reso.curv ?? 0.2, sourceStop(center), ringStop(other, 2));
+      linkTargets.resonance.push(other);
+      resoOn = true;
+    }
+    if (resoOn) ctx.stroke();
+    ctx.restore();
+  }
+
+  /**
+   * 被指向的球套光圈（v0.4.3）：谁被连线指着，谁的球边缘就亮一圈【对应颜色】的光圈——
+   * 同作者=主题主色、主题共现=琥珀、生态共鸣=紫罗兰，与线色一一对应。
+   *
+   * 同一个球可能同时被两类线指着，光圈按类型依次外扩（3px 一档），两种颜色都看得见。
+   * 每一类成批描边（一次 path + 一次 stroke），几百个目标也只有 3 次 stroke。
+   */
+  function drawTargetRings() {
+    if (!layout || selectedId == null) return;
+    const rings = [
+      { type: "owner", color: p().accent, alpha: 0.85, width: 1.6 },
+      { type: "topic", color: EDGE_STYLES.topic?.color ?? "#e08a00", alpha: 0.7, width: 1.4 },
+      { type: "resonance", color: EDGE_STYLES.resonance?.color ?? "#a86bff", alpha: 0.85, width: 1.8 },
+    ];
+    for (let slot = 0; slot < rings.length; slot++) {
+      const ring = rings[slot];
+      const targets = linkTargets[ring.type];
+      if (!targets || targets.length === 0) continue;
+      // 目标多的时候不画外发光：几百个 shadowBlur 会明显掉帧
+      const glow = targets.length <= 80;
+      ctx.save();
+      ctx.setLineDash([]);
+      ctx.lineWidth = ring.width;
+      ctx.strokeStyle = hexA(ring.color, ring.alpha);
+      if (glow) {
+        ctx.shadowColor = hexA(ring.color, 0.55);
+        ctx.shadowBlur = 9;
+      }
+      ctx.beginPath();
+      for (const i of targets) {
+        const [sx, sy] = toScreen(layout.x[i], layout.y[i]);
+        if (sx < -30 || sy < -30 || sx > cssW + 30 || sy > cssH + 30) continue; // 屏外不画
+        const r = Math.max(2, layout.radius[i] * view.k);
+        const rr = r + 3 + slot * 2.4;
+        // moveTo 先跳到圆的起点，避免和上一个圆之间连出一条直线
+        ctx.moveTo(sx + rr, sy);
+        ctx.arc(sx, sy, rr, 0, Math.PI * 2);
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
   }
 
   /**
@@ -532,6 +635,7 @@ export function createGraphView(canvas, hooks = {}) {
     drawSearchRays();
     drawEdges();
     drawNodes();
+    drawTargetRings(); // 被指向的球套同色光圈（画在球之上，才像"框选"）
     drawHub();
     drawLabels();
   }
@@ -725,6 +829,9 @@ export function createGraphView(canvas, hooks = {}) {
       prepared = nextPrepared;
       layout = nextLayout;
       siblingCache = { id: null, ids: null }; // 数据换了，兄弟缓存必须作废
+      linkTargets.owner = [];
+      linkTargets.topic = [];
+      linkTargets.resonance = [];
       resize();
       fit();
       wake();
