@@ -104,22 +104,23 @@ test("左栏顺序（v0.4.3）：总览 → 功能扇区 → 筛选 → 其余",
   assert.equal(ftitles[2], "筛选");
 });
 
-test("右栏顺序（v0.4.3）：图例 → 操作提示 → 其余；选中仓库后同样如此", () => {
+test("右栏顺序（v0.4.3）：未选中时 图例 → 操作提示 在最前；点开项目球后压到最底部", () => {
   const empty = new FakeNode("aside");
   panels.renderInspector(empty, prepared, baseState(), actions, { linkCounts: { owner: 3, topic: 2, resonance: 1 } });
   const emptyTitles = empty.children.filter((c) => c.className === "sec").map((c) => c.children[0].textContent);
-  assert.equal(emptyTitles[0], "图例", "右栏第一段应是图例，实际：" + emptyTitles.join(" → "));
-  assert.equal(emptyTitles[1], "操作提示", "右栏第二段应是操作提示，实际：" + emptyTitles.join(" → "));
+  assert.equal(emptyTitles[0], "图例", "未选中时右栏第一段应是图例，实际：" + emptyTitles.join(" → "));
+  assert.equal(emptyTitles[1], "操作提示", "未选中时右栏第二段应是操作提示，实际：" + emptyTitles.join(" → "));
+  assert.ok(/^待复核仓库/.test(emptyTitles[2] ?? ""), "其余照常：待复核清单排在它们后面，实际：" + emptyTitles.join(" → "));
 
   const picked = prepared.nodes.find((n) => (prepared.adjacency.get(n.id) ?? []).length > 0);
   const filled = new FakeNode("aside");
   panels.renderInspector(filled, prepared, { ...baseState(), selectedId: picked.id }, actions, { linkCounts: { owner: 3, topic: 2, resonance: 1 } });
   const titles = filled.children.map((c) => c.children[0]?.textContent);
-  assert.equal(titles[0], "图例");
-  assert.equal(titles[1], "操作提示");
-  // 第三段起是仓库档案（它的首个子节点是头像/名字所在的 d-head，没有 h3 标题）
-  assert.equal(filled.children[2].className, "sec", "第三段应是仓库档案小节");
-  assert.ok(titles.some((t) => /^关联（/.test(t ?? "")), "仓库档案之后应仍是命中标签/关联等小节，实际：" + titles.join(" → "));
+  // 第一段是仓库档案（首个子节点是 d-head，没有 h3 标题）
+  assert.equal(filled.children[0].className, "sec", "点开后第一段应是仓库档案小节");
+  assert.ok(!/^(图例|操作提示)$/.test(titles[0] ?? ""), "点开后图例不该还占着顶部，实际：" + titles.join(" → "));
+  assert.deepEqual(titles.slice(-2), ["图例", "操作提示"], "点开后图例与操作提示应压在右栏最底部，实际：" + titles.join(" → "));
+  assert.ok(titles.some((t) => /^关联（/.test(t ?? "")), "档案内容仍照常排在前面，实际：" + titles.join(" → "));
 });
 
 test("面板里不允许出现 [object ...] 这类拼接事故", () => {

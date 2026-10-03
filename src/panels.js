@@ -313,9 +313,8 @@ export function renderInspector(root, prepared, state, actions, view = {}) {
   if (ownerIds.length > 0) byType.set("owner", ownerIds.map((id) => ({ id, type: "owner", weight: 1, via: [] })));
   const relatedCount = [...byType.values()].reduce((sum, list) => sum + list.length, 0);
 
+  // 点开项目球后：图例与操作提示让位给档案内容，压到最底部（覆盖性修复）
   root.replaceChildren(
-    legendSec,
-    hintsSec,
     el("section", { class: "sec" }, [
       el("div", { class: "d-head" }, [
         node.avatar ? el("img", { src: node.avatar, alt: "", loading: "lazy", on: { error: (ev) => (ev.target.style.visibility = "hidden") } }) : null,
@@ -397,6 +396,9 @@ export function renderInspector(root, prepared, state, actions, view = {}) {
         list.length > 14 ? el("div", { class: "note", text: "以上按星标取前 14 个，共 " + list.length + " 个" }) : null,
       ]),
     ),
+    // 展示仓库档案时，图例与操作提示排在最后（未选中时才在最前）
+    legendSec,
+    hintsSec,
   );
 }
 
