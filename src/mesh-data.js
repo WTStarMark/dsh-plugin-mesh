@@ -20,9 +20,11 @@ export const TAG_COLORS = {
  * curv：弧线鼓起的程度（相对弦长），值越大越远离圆心 —— 观赏性的关键参数。
  */
 export const EDGE_STYLES = {
-  // 选中时画的两类连线：颜色明显区分（同作者=主题主色，主题共现=琥珀）
+  // 选中时画的三类连线：颜色明显区分（同作者=主题主色，主题共现=琥珀，生态共鸣=紫罗兰）
   owner: { label: "同作者", color: null, alpha: 0.85, curv: 0.16, dash: [] },
   topic: { label: "主题共现", color: "#e08a00", alpha: 0.5, curv: 0.22, dash: [5, 4] },
+  // 生态共鸣：人工策展的"谁长在谁上面"（基座 → 生态），与规则推导的边区分开
+  resonance: { label: "生态共鸣", color: "#a86bff", alpha: 0.75, curv: 0.2, dash: [] },
   fork: { label: "复刻血缘", color: "#a08a6a", alpha: 0.3, curv: 0.14, dash: [2, 3] },
 };
 
@@ -107,8 +109,8 @@ export async function loadMeshBest(url = "./data/mesh.json", options = {}) {
   return { ...result, core: false };
 }
 
-/** 预计算契约里的连线类型编码 */
-export const EDGE_TYPE_BY_CODE = ["owner", "topic", "fork", "neighbor"];
+/** 预计算契约里的连线类型编码（新增类型只能往后追加，老数据才不会错位） */
+export const EDGE_TYPE_BY_CODE = ["owner", "topic", "fork", "neighbor", "resonance"];
 
 /**
  * 从预计算契约（mesh-core.json）构建，产物与 prepare() 同形。

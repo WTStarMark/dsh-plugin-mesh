@@ -17,7 +17,7 @@ const SECTOR_COUNT = mesh.clusters.length;
 const SECTOR_DEG = (360 / SECTOR_COUNT).toFixed(1).replace(".", "\\.");
 const atFull = new RegExp("命中 " + NODE_COUNT + " / " + NODE_COUNT);
 
-const drawCalls = { fillRect: 0, arc: 0, stroke: 0, fill: 0, fillText: 0, closePath: 0, clip: 0, drawImage: 0, curve: 0, lineTo: 0, segments: [], strokeWidths: [] };
+const drawCalls = { fillRect: 0, arc: 0, stroke: 0, fill: 0, fillText: 0, closePath: 0, clip: 0, drawImage: 0, curve: 0, lineTo: 0, segments: [], strokeWidths: [], strokeStyles: [] };
 
 /** 记录每段直线的起止点：用来验证放射线确实"从圆心射出"（不只是数调用次数） */
 let stubMove = [0, 0];
@@ -36,7 +36,7 @@ function makeCtx() {
     quadraticCurveTo() { drawCalls.curve++; },
     drawImage() { drawCalls.drawImage++; },
     fill() { drawCalls.fill++; },
-    stroke() { drawCalls.stroke++; drawCalls.strokeWidths.push(this.lineWidth); },
+    stroke() { drawCalls.stroke++; drawCalls.strokeWidths.push(this.lineWidth); drawCalls.strokeStyles.push(String(this.strokeStyle)); },
     fillText() { drawCalls.fillText++; },
     strokeText() {},
     createRadialGradient() { return { addColorStop() {} }; },
@@ -155,6 +155,8 @@ globalThis.ResizeObserver = class { observe() {} disconnect() {} };
 globalThis.localStorage = { getItem: () => null, setItem() {} };
 globalThis.location = { search: "" };
 const coreJson = JSON.parse(await readFile(new URL("../data/mesh-core.json", import.meta.url), "utf8"));
+// 生态共鸣清单（人工策展）：测试用它挑基座，不写死任何仓库名
+const ecoJson = JSON.parse(await readFile(new URL("../tools/ecosystem.json", import.meta.url), "utf8"));
 globalThis.fetch = async (url) => {
   const target = String(url ?? "");
   if (target.includes("mesh-core")) {
@@ -438,6 +440,7 @@ test("点选项目后画出两类连线，且颜色不同", () => {
   canvas.fire("pointerup", { clientX: 5, clientY: 5, pointerId: 97 });
   pump(5);
   const before = drawCalls.curve;
+  const arcBefore = drawCalls.arc;
 
   // 扫画布找到「确有同作者」的节点再点它
   let hit = null;
@@ -461,6 +464,14 @@ test("点选项目后画出两类连线，且颜色不同", () => {
   canvas.fire("pointerup", { clientX: hit.x, clientY: hit.y, pointerId: 7 });
   pump(30);
   assert.ok(drawCalls.curve > before, "点选 " + hit.id + " 后应画出它的同作者连线，新增 " + (drawCalls.curve - before));
+
+  // 每个被指向的球都要套光圈：弧线调用数至少增加"同作者兄弟数"
+  const clicked = coreJson.nodes.find((n) => n.id === hit.id);
+  const siblingsInData = coreJson.nodes.filter((n) => n.owner === clicked.owner && n.id !== clicked.id).length;
+  assert.ok(
+    drawCalls.arc - arcBefore >= siblingsInData,
+    "被指向的球应各套一圈光圈：" + hit.id + " 有 " + siblingsInData + " 个同作者，弧线只新增 " + (drawCalls.arc - arcBefore),
+  );
 
   // 图例应同时给出两类关系的计数
   const legend = registry.get("edge-types").all.map((c) => c.textContent).join(" ");
@@ -603,6 +614,41 @@ test("v0.4.2 双击聚焦关联仓库后，点空白处必须恢复全图", () =
   canvas.fire("pointerup", { clientX: 5, clientY: 5, pointerId: 91 });
   pump(20);
   assert.equal(hits(), full, "点空白处应恢复到全图，实际：" + hint.textContent);
+});
+
+test("v0.4.3 生态共鸣：点选基座仓库会画出紫罗兰实线", () => {
+  const base = (ecoJson.bases ?? []).find((b) => b.enabled !== false && coreJson.nodes.some((n) => n.id === b.id));
+  assert.ok(base, "样本数据里应至少有一个生态基座");
+  const inData = base.verified.filter((v) => coreJson.nodes.some((n) => n.id === v.id));
+  assert.ok(inData.length > 0, base.id + " 在当前数据里应有生态子节点");
+
+  const search = registry.get("search");
+  const canvas = registry.get("graph");
+  hudButtons.find((b) => b.dataset.act === "fit").fire("click");
+  canvas.fire("pointerdown", { clientX: 5, clientY: 5, pointerId: 90 });
+  canvas.fire("pointerup", { clientX: 5, clientY: 5, pointerId: 90 });
+  canvas.fire("pointerleave");
+  pump(10);
+
+  const before = drawCalls.curve;
+  const styleStart = drawCalls.strokeStyles.length;
+  search.value = base.id;
+  search.fire("input");
+  search.fire("keydown", { key: "Enter" }); // 选中基座
+  pump(40);
+  const drawn = drawCalls.curve - before;
+  assert.ok(drawn >= inData.length, "点选 " + base.id + " 应画出 " + inData.length + " 条生态共鸣连线，实际 " + drawn);
+
+  const legend = registry.get("edge-types").all.map((n) => n.textContent).join(" ");
+  assert.match(legend, /生态共鸣 \d+/, "连线图例应显示生态共鸣计数，实际 " + legend);
+
+  // 被指向的球要套【对应颜色】的光圈：生态共鸣 = 紫罗兰 #a86bff → rgba(168,107,255,…)
+  const violet = drawCalls.strokeStyles.slice(styleStart).filter((s) => s.includes("168,107,255"));
+  assert.ok(violet.length > 0, "被生态共鸣指向的球应有紫罗兰光圈，实际描边颜色：" + [...new Set(drawCalls.strokeStyles.slice(styleStart))].slice(0, 6).join(" | "));
+
+  search.value = "";
+  search.fire("input");
+  pump(10);
 });
 
 test("v0.4.2 搜索：从圆心放射出指向命中仓库的直线，清空后消失", () => {

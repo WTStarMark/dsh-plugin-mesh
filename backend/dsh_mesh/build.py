@@ -8,8 +8,37 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timezone
+from pathlib import Path
 
-from .classify import apply_categories
+from .classify import apply_categories, non_plugin_reason
+from .config import ROOT  # noqa: E402  (ROOT 在下面 config 段还会用到)
+
+
+def load_ecosystem(path=None) -> dict:
+    """读生态共鸣清单。缺失/损坏都当空表，绝不因此中断采集。"""
+    path = path or ECOSYSTEM_JSON
+    try:
+        import json as _json
+
+        data = _json.loads(Path(path).read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 - 清单是加分项，读不到就只是没有这些边
+        return {}
+    out: dict[str, dict] = {}
+    for base in data.get("bases") or []:
+        base_id = str(base.get("id") or "")
+        if not base_id:
+            continue
+        out[base_id] = {
+            "label": base.get("label") or "",
+            # enabled=False 的基座仍然策展、仍然算基座（归入协议基座），只是不建共鸣边
+            "enabled": base.get("enabled") is not False,
+            "children": [
+                {"id": str(v.get("id")), "label": base.get("label") or "", "signals": v.get("signals") or []}
+                for v in (base.get("verified") or [])
+                if v.get("id")
+            ],
+        }
+    return out
 from .config import (
     DEGREE_CAP,
     HUB_DF,
@@ -19,6 +48,9 @@ from .config import (
     OWNER_CLIQUE_MAX,
     WHITELIST_TAGS,
 )
+
+# 生态共鸣清单（人工策展，见 tools/curate-ecosystem.mjs）：基座 → 长在它上面的插件
+ECOSYSTEM_JSON = ROOT / "tools" / "ecosystem.json"
 
 _NAME_RE = re.compile(r"(^|[^a-z])dsh([^a-z]|$)|dsh-|dsh_", re.I)
 _DESC_RE = re.compile(r"dsh|deepseek[- ]?harness|cordis", re.I)
@@ -60,6 +92,14 @@ def pick_repo(item: dict) -> dict:
 def normalize_repo(item: dict) -> dict:
     """本地缓存里存的可能已经是裁剪过的记录（owner 是字符串），也可能还是原始 API 响应。"""
     return pick_repo(item) if "full_name" in item else item
+
+
+def owner_of(repo: dict) -> str:
+    """作者名：原始 API 记录里 owner 是 dict（{login}），裁剪过的记录里是字符串。"""
+    owner = repo.get("owner")
+    if isinstance(owner, dict):
+        return str(owner.get("login") or "")
+    return str(owner or "")
 
 
 def relevance_score(repo: dict) -> int:
@@ -164,11 +204,17 @@ def build_mesh(
     nodes: list[dict] = []
     seen: dict[str, dict] = {}
     skipped_blacklisted = 0
+    excluded_repos: dict[str, str] = {}
 
     for raw in raw_repos:
         repo = normalize_repo(raw)
-        if repo.get("owner") in blacklist:
+        if owner_of(repo) in blacklist:
             skipped_blacklisted += 1
+            continue
+        # 非 DSH 语境（例如 DSH 指 Deep Supervised Hashing）直接不进索引
+        not_plugin = non_plugin_reason(repo)
+        if not_plugin:
+            excluded_repos[str(repo.get("id") or repo.get("name") or "?")] = not_plugin
             continue
         matched = [t for t in WHITELIST_TAGS if t in repo["topics"]]
         if not matched or not repo["id"]:
@@ -200,7 +246,9 @@ def build_mesh(
             noise_removed = sum(info["repos"] for info in keep.values())
         nodes = [n for n in nodes if n["owner"] not in detected]
 
-    categories = apply_categories(nodes)
+    # 策展认定的生态基座（tools/ecosystem.json）直接归入协议基座，下面建共鸣边时复用同一份清单
+    ecosystem = load_ecosystem()
+    categories = apply_categories(nodes, base_ids=set(ecosystem.keys()))
 
     # ---------- 连线 ----------
     edge_map: dict[tuple, dict] = {}
@@ -253,6 +301,18 @@ def build_mesh(
                 add_edge(hub["id"], node["id"], "owner", owner)
                 owner_star_edges += 1
 
+    # 生态共鸣：基座 → 长在它上面的插件（人工策展 + README 复核，不是规则推导）
+    resonance_edges = 0
+    node_ids = {n["id"] for n in nodes}
+    for base_id, info in ecosystem.items():
+        if not info["enabled"] or base_id not in node_ids:
+            continue
+        for child in info["children"]:
+            if child["id"] == base_id or child["id"] not in node_ids:
+                continue
+            add_edge(base_id, child["id"], "resonance", info["label"] or "生态共鸣")
+            resonance_edges += 1
+
     # 度数裁剪：只裁"主题共现"；同作者是硬关系，必须保留
     degree: dict[str, int] = {}
     edges: list[dict] = []
@@ -303,6 +363,12 @@ def build_mesh(
                 "manual": sum(1 for n in nodes if n.get("verdict") == "manual"),
             },
             # 噪声黑名单：长期生效，人工可从 data/noise-blacklist.json 里删条目解除
+            # 非插件语境排除（DSH 是别的意思）：这些仓库不进 nodes，也不进前端
+            "resonanceEdges": resonance_edges,
+            "ecosystemBases": sorted(k for k, v in ecosystem.items() if v["enabled"]),
+            "ecosystemDisabled": sorted(k for k, v in ecosystem.items() if not v["enabled"]),
+            "excludedNotPlugin": dict(sorted(excluded_repos.items())),
+            "excludedNotPluginCount": len(excluded_repos),
             "noiseBlacklist": dict(sorted(blacklist.items())),
             "noiseBlacklistSize": len(blacklist),
             "noiseNodesRemoved": noise_removed,

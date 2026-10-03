@@ -35,7 +35,8 @@ test("边必须引用存在的节点，且没有自环", () => {
     assert.ok(ids.has(e.source), "悬空 source: " + e.source);
     assert.ok(ids.has(e.target), "悬空 target: " + e.target);
     assert.notEqual(e.source, e.target, "自环: " + e.source);
-    assert.ok(["topic", "owner", "fork"].includes(e.type), "未知边类型: " + e.type);
+    assert.ok(["topic", "owner", "fork", "resonance"].includes(e.type), "未知边类型: " + e.type);
+    if (e.type === "resonance") assert.ok(e.source < e.target || e.target < e.source, "共鸣边不应自环");
     assert.ok(typeof e.weight === "number" && e.weight > 0, "weight 必须为正数");
   }
 });

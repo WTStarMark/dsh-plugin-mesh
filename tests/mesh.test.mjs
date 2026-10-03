@@ -9,8 +9,13 @@ import { prepare } from "../src/mesh-data.js";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const mesh = JSON.parse(await readFile(resolve(ROOT, "data/mesh.json"), "utf8"));
 
-test("真实数据：扇区散射能在 2 秒内算完", () => {
+test("真实数据：扇区散射耗时与节点数成正比（每千节点 1 秒预算）", () => {
+  // 本地数据已从 2.6k 抽样换成远端全量索引（1.8 万节点，7 倍）。
+  // 固定 2 秒的预算在这种规模下必然误报，所以改成【按节点数给预算】：
+  // 实测 18826 节点约 7.5 秒（0.4ms/节点），预算给到 1ms/节点仍有 2 倍余量，
+  // 仍能抓住算法退化（例如退化成 O(n²)）。
   const prepared = prepare(mesh);
+  const budget = Math.max(2000, prepared.nodes.length);
   const started = Date.now();
   const layout = createSectorLayout({
     nodes: prepared.nodes,
@@ -20,7 +25,7 @@ test("真实数据：扇区散射能在 2 秒内算完", () => {
   });
   layout.run(200);
   const cost = Date.now() - started;
-  assert.ok(cost < 2000, "布局耗时过长: " + cost + "ms");
+  assert.ok(cost < budget, "布局耗时过长: " + cost + "ms（预算 " + budget + "ms / " + prepared.nodes.length + " 节点）");
   for (let i = 0; i < prepared.nodes.length; i++) {
     assert.ok(Number.isFinite(layout.x[i]) && Number.isFinite(layout.y[i]), "坐标非有限数 @" + i);
   }

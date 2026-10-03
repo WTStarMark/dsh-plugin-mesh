@@ -16,6 +16,30 @@ import re
 
 OTHER = {"id": "other", "label": "其他"}
 
+# 非插件语境排除（与 tools/categories.mjs 的 NOT_PLUGIN_PATTERNS 逐条一致）：
+# 挂 dsh 标签但 DSH 是别的意思（如 DeepHash-pytorch 的 DSH = Deep Supervised Hashing）。
+NOT_PLUGIN_PATTERNS = [
+    (re.compile(r"deep\s*hash|deephash|deep hashing|深度哈希|哈希算法|image retrieval|检索演示", re.I),
+     "深度哈希类：这里的 DSH 是 Deep Supervised Hashing，不是 DeepSeek Harness"),
+    (re.compile(r"digital\s*signal\s*processing|离散时间信号", re.I), "数字信号处理类：DSH 是别的缩写"),
+]
+
+
+def non_plugin_reason(node: dict) -> str | None:
+    """命中即"不是 DSH 插件"，返回原因；没命中返回 None。"""
+    text = " ".join([
+        str(node.get("name") or ""),
+        str(node.get("description") or ""),
+        " ".join(str(t) for t in (node.get("topics") or [])),
+    ])
+    for pattern, why in NOT_PLUGIN_PATTERNS:
+        if pattern.search(text):
+            return why
+    topics = [str(t).lower() for t in (node.get("topics") or [])]
+    if "deep-hashing" in topics:
+        return "深度哈希类：topic 直接写着 deep-hashing"
+    return None
+
 _ASCII_WORD = re.compile(r"^[a-z0-9][a-z0-9 .+-]*$")
 
 
@@ -35,6 +59,19 @@ def make_counter(term: str):
 
 
 # 与 tools/categories.mjs 的 CATEGORY_RULES 一一对应（priority 即裁决顺序）
+# 「基座」自述 / 「协议规范」自述的正则源（与 JS 端逐字对齐，便于两边同改）
+_BASE_WORDS = "底座|基座|脚手架|基础设施|框架|foundation|framework|scaffold|infrastructure"
+_ECO_WORDS = "插件|扩展|拓展|生态|三方|宿主|皮肤|面板|侧边栏|工作台|工具链|plugin|extension|ecosystem|host"
+# 中间最多 4 个字符且不能跨标点，避免"插件：10 条内置思维框架"这种跨小句巧合算成基座自述
+_GAP = r"[^，。；：、,.;:!?|()（）\n]{0,4}"
+BASE_SELF_SRC = f"({_BASE_WORDS}){_GAP}({_ECO_WORDS})|({_ECO_WORDS}){_GAP}({_BASE_WORDS})"
+SPEC_SELF_SRC = (
+    r"(插件|生态|社区)[^\n]{0,10}(规范|标准|公约|共识|契约|协议)|互操作|元协议|meta[- ]protocol|"
+    r"plugin[- ](standard|spec|specification|convention|contract|schema|manifest)|"
+    r"ecosystem[- ](standard|spec|specification|convention)|community[- ](standard|spec|consensus|convention)|"
+    r"conventions every plugin|(standard|specification|protocol)\s+for\s+(dsh|deepseek|plugins?)"
+)
+
 CATEGORY_RULES = [
     {"id": "skin", "label": "皮肤美化", "priority": 1, "terms": [
         ("skin", 3), ("theme", 2), ("wallpaper", 3), ("皮肤", 3), ("主题", 2), ("壁纸", 3),
@@ -133,21 +170,32 @@ CATEGORY_RULES = [
     {"id": "file", "label": "文件管理", "priority": 18, "terms": [
         ("folder", 3), ("drag", 2), ("drop", 1), ("file", 1), ("文件", 1), ("目录", 1),
         ("拖拽", 3), ("网盘", 3), ("附件", 1), ("备份", 2)]},
+    # "鲸鱼娘/小鲸鱼/看板娘" 是 DSH 桌宠的通用说法（官方吉祥物是鲸鱼）；
+    # 「娘」在这批语料里就是"角色/看板娘"的标记，不是"姑娘"那种泛用
     {"id": "pet", "label": "桌宠娱乐", "priority": 19, "terms": [
         ("pet", 3), ("pokemon", 3), ("live2d", 3), ("game", 2), ("桌宠", 3), ("宠物", 3),
-        ("养成", 3), ("游戏", 2), ("虚拟形象", 3)]},
-    # 「给整个生态定规矩」的那批仓库：dsh-std、插件互操作元协议、社区标准、接口契约…
-    # 坑在于"标准/协议/公约"全是泛词（最大公约数、标准差、身高标准、HTTP 协议、DevTools Protocol），
-    # 所以先过一道生态语境门槛，再靠精确词打分；priority 最后：同分让给更具体的扇区。
-    {"id": "spec", "label": "公约协议", "priority": 20,
+        ("养成", 3), ("游戏", 2), ("虚拟形象", 3),
+        ("小鲸鱼", 6), ("鲸鱼娘", 5), ("娘", 3), ("看板娘", 3), ("mascot", 3), ("吉祥物", 3), ("陪伴", 2)]},
+    # 两件事合起来回答"这个生态的规则与地基由谁定"：
+    #   1) 协议/规范/标准：dsh-std、插件互操作元协议、社区共识、接口契约…
+    #   2) 基座/框架：侧边栏底座、皮肤框架、工作台基座…（别的插件往上长的那种）
+    # 坑一："标准/协议/公约"全是泛词；坑二："framework/infrastructure" 也满大街。
+    # 所以 gate 要求【生态语境】或【基座自述】，strong 让"底座/基座/皮肤框架"这类自述直接胜出。
+    {"id": "spec", "label": "协议基座", "priority": 20,
      "gate": {
-         "name": re.compile(r"((^|[-_])(std|spec|specs|convention|conventions|covenant|charter)([-_]|$))|((插件|生态)(规范|标准|公约|契约|协议))|(meta[-_]protocol)"),
-         "desc": re.compile(r"(插件|生态|社区)[^\n]{0,10}(规范|标准|公约|共识|契约|协议)|互操作|元协议|meta[- ]protocol|plugin[- ](standard|spec|specification|convention|contract|schema|manifest)|ecosystem[- ](standard|spec|specification|convention)|community[- ](standard|spec|consensus|convention)|conventions every plugin|(standard|specification|protocol)\s+for\s+(dsh|deepseek|plugins?)", re.I),
+         "name": re.compile(r"((^|[-_])(std|spec|specs|convention|conventions|covenant|charter)([-_]|$))|((插件|生态)(规范|标准|公约|契约|协议))|(meta[-_]protocol)|(基座|底座)"),
+         "desc": re.compile(SPEC_SELF_SRC + "|" + BASE_SELF_SRC, re.I),
+     },
+     "strong": {
+         "name": re.compile(r"(基座|底座)"),
+         "desc": re.compile(BASE_SELF_SRC, re.I),
      },
      "terms": [
         ("公约", 2), ("元协议", 3), ("互操作", 3), ("契约", 2), ("约定", 1), ("规范", 2), ("协议", 1), ("标准", 1),
         ("convention", 2), ("specification", 2), ("interoperability", 3), ("interoperable", 3), ("schema", 1),
-        ("protocol", 1), ("standard", 1), ("rfc", 1), ("manifest", 1), ("接口定义", 3), ("插件规范", 3), ("插件标准", 3)]},
+        ("protocol", 1), ("standard", 1), ("rfc", 1), ("manifest", 1), ("接口定义", 3), ("插件规范", 3), ("插件标准", 3),
+        ("基座", 4), ("底座", 4), ("脚手架", 3), ("基础设施", 3), ("框架", 3), ("中间件", 2), ("内核", 2),
+        ("foundation", 3), ("framework", 2), ("scaffold", 3), ("infrastructure", 2)]},
 ]
 
 # 细枝分类：与大分类同一套词边界规则，用于「选中扇区后铺满整圆」的二级扇区。
@@ -338,6 +386,18 @@ def _is_excluded(rule: dict, sig: dict) -> bool:
     return True
 
 
+def _strong_hit(rule: dict, sig: dict) -> bool:
+    """强命中：规则声明 strong（name/desc/topics 三个正则）时，命中即直接胜出，不再比分数。
+
+    只给语义无歧义的"自述"用，例如「侧边栏底座」「皮肤框架」——
+    这类仓库的定位就是生态基座，不该因为正文里同时出现 sidebar/皮肤 等词被分流。
+    """
+    strong = rule.get("strong")
+    if not strong:
+        return False
+    return any(strong.get(key) and strong[key].search(sig[key]) for key in ("name", "desc", "topics"))
+
+
 def classify_node(node: dict) -> dict:
     """单仓库分类：返回 {id,label,score,hits,blocked}。"""
     sig = _signals(node)
@@ -359,6 +419,9 @@ def classify_node(node: dict) -> dict:
         if _is_excluded(rule, sig):
             blocked = blocked or {"id": rule["id"], "label": rule["label"], "reason": "被排除规则拦下"}
             continue
+        if _strong_hit(rule, sig):
+            best = {"id": rule["id"], "label": rule["label"], "score": score, "hits": hits[:3], "strong": True}
+            break  # 强命中：直接胜出
         if best is None or score > best["score"]:
             best = {"id": rule["id"], "label": rule["label"], "score": score, "hits": hits[:4]}
     # 最低置信分：只有一个很弱的描述命中时不硬塞进扇区，留给「其他」
@@ -395,9 +458,28 @@ def classify_node(node: dict) -> dict:
 KEEP_ALWAYS = ("spec",)
 
 
-def apply_categories(nodes: list[dict], min_count: int = 10, max_sectors: int = 20, keep_ids=KEEP_ALWAYS) -> dict:
-    """全量归类 + 长尾合并，语义与 JS 的 applyCategories 一致。"""
-    raw = {node["id"]: classify_node(node) for node in nodes}
+def apply_categories(
+    nodes: list[dict],
+    min_count: int = 10,
+    max_sectors: int = 20,
+    keep_ids=KEEP_ALWAYS,
+    base_ids=(),
+) -> dict:
+    """全量归类 + 长尾合并，语义与 JS 的 applyCategories 一致。
+
+    base_ids：策展认定的生态基座（tools/ecosystem.json 的 bases）直接归入协议基座 ——
+    它们是"别人长在上面"的那批，但正文未必写着"基座"二字。
+    """
+    curated = set(base_ids or ())
+    spec_label = LABELS.get("spec", "协议基座")
+    raw = {
+        node["id"]: (
+            {"id": "spec", "label": spec_label, "score": 0, "hits": ["策展基座"], "strong": True, "curatedBase": True}
+            if node["id"] in curated
+            else classify_node(node)
+        )
+        for node in nodes
+    }
     counts: dict[str, int] = {}
     for result in raw.values():
         counts[result["id"]] = counts.get(result["id"], 0) + 1
@@ -425,6 +507,14 @@ def apply_categories(nodes: list[dict], min_count: int = 10, max_sectors: int = 
         node["categoryLabel"] = result["label"] if keep else OTHER["label"]
         node["categoryScore"] = result["score"]
         node["categoryHits"] = result["hits"]
+        if result.get("strong"):
+            node["categoryStrong"] = True
+        else:
+            node.pop("categoryStrong", None)
+        if result.get("curatedBase"):
+            node["categoryCurated"] = True
+        else:
+            node.pop("categoryCurated", None)
         sub = result.get("sub")
         node["subcategory"] = sub["id"] if (keep and sub) else None
         node["subcategoryLabel"] = sub["label"] if (keep and sub) else None

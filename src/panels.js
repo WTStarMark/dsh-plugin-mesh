@@ -5,7 +5,7 @@
  */
 import { colorOfTag, EDGE_STYLES, formatStars, formatDate, ownerSiblings, isConfirmedNoise, NOISE_OWNER_MIN_REPOS, NOISE_OWNER_MAX_STARS } from "./mesh-data.js";
 
-const EDGE_ORDER = ["neighbor", "owner", "topic", "fork"];
+const EDGE_ORDER = ["neighbor", "owner", "topic", "resonance", "fork"];
 
 export function el(tag, props = {}, children = []) {
   const node = document.createElement(tag);
@@ -169,7 +169,7 @@ export function renderRail(root, prepared, state, actions, view = {}) {
     ),
   );
 
-  root.replaceChildren(...[focusBanner, sec("总览", [
+  const overviewSec = sec("总览", [
       el("div", { class: "readout-grid" }, [
         stat(nodes.length, "仓库数", "hot"),
         stat(edges.length, "关系对数"),
@@ -195,8 +195,8 @@ export function renderRail(root, prepared, state, actions, view = {}) {
               + " 个仓库）已被剔除，不再展示 —— 判据是同一作者收录超过 " + NOISE_OWNER_MIN_REPOS + " 个仓库且每个仓库星标都低于 " + NOISE_OWNER_MAX_STARS + "。",
           })
         : null,
-    ]),
-    sec("扇区划分依据", [
+    ]);
+  const basisSec = sec("扇区划分依据", [
       field(
         "划分依据",
         el("select", { on: { change: (ev) => actions.setGroupBy(ev.target.value) } }, [
@@ -208,12 +208,12 @@ export function renderRail(root, prepared, state, actions, view = {}) {
         class: "note",
         text: "圆心固定为官方仓库 " + hubId + "。每个分类对应一束柔和的光，方向之间等角分布；扇区内离散随机散布，星标越多整体越靠近圆心。",
       }),
-    ]),
-    sec("捕获标签", [
+    ]);
+  const tagsSec = sec("捕获标签", [
       tagRows,
       el("div", { class: "note", text: "仓库需同时具备所有已开启的标签才会高亮；关掉某个标签即可筛掉带它的仓库。" }),
-    ]),
-    sec("筛选", [
+    ]);
+  const filterSec = sec("筛选", [
       field("星标下限", slider, el("b", { text: starText(state.minStars) })),
       field("推送时间", pushedSelect),
       field("仓库语言", languageSelect),
@@ -226,8 +226,8 @@ export function renderRail(root, prepared, state, actions, view = {}) {
         el("button", { class: "key", text: "重置筛选", title: "清空标签/语言/归档/星标/搜索，并退出放大与关联聚焦", on: { click: () => actions.resetFilters() } }),
       ]),
       el("div", { class: "note", text: "筛选只做淡化、不移除节点：布局位置保持不变，便于前后对照。" }),
-    ]),
-    sec(view.focusCategory ? "细枝分类" : "功能扇区", [
+    ]);
+  const sectorsSec = sec(view.focusCategory ? "细枝分类" : "功能扇区", [
       view.focusCategory ? subRows : groupRows,
       el("div", {
         class: "note",
@@ -235,14 +235,17 @@ export function renderRail(root, prepared, state, actions, view = {}) {
           ? "已放大到「" + (view.focusLabel ?? view.focusCategory) + "」：整个圆都是它，扇区是它的细枝分类。点细枝可高亮，Esc 或上方按钮返回全局。"
           : "共 " + groups.length + " 个扇区，每个约 " + (groups.length ? (360 / groups.length).toFixed(1) : "0") + "°。点击可放大该扇区（圆内再按细枝分类铺开）。",
       }),
-    ]),
-    hubs.length
-      ? sec("高频共享标签", [
-          el("div", { class: "hubchips" }, hubs.slice(0, 10).map((h) => el("span", { class: "hubchip", text: h.topic + "（" + h.count + "）" }))),
-          el("div", { class: "note", text: "出现次数超过阈值的标签，若两两连线会形成一团乱麻，因此只作为属性展示，不参与连线。" }),
-        ])
-      : null,
-  ].filter(Boolean));
+    ]);
+  const hubsSec = hubs.length
+    ? sec("高频共享标签", [
+        el("div", { class: "hubchips" }, hubs.slice(0, 10).map((h) => el("span", { class: "hubchip", text: h.topic + "（" + h.count + "）" }))),
+        el("div", { class: "note", text: "出现次数超过阈值的标签，若两两连线会形成一团乱麻，因此只作为属性展示，不参与连线。" }),
+      ])
+    : null;
+
+  // 左栏顺序（v0.4.3 用户指定）：总览 → 功能扇区 → 筛选 → 其余照常
+  // （其余 = 扇区划分依据 / 捕获标签 / 高频共享标签，保持它们原本的相对顺序）
+  root.replaceChildren(...[focusBanner, overviewSec, sectorsSec, filterSec, basisSec, tagsSec, hubsSec].filter(Boolean));
 }
 
 export function renderInspector(root, prepared, state, actions, view = {}) {
@@ -250,14 +253,39 @@ export function renderInspector(root, prepared, state, actions, view = {}) {
   const arm = view.armOf && node ? view.armOf.get(node.id) : null;
   const counts = view.linkCounts ?? {};
 
+  // 右栏固定的前两段（v0.4.3 用户指定）：1. 图例  2. 操作提示；其余小节照旧排在它们后面
+  const legendSec = sec("图例", [
+      el(
+        "div",
+        { class: "legend" },
+        EDGE_ORDER.filter((type) => (counts[type] ?? 0) > 0 || prepared.edgeTypes.includes(type)).map((type) => {
+          const style = EDGE_STYLES[type] ?? { label: type, color: "#8899aa", dash: [] };
+          const n = counts[type] ?? prepared.edges.filter((e) => e.type === type).length;
+          return el("div", { class: "row" }, [
+            el("span", { class: "line", style: { borderTopColor: style.color ?? "var(--accent)", borderTopStyle: style.dash?.length ? "dashed" : "solid" } }),
+            // 同作者这类完整关系数可能上十万，用紧凑写法免得撑破侧栏
+            el("span", { text: style.label + "（" + (n >= 10000 ? formatStars(n) : n) + "）" }),
+          ]);
+        }),
+      ),
+      el("div", { class: "note", text: "连线一律画成背离圆心的弧线，交叉时绕开圆心，不会在中心糊成一团。" }),
+      el("div", {
+        class: "note",
+        text: "同作者按完整关系计数：点选任意仓库都会连到它全部同作者仓库。因此这里的数比数据文件里存的边多 —— 超大作者在数据层只存「枢纽连线」的星形拓扑，否则载荷会爆。",
+      }),
+      el("div", { class: "note", text: "节点配色表示功能分类，半径表示星标（对数）。" }),
+  ]);
+  const hintsSec = sec("操作提示", [
+      el("div", {
+        class: "note",
+        text: "· 滚轮缩放，按住拖拽平移，单击选中仓库，双击聚焦其关联仓库\n· 左侧筛选只淡化、不移除节点，位置保持不变\n· 琥珀色虚线圆环表示疑似噪声，等待人工复核\n· 扇区标签沿中轴朝外，通常越靠近圆心星标越高",
+    }),
+  ]);
+
   if (!node) {
     root.replaceChildren(
-      sec("操作提示", [
-        el("div", {
-          class: "note",
-          text: "· 滚轮缩放，按住拖拽平移，单击选中仓库，双击聚焦其关联仓库\n· 左侧筛选只淡化、不移除节点，位置保持不变\n· 琥珀色虚线圆环表示疑似噪声，等待人工复核\n· 扇区标签沿中轴朝外，通常越靠近圆心星标越高",
-        }),
-      ]),
+      legendSec,
+      hintsSec,
       sec(
         "待复核仓库（" + prepared.review.length + " 个）",
         prepared.review.slice(0, 8).map((n) =>
@@ -268,27 +296,7 @@ export function renderInspector(root, prepared, state, actions, view = {}) {
           ]),
         ),
       ),
-      sec("图例", [
-        el(
-          "div",
-          { class: "legend" },
-          EDGE_ORDER.filter((type) => (counts[type] ?? 0) > 0 || prepared.edgeTypes.includes(type)).map((type) => {
-            const style = EDGE_STYLES[type] ?? { label: type, color: "#8899aa", dash: [] };
-            const n = counts[type] ?? prepared.edges.filter((e) => e.type === type).length;
-            return el("div", { class: "row" }, [
-              el("span", { class: "line", style: { borderTopColor: style.color ?? "var(--accent)", borderTopStyle: style.dash?.length ? "dashed" : "solid" } }),
-              // 同作者这类完整关系数可能上十万，用紧凑写法免得撑破侧栏
-              el("span", { text: style.label + "（" + (n >= 10000 ? formatStars(n) : n) + "）" }),
-            ]);
-          }),
-        ),
-        el("div", { class: "note", text: "连线一律画成背离圆心的弧线，交叉时绕开圆心，不会在中心糊成一团。" }),
-        el("div", {
-          class: "note",
-          text: "同作者按完整关系计数：点选任意仓库都会连到它全部同作者仓库。因此这里的数比数据文件里存的边多 —— 超大作者在数据层只存「枢纽连线」的星形拓扑，否则载荷会爆。",
-        }),
-        el("div", { class: "note", text: "节点配色表示功能分类，半径表示星标（对数）。" }),
-      ]),
+
     );
     return;
   }
@@ -306,6 +314,8 @@ export function renderInspector(root, prepared, state, actions, view = {}) {
   const relatedCount = [...byType.values()].reduce((sum, list) => sum + list.length, 0);
 
   root.replaceChildren(
+    legendSec,
+    hintsSec,
     el("section", { class: "sec" }, [
       el("div", { class: "d-head" }, [
         node.avatar ? el("img", { src: node.avatar, alt: "", loading: "lazy", on: { error: (ev) => (ev.target.style.visibility = "hidden") } }) : null,
@@ -375,9 +385,11 @@ export function renderInspector(root, prepared, state, actions, view = {}) {
               text:
                 type === "owner"
                   ? "同一作者：" + node.owner
-                  : nb.via?.length
-                    ? "共同主题：" + nb.via.slice(0, 2).join("、")
-                    : "权重 ×" + nb.weight,
+                  : type === "resonance"
+                    ? "生态共鸣：" + (nb.via?.[0] ?? "基座")
+                    : nb.via?.length
+                      ? "共同主题：" + nb.via.slice(0, 2).join("、")
+                      : "权重 ×" + nb.weight,
             }),
           ]);
         }),
@@ -450,7 +462,13 @@ export function renderLinkLegend(root, prepared, state, actions, view = {}) {
   };
   const accent = view.colors?.accent ?? "#2f7df6";
   const topicColor = view.colors?.topic ?? "#e08a00";
+  const resonanceColor = EDGE_STYLES.resonance?.color ?? "#a86bff";
   root.replaceChildren(
-    ...[row(accent, false, "同作者", linked("owner")), row(topicColor, true, "主题共现", linked("topic"))],
+    ...[
+      row(accent, false, "同作者", linked("owner")),
+      row(topicColor, true, "主题共现", linked("topic")),
+      // 生态共鸣是人工策展的边（基座 → 生态），也在这里显示当前选中项的条数
+      row(resonanceColor, false, "生态共鸣", linked("resonance")),
+    ],
   );
 }

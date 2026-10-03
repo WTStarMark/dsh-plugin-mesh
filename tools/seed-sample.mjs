@@ -10,7 +10,9 @@
  *   data/mesh.json        前端数据契约（meta / tags / clusters / nodes / edges）
  */
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { applyCategories, DEFAULT_OPTIONS } from "./categories.mjs";
+import { applyCategories, DEFAULT_OPTIONS, nonPluginReason } from "./categories.mjs";
+// 生态共鸣清单（人工策展，见 tools/curate-ecosystem.mjs）
+import ecosystem from "./ecosystem.json" with { type: "json" };
 // 相关性判定与采集器同一套口径（三档结论：related / noise / manual）
 import { analyzeRelevance } from "./relevance.mjs";
 import { dirname, resolve } from "node:path";
@@ -79,6 +81,7 @@ function buildMesh(rawRepos, queryMeta) {
   for (const r of rawRepos) {
     const matchedTags = WHITELIST.filter((t) => r.topics.includes(t));
     if (!matchedTags.length) continue; // 精确命中才算数：只认 topics[] 里的白名单标签
+    if (nonPluginReason(r)) continue; // 非 DSH 语境（例如 DSH 指深度哈希）不进索引
     if (seen.has(r.id)) {
       const prev = seen.get(r.id);
       prev.matchedTags = [...new Set([...prev.matchedTags, ...matchedTags])].sort(
@@ -164,6 +167,19 @@ function buildMesh(rawRepos, queryMeta) {
     }
   }
 
+  // ---- 生态共鸣：基座 → 长在它上面的插件（人工策展 + README 复核，不是规则推导）----
+  let resonanceEdges = 0;
+  const nodeIds = new Set(nodes.map((n) => n.id));
+  for (const base of ecosystem.bases ?? []) {
+    if (base.enabled === false) continue; // 临时关闭的基座不建边（但仍是策展基座，分类照旧）
+    if (!nodeIds.has(base.id)) continue;
+    for (const child of base.verified ?? []) {
+      if (!child.id || child.id === base.id || !nodeIds.has(child.id)) continue;
+      addEdge(base.id, child.id, "resonance", base.label ?? "生态共鸣");
+      resonanceEdges++;
+    }
+  }
+
   // ---- 度数上限：只裁剪"主题共现"边；同作者是硬关系，必须保留 ----
   // （曾经的 bug：高星仓库先被主题边占满配额，Tencent/BrowserSkill 与 Tencent/WeKnora 的同作者边被静默丢掉）
   const DEGREE_CAP = 14;
@@ -189,7 +205,11 @@ function buildMesh(rawRepos, queryMeta) {
   for (const n of nodes) n.degree = degree.get(n.id) ?? 0;
 
   // ---- 功能分类：纯规则打分，不按标签分组（见 tools/categories.mjs）----
-  const categoryStats = applyCategories(nodes, { ...DEFAULT_OPTIONS });
+  // 策展认定的生态基座直接归入协议基座（与 reclassify / Python 采集器同一套口径）
+  const categoryStats = applyCategories(nodes, {
+    ...DEFAULT_OPTIONS,
+    baseIds: (ecosystem.bases ?? []).map((b) => b.id),
+  });
   const clusters = categoryStats.counts.map((c) => ({ id: c.id, label: c.label, count: c.count }));
 
   const tagCounts = WHITELIST.map((t) => ({
@@ -213,12 +233,16 @@ function buildMesh(rawRepos, queryMeta) {
       reviewedAsNoise: nodes.filter((n) => n.review).length,
       ownerEdges,
       ownerStarEdges: ownerStars,
+      resonanceEdges,
+      ecosystemBases: (ecosystem.bases ?? []).map((b) => b.id),
+      ecosystemDisabled: (ecosystem.bases ?? []).filter((b) => b.enabled === false).map((b) => b.id),
       topicEdgesDroppedByCap: dropped,
       categories: {
         classified: categoryStats.classified,
         unclassified: categoryStats.unclassified,
-        minCount: 10,
-        maxSectors: 18,
+        minCount: DEFAULT_OPTIONS.minCount,
+        maxSectors: DEFAULT_OPTIONS.maxSectors,
+        keepIds: DEFAULT_OPTIONS.keepIds,
         merged: categoryStats.merged,
         distribution: categoryStats.counts,
       },
