@@ -76,7 +76,7 @@ def pick_repo(item: dict) -> dict:
         "name": item.get("name"),
         "owner": owner.get("login") or "?",
         "ownerType": owner.get("type"),
-        "avatar": owner.get("avatar_url"),
+        "avatar": sized_avatar(owner.get("avatar_url")),
         "htmlUrl": item.get("html_url"),
         "stars": item.get("stargazers_count") or 0,
         "forks": item.get("forks_count") or 0,
@@ -151,6 +151,22 @@ def relevance_score(repo: dict) -> int:
     if _CORDIS_RE.search(repo.get("description") or "") or "cordis" in topics:
         score += 1
     return score
+
+
+# 头像尺寸：GitHub 默认给 460×460 原图（实测单张 12KB~282KB），
+# 而图上最大也就几十像素。统一要 64px（视网膜屏也够），单张降到 1~8KB。
+AVATAR_SIZE = 64
+
+
+def sized_avatar(url: str | None) -> str | None:
+    """给 GitHub 头像 URL 补上尺寸参数。非 GitHub 头像（或已带尺寸）原样返回。"""
+    if not url or not isinstance(url, str):
+        return url or None
+    if not url.startswith("https://avatars.githubusercontent.com/"):
+        return url
+    if re.search(r"[?&](s|size)=", url):
+        return url
+    return url + ("&" if "?" in url else "?") + "s=" + str(AVATAR_SIZE)
 
 
 def find_noise_owners(

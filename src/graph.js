@@ -71,9 +71,33 @@ export function createGraphView(canvas, hooks = {}) {
   let theme = themeOf();
   let gridRGB = hexParts(theme.canvas.ink);
   let showAvatars = true;
+  // 头像是一张张流式到货的：每张都触发整画布重绘（1.7 万球 + 2.3 万边）会变成持续卡顿。
+  // 合并成 250ms 一次；流式期间顺便降 LOD（复用手势那套低细节渲染），最后一张仍会补画。
+  let avatarPaintAt = 0;
+  let avatarPaintTimer = 0;
+  let avatarBurstTimer = 0;
   const avatars = createAvatarStore({
     concurrency: 6,
     onLoad: () => {
+      lowDetail = true;
+      clearTimeout(avatarBurstTimer);
+      avatarBurstTimer = setTimeout(() => {
+        lowDetail = false;
+        invalidate();
+      }, 320);
+      const now = Date.now();
+      if (now - avatarPaintAt < 250) {
+        if (!avatarPaintTimer) {
+          avatarPaintTimer = setTimeout(() => {
+            avatarPaintTimer = 0;
+            avatarPaintAt = Date.now();
+            dirty = true;
+            wake();
+          }, 250);
+        }
+        return;
+      }
+      avatarPaintAt = now;
       dirty = true;
       wake();
     },
@@ -498,7 +522,8 @@ export function createGraphView(canvas, hooks = {}) {
       ctx.shadowBlur = 0;
       // 作者头像：球够大时才画，未加载/失败时保留上面的底色圆
       if (showAvatars && active && inFocus && r >= AVATAR_MIN_RADIUS && node.avatar) {
-        const img = avatars.ready(node.avatar);
+        // 优先级用屏幕半径：越大的球越先加载；加载器每帧结束会淘汰看不见的
+        const img = avatars.want(node.avatar, r);
         if (img) {
           ctx.save();
           ctx.beginPath();
@@ -630,6 +655,8 @@ export function createGraphView(canvas, hooks = {}) {
   }
 
   function draw() {
+    // 头像加载器按"这一帧想要哪些"做优先级排序与淘汰（工作集上限 100）
+    avatars.beginFrame();
     if (!prepared) return;
     focusIds = computeFocusIds();
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -641,6 +668,7 @@ export function createGraphView(canvas, hooks = {}) {
     drawTargetRings(); // 被指向的球套同色光圈（画在球之上，才像"框选"）
     drawHub();
     drawLabels();
+    avatars.endFrame(); // 这一帧没要、且超出上限的头像在这里被淘汰
   }
 
   function frame() {

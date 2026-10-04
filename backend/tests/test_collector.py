@@ -225,6 +225,16 @@ def fake_repo(owner: str, name: str, stars: int = 0, topics=("dsh", "dsh-plugin"
 class NoiseBlacklistTest(unittest.TestCase):
     """噪声黑名单：>300 个仓库且 0 星占比 >98%（主判据），或 >200 个仓库且全是 0 星（老判据）=> 剔除。"""
 
+    def test_avatar_url_gets_size_param(self):
+        """头像 URL 必须带尺寸参数：GitHub 默认给 460×460 原图（实测单张最大 282KB）。"""
+        from dsh_mesh.build import AVATAR_SIZE, sized_avatar
+
+        self.assertEqual(sized_avatar("https://avatars.githubusercontent.com/u/1?v=4"), "https://avatars.githubusercontent.com/u/1?v=4&s=" + str(AVATAR_SIZE))
+        self.assertEqual(sized_avatar("https://avatars.githubusercontent.com/u/2"), "https://avatars.githubusercontent.com/u/2?s=" + str(AVATAR_SIZE))
+        self.assertEqual(sized_avatar("https://avatars.githubusercontent.com/u/3?v=4&s=32"), "https://avatars.githubusercontent.com/u/3?v=4&s=32", "已带尺寸的不动")
+        self.assertEqual(sized_avatar("https://example.com/a.png"), "https://example.com/a.png", "非 GitHub 头像不动")
+        self.assertIsNone(sized_avatar(None))
+
     def test_mass_publish_owner_is_noise(self):
         """主判据：一个人发 300+ 个仓库、0 星占比超 98% —— 典型批量刷标签号。"""
         raws = [fake_repo("mass", f"dsh-mass-{i}") for i in range(295)]

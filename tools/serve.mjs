@@ -18,13 +18,19 @@ import { readFile, stat } from "node:fs/promises";
 import { extname, join, normalize, resolve, sep, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
-import { gzipSync } from "node:zlib";
+import { gzipSync, brotliCompress, constants } from "node:zlib";
+import { promisify } from "node:util";
+
+// 同步压缩会把单线程服务整个卡住：details 分片 250KB 用 q11 要 ~0.5-1s，
+// 期间所有请求（连 /api/status 这种 1KB 的）都在排队 —— 表现就是"页面卡一下"。
+// 改用异步版：压缩跑在 libuv 线程池里，事件循环不被阻塞。
+const brotliAsync = promisify(brotliCompress);
 import { networkInterfaces } from "node:os";
 import { createApi, apiIndex, validNamePart } from "./api.mjs";
 import { renderPreviewSvg, sceneFromCore } from "./preview-svg.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const VERSION = "0.4.7";
+const VERSION = "0.4.8";
 /** 卡片默认去处（线上站点），可用环境变量 SITE_URL 或请求参数 ?link= 覆盖 */
 const SITE_URL = process.env.SITE_URL ?? "http://104.129.51.126/";
 
@@ -64,6 +70,8 @@ const ALLOW = [
   { pattern: /^\/src\/[A-Za-z0-9_.-]+\.js$/, file: null }, // 前端模块
   { pattern: /^\/data\/mesh\.json$/, file: "data/mesh.json" },
   { pattern: /^\/data\/mesh-core\.json$/, file: "data/mesh-core.json" },
+  { pattern: /^\/data\/mesh-core\.bin$/, file: "data/mesh-core.bin" },
+  { pattern: /^\/data\/mesh-core\.head\.bin$/, file: "data/mesh-core.head.bin" },
   { pattern: /^\/data\/details\/[0-9]+\.json$/, file: null },
 ];
 
@@ -156,6 +164,21 @@ function rateLimited(req) {
   }
   entry.count += 1;
   return entry.count > RATE_LIMIT.max;
+}
+
+/**
+ * 压缩结果缓存：Brotli q9 对 11MB 的契约要压 ~1 秒，而同一份文件会被多个访客反复请求。
+ * 按「路径 + ETag + 编码」缓存最近几份压缩结果，文件一变 ETag 就变，缓存自然失效。
+ */
+const compressCache = new Map();
+const COMPRESS_CACHE_MAX = 8;
+function compressCacheGet(pathname, etag, encoding) {
+  return compressCache.get(pathname + "|" + etag + "|" + encoding) ?? null;
+}
+function compressCachePut(pathname, etag, encoding, payload) {
+  compressCache.set(pathname + "|" + etag + "|" + encoding, payload);
+  while (compressCache.size > COMPRESS_CACHE_MAX) compressCache.delete(compressCache.keys().next().value);
+  return payload;
 }
 
 function sendJson(res, data, code = 200, extra = {}) {
@@ -504,13 +527,40 @@ const server = createServer(async (req, res) => {
       console.log("304 " + pathname);
       return;
     }
-    const compressible = /^(text\/|application\/(json|javascript))/.test(type);
-    const wantsGzip = String(req.headers["accept-encoding"] ?? "").includes("gzip");
+    // 二进制契约（.bin）本身已经很紧凑，但 Brotli 仍能再省一点，一并压
+    const compressible = /^(text\/|application\/(json|javascript|octet-stream))/.test(type) || /mesh-core.*\.bin$/.test(pathname);
+    const accept = String(req.headers["accept-encoding"] ?? "");
     let payload = body;
     let encoding;
-    if (compressible && wantsGzip && body.length > 1024) {
-      payload = gzipSync(body);
-      encoding = "gzip";
+    if (compressible && body.length > 1024) {
+      // 优先 Brotli（JSON 比 gzip 再省 15~20%），不支持的客户端回落 gzip
+      if (/\bbr\b/.test(accept)) {
+        // Brotli 是同步压缩，会把整个服务卡住 —— 按体积分档：
+        //   <512KB  q11（首屏主干 250KB → 98KB，压缩 ~0.5s）
+        //   <2MB    q9 （整份二进制 1.4MB → 601KB，~0.3s）
+        //   更大    直接 gzip（11MB 的 JSON 用 q11 要 21 秒，不能这么干）
+        const quality = body.length < 512 * 1024 ? 11 : body.length < 2 * 1024 * 1024 ? 9 : 5;
+        const cached = quality ? compressCacheGet(pathname, etag, "br") : null;
+        if (quality) {
+          payload =
+            cached ??
+            compressCachePut(
+              pathname,
+              etag,
+              "br",
+              await brotliAsync(body, {
+                params: { [constants.BROTLI_PARAM_QUALITY]: quality, [constants.BROTLI_PARAM_SIZE_HINT]: body.length },
+              }),
+            );
+          encoding = "br";
+        } else if (/\bgzip\b/.test(accept)) {
+          payload = gzipSync(body);
+          encoding = "gzip";
+        }
+      } else if (/\bgzip\b/.test(accept)) {
+        payload = gzipSync(body);
+        encoding = "gzip";
+      }
     }
     const headers = {
       "content-type": type,
@@ -524,7 +574,7 @@ const server = createServer(async (req, res) => {
     res.writeHead(200, headers);
     if (method === "HEAD") res.end();
     else res.end(payload);
-    console.log("200 " + pathname + " (" + payload.length + "B" + (encoding ? " gzip" : "") + ")");
+    console.log("200 " + pathname + " (" + payload.length + "B" + (encoding ? " " + encoding : "") + ")");
   } catch {
     deny(res, 404, "404 " + pathname);
     console.log("404 " + pathname);

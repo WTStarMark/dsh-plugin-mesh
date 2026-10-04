@@ -4,6 +4,7 @@
  * 载入带本地缓存：二次访问先秒开缓存，再后台用 ETag 校验。
  */
 import { createStore } from "./cache.js";
+import { decodeCore, decodeCoreAsync } from "./mesh-core-bin.js";
 
 export const TAG_COLORS = {
   "dsh-plugin-desktop": "#9b8cf0",
@@ -94,12 +95,55 @@ export async function loadMeshCached(url = "./data/mesh.json", options = {}) {
  */
 export async function loadMeshBest(url = "./data/mesh.json", options = {}) {
   const coreUrl = options.coreUrl ?? "./data/mesh-core.json";
+
+  // ① 二进制契约：先拿主干分片（几十 KB）立刻出图，整份在后台补上
+  const binBase = options.binUrl ?? "./data/mesh-core.bin";
+  const headUrl = options.headUrl ?? "./data/mesh-core.head.bin";
+  const fetchBin = async (target, cache, chunked = false) => {
+    const res = await fetch(target, cache ? { cache } : undefined);
+    if (!res.ok || typeof res.arrayBuffer !== "function") return null;
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    // 主干分片小（~3 千节点，8ms），直接同步解，首屏最快；整份用分块解，避免独占主线程
+    const core = chunked ? await decodeCoreAsync(bytes) : decodeCore(bytes);
+    return core?.nodes?.length && core.meta?.layout === "precomputed" ? core : null;
+  };
   try {
-    const res = await fetch(coreUrl, { cache: "no-store" });
+    const head = await fetchBin(headUrl);
+    if (head) {
+      return {
+        mesh: head,
+        core: true,
+        fromCache: false,
+        // 后台把整份拉回来；签名不同（节点数变了）就交给上层重建
+        revalidate: async () => {
+          // 整份用【分块解码】：1.7 万个节点摊到多帧里建，主线程不再被独占几秒
+          const full = await fetchBin(binBase, "no-cache", true).catch(() => null);
+          return full && dataSignature(full) !== dataSignature(head) ? full : null;
+        },
+      };
+    }
+  } catch {
+    /* 没有二进制契约就往下走 JSON */
+  }
+
+  try {
+    // 走浏览器缓存 + ETag：回访拿到 304（几十字节），不再每次重下整份契约。
+    // 数据新鲜度靠下面的 revalidate（带 no-cache 强制校验 ETag）。
+    const res = await fetch(coreUrl);
     if (res.ok) {
       const core = await res.json();
       if (core?.nodes?.length && core.meta?.layout === "precomputed") {
-        return { mesh: core, core: true, fromCache: false, revalidate: async () => null };
+        return {
+          mesh: core,
+          core: true,
+          fromCache: false,
+          revalidate: async () => {
+            const fresh = await fetch(coreUrl, { cache: "no-cache" });
+            if (!fresh.ok) return null;
+            const next = await fresh.json();
+            return (next?.meta?.generatedAt ?? null) !== (core.meta?.generatedAt ?? null) ? next : null;
+          },
+        };
       }
     }
   } catch {
@@ -136,6 +180,65 @@ export function prepareCore(core) {
   const review = nodes.filter((n) => n.review).sort((a, b) => b.stars - a.stars);
   const noise = nodes.filter(isConfirmedNoise).sort((a, b) => b.stars - a.stars);
   const ownerIndex = indexByOwner(nodes);
+  return {
+    mesh: core,
+    noise,
+    core: true,
+    nodes,
+    edges: triples,
+    links,
+    byId,
+    adjacency,
+    ownerIndex,
+    ownerPairs: countOwnerPairs(ownerIndex),
+    languages: [...new Set(nodes.map((n) => n.language).filter(Boolean))].sort(),
+    owners: new Set(nodes.map((n) => n.owner)),
+    maxStars: nodes.reduce((m, n) => Math.max(m, n.stars || 0), 0),
+    review,
+    meta: core.meta ?? {},
+    tags: core.tags ?? [],
+    clusters: core.clusters ?? [],
+    hubs: core.hubs ?? [],
+    edgeTypes: [...new Set(links.map((l) => l.type))],
+  };
+}
+
+/**
+ * 分块版 prepareCore：切换整份数据时用。
+ * prepareCore 是一次 ~250ms 的同步块（边上万条的邻接表 + 几个全量扫描），
+ * 这里把邻接表按批构建、并在各阶段之间让出主线程 —— 单块降到几十毫秒，切换不再"卡一下"。
+ */
+export async function prepareCoreAsync(core, options = {}) {
+  const yieldFn = options.yieldFn ?? (() => new Promise((resolve) => setTimeout(resolve, 0)));
+  const step = Math.max(500, options.chunk ?? 4000);
+  const nodes = core.nodes ?? [];
+  const triples = core.edges ?? [];
+
+  await yieldFn();
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const adjacency = new Map(nodes.map((n) => [n.id, []]));
+  await yieldFn();
+
+  const links = [];
+  for (let i = 0; i < triples.length; i++) {
+    const [a, b, code] = triples[i];
+    const na = nodes[a];
+    const nb = nodes[b];
+    if (!na || !nb) continue;
+    const type = EDGE_TYPE_BY_CODE[code] ?? "topic";
+    links.push({ a, b, type });
+    adjacency.get(na.id).push({ id: nb.id, type, weight: 1, via: [] });
+    adjacency.get(nb.id).push({ id: na.id, type, weight: 1, via: [] });
+    if ((i + 1) % step === 0) await yieldFn();
+  }
+  await yieldFn();
+
+  const review = nodes.filter((n) => n.review).sort((a, b) => b.stars - a.stars);
+  const noise = nodes.filter(isConfirmedNoise).sort((a, b) => b.stars - a.stars);
+  await yieldFn();
+  const ownerIndex = indexByOwner(nodes);
+  await yieldFn();
+
   return {
     mesh: core,
     noise,
@@ -470,6 +573,26 @@ export function isConfirmedNoise(node) {
  * 超过这个数就只做高亮、不画放射线，并在状态栏说明原因。
  */
 export const RAY_HIT_LIMIT = 100;
+
+/**
+ * 头像尺寸统一：GitHub 默认给 460×460 原图（实测单张最大 282KB），图上最大才几十像素。
+ * 与 backend/dsh_mesh/build.py 的 AVATAR_SIZE 保持一致；旧数据里没带参数的在渲染前补上。
+ */
+export const AVATAR_SIZE = 64;
+
+export function sizedAvatar(url) {
+  if (!url || typeof url !== "string") return url ?? null;
+  if (!url.startsWith("https://avatars.githubusercontent.com/")) return url;
+  if (/[?&](s|size)=/.test(url)) return url;
+  return url + (url.includes("?") ? "&" : "?") + "s=" + AVATAR_SIZE;
+}
+
+/** 数据签名：判断"拿到的这份数据是否换了"（节点数也要看，否则主干→整份的替换不会触发） */
+export function dataSignature(mesh) {
+  if (!mesh) return null;
+  const meta = mesh.meta ?? {};
+  return [meta.generatedAt ?? "", meta.sampleNodes ?? mesh.nodes?.length ?? 0, meta.partial ? "head" : "full"].join("|");
+}
 
 /** 搜索匹配：仓库名 / 作者 / 描述 / 标签 */
 export function matches(node, query) {

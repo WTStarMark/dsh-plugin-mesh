@@ -3,9 +3,9 @@
 **把带 `dsh` 系列 GitHub 标签的仓库，画成一张可交互的生态网络图。**
 
 [![在线访问](https://img.shields.io/badge/在线访问-104.129.51.126-2f7df6?style=flat-square)](http://104.129.51.126/)
-[![测试](https://img.shields.io/badge/tests-163%20JS%20%2B%2064%20Python-3fb8a8?style=flat-square)](#测试)
+[![测试](https://img.shields.io/badge/tests-170%20JS%20%2B%2068%20Python-3fb8a8?style=flat-square)](#测试)
 [![依赖](https://img.shields.io/badge/dependencies-0-57b894?style=flat-square)](#技术选型)
-[![版本](https://img.shields.io/badge/version-v0.4.7-9b8cf0?style=flat-square)](#)
+[![版本](https://img.shields.io/badge/version-v0.4.8-9b8cf0?style=flat-square)](#)
 
 👉 **在线地址：<http://104.129.51.126/>**
 
@@ -55,7 +55,9 @@
 | 头像 | 并发 6、按 URL 去重、球太小不发请求；默认开 |
 | 手机端 | ≤900px 画布全屏、侧栏变底部抽屉且**左右互斥**、双指缩放、安全区适配 |
 | 访问统计 | 同端口最小 API：访问数 / 同时在线；拿不到接口时整栏隐藏 |
-| 缓存 | gzip + ETag/304 + IndexedDB 秒开 + 后台校验 |
+| 缓存 | Brotli（q9，带压缩结果缓存）+ ETag/304 + IndexedDB 秒开 + 后台校验；契约回访走 304，不再重下整份 |
+| 二进制契约 | 首屏优先拉 `data/mesh-core.bin` 的**主干分片**（按星标前 3000 个，约 110KB）立刻出图，整份（约 610KB）在后台补上；JSON 契约保留作兜底。格式见 `src/mesh-core-bin.js`：分类/标签/判定/理由字典化 + 坐标半径定点化 + id 串池，未知字段直接报错 |
+| 头像尺寸 | 头像 URL 统一补 `s=64`：GitHub 默认给 460×460 原图（实测单张最大 282KB），加参数后单张 1~8KB |
 | 双主题 | 清爽（蓝白）、粉黛；明暗各一套，画布文字深色白字 / 浅色黑字 |
 
 ## 快速开始

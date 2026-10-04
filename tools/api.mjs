@@ -168,12 +168,16 @@ export function createApi({ root }) {
   const README_SEP = "\u0000";
 
   async function load() {
-    const now = Date.now();
-    if (cache.mesh && now - cache.at < DATA_TTL_MS) return cache.mesh;
-    const raw = await readFile(join(root, "data", "mesh.json"), "utf8");
+    // 按【文件 mtime】缓存，而不是固定 5 分钟 TTL：
+    // mesh.json 有 21MB，JSON.parse 要 ~1 秒，而且会阻塞整个事件循环；
+    // 每 5 分钟重解析一次 = 所有并发请求（含前端每 15 秒一次的 /api/status 轮询）被卡一下。
+    const file = join(root, "data", "mesh.json");
+    const info = await stat(file).catch(() => null);
+    if (cache.mesh && info && cache.mtimeMs === info.mtimeMs) return cache.mesh;
+    const raw = await readFile(file, "utf8");
     // 噪声黑名单兜底：旧快照里若还留着垃圾账号，接口也不该再吐出来（无噪声时是空操作）
     const mesh = stripNoiseOwners(JSON.parse(raw));
-    cache = { at: now, mesh };
+    cache = { at: Date.now(), mtimeMs: info?.mtimeMs ?? -1, mesh };
     return mesh;
   }
 

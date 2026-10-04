@@ -4,7 +4,7 @@
  * 状态变更路径永远是：改 state -> applyHighlight() -> 重绘 / 重渲染面板。
  * 过滤一律「淡化」而非「移除」，保证同一份数据在任意过滤下位置一致、可对比。
  */
-import { loadMeshBest, prepare, prepareCore, precomputedLayout, matches, formatStars, groupColor, starThreshold, ownerSiblings, stripNoiseOwners, isConfirmedNoise, EDGE_TYPE_BY_CODE, EDGE_STYLES, RAY_HIT_LIMIT } from "./mesh-data.js";
+import { loadMeshBest, prepare, prepareCore, prepareCoreAsync, precomputedLayout, matches, formatStars, groupColor, starThreshold, ownerSiblings, stripNoiseOwners, isConfirmedNoise, EDGE_TYPE_BY_CODE, EDGE_STYLES, RAY_HIT_LIMIT, dataSignature } from "./mesh-data.js";
 import { createDetailStore } from "./details.js";
 import { createStore } from "./cache.js";
 import { startStats, formatCount } from "./stats.js";
@@ -684,11 +684,12 @@ function loadPanels() {
 }
 
 /** 用一份数据把界面搭起来；后台校验拿到新数据时用 resetFilters=false 再跑一次 */
-function bootMesh(mesh, { resetFilters, core }) {
+async function bootMesh(mesh, { resetFilters, core }) {
   // 噪声黑名单：必须在 prepareCore / precomputedLayout 之前剔除，
   // 否则预计算里的节点索引与扇区成员会对不上（旧快照兜底，新数据本就干净）。
   mesh = stripNoiseOwners(mesh);
-  prepared = core ? prepareCore(mesh) : prepare(mesh);
+  // 整份数据用分块版：邻接表按批建、阶段间让帧，避免切换时 ~250ms 的同步块
+  prepared = core ? await prepareCoreAsync(mesh) : prepare(mesh);
   precomputed = core ? precomputedLayout(mesh) : null;
   details = core ? createDetailStore(mesh.meta ?? {}) : null;
   state.localLayout = false; // 换数据就回到"用预计算坐标"
@@ -843,21 +844,33 @@ async function main() {
   // 先吃缓存秒开，再带 ETag 后台校验；数据真的变了才重建
   const store = await createStore();
   const { mesh, core, fromCache, revalidate } = await loadMeshBest("./data/mesh.json", { store });
-  bootMesh(mesh, { resetFilters: true, core });
+  await bootMesh(mesh, { resetFilters: true, core });
   loadPanels(); // 画布已经出来了，面板随后动态载入
   if (fromCache) dom.hint.title = "已用本地缓存渲染，正在后台校验是否有新快照…";
 
   // 在线实时更新：数据每次核对都带 ETag，没变就是 304（几乎零成本），变了才重建
-  let liveGeneration = mesh.meta?.generatedAt ?? null;
+  // 签名同时看 generatedAt 与节点数：二进制主干分片与整份的 generatedAt 相同，
+  // 只看时间戳的话"后台补全"永远不会触发重建。
+  let liveGeneration = dataSignature(mesh);
   let refreshing = false;
   const pullFresh = async (why) => {
     if (refreshing) return;
     refreshing = true;
     try {
       const fresh = await revalidate();
-      if (fresh && (fresh.meta?.generatedAt ?? null) !== liveGeneration) {
-        liveGeneration = fresh.meta?.generatedAt ?? null;
-        bootMesh(fresh, { resetFilters: false });
+      const freshSignature = dataSignature(fresh);
+      if (fresh && freshSignature !== liveGeneration) {
+        liveGeneration = freshSignature;
+        // 换数据要重建整张图（解 1.7 万个节点 + 重排 + 重绘），同步做会卡住主线程几秒。
+        // 排到空闲时执行：用户正在拖拽/缩放时不会被抢主线程；超时兜底保证一定会补上。
+        dom.hint.title = "正在补全完整数据…";
+        await new Promise((resolve) => {
+          if (typeof requestIdleCallback === "function") requestIdleCallback(() => resolve(), { timeout: 2500 });
+          else setTimeout(resolve, 120);
+        });
+        // 必须带上 core 标记：补全拿到的是【预计算契约】，不带的话会被当成 mesh 走 prepare()，
+        // 并退回"从零跑布局模拟" —— 表现就是球全部从圆心散开重排（而且模拟本身要吃 CPU）。
+        await bootMesh(fresh, { resetFilters: false, core });
         dom.hint.title = "已同步到最新快照（" + String(liveGeneration ?? "").slice(11, 16) + " UTC）";
       } else if (why === "boot" && fromCache) {
         dom.hint.title = "缓存已是最新（" + String(liveGeneration ?? "").slice(11, 16) + " UTC 快照）";

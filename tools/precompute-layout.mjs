@@ -11,6 +11,7 @@
  */
 
 import { readFile, writeFile, mkdir, rm } from "node:fs/promises";
+import { encodeCore, subsetCore } from "../src/mesh-core-bin.js";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createSectorLayout } from "../src/layout-sector.js";
@@ -130,7 +131,16 @@ const core = {
 };
 
 await mkdir(OUT_DIR, { recursive: true });
-await writeFile(join(OUT_DIR, "mesh-core.json"), JSON.stringify(core), "utf8");
+const coreJson = JSON.stringify(core);
+await writeFile(join(OUT_DIR, "mesh-core.json"), coreJson, "utf8");
+
+// 二进制契约（v0.4.8）：浏览器优先拉它，体积是 JSON 的 1/8。
+// 主干分片（按星标前 HEAD_NODES 个）供首屏秒开，整份在后台补上。
+const HEAD_NODES = Number(process.env.HEAD_NODES ?? 3000);
+const binBytes = encodeCore(core);
+await writeFile(join(OUT_DIR, "mesh-core.bin"), binBytes);
+const headBytes = encodeCore(subsetCore(core, HEAD_NODES));
+await writeFile(join(OUT_DIR, "mesh-core.head.bin"), headBytes);
 
 // 详情分片：按索引取模，稳定且均匀
 const detailDir = join(OUT_DIR, "details");
@@ -157,4 +167,8 @@ console.log("预计算完成（布局 " + Math.round(t1 - t0) + "ms）");
 console.log("  原始 mesh.json : " + (originalBytes / 1048576).toFixed(1) + " MB");
 console.log("  mesh-core.json : " + (coreBytes / 1048576).toFixed(1) + " MB  （省 " + (100 - (coreBytes / originalBytes) * 100).toFixed(0) + "%）");
 console.log("  详情 " + CHUNKS + " 片     : " + (detailBytes / 1048576).toFixed(1) + " MB（点开右栏才拉）");
+console.log(
+  "  mesh-core.bin  : " + (binBytes.length / 1048576).toFixed(2) + " MB  （JSON 的 1/" + (coreBytes / binBytes.length).toFixed(1) + "）" +
+    " · 主干分片 " + HEAD_NODES + " 个节点 " + (headBytes.length / 1024).toFixed(0) + " KB",
+);
 console.log("  节点 " + nodes.length + " · 连线 " + edges.length + " · 扇区 " + arms.length);
