@@ -99,14 +99,22 @@ class FakeNode {
   filter(pred) { return this.all.filter(pred); }
 }
 
-const ids = ["rail", "inspector", "snapshot", "loading", "tooltip", "hint", "telemetry", "lamp", "edge-types", "search", "search-clear", "theme", "palette", "toggle-rail", "toggle-dossier", "stage", "graph"];
+const ids = ["rail", "inspector", "snapshot", "loading", "tooltip", "hint", "telemetry", "lamp", "edge-types", "search", "search-clear", "theme", "palette", "toggle-rail", "toggle-dossier", "stage", "graph", "status", "status-panel"];
 const registry = new Map(ids.map((id) => [id, new FakeNode(id === "graph" ? "canvas" : "div", id)]));
+// 状态圆环：真实 HTML 里环是 SVG <circle>，桩里给它一个可断言的子节点
+const ringFill = new FakeNode("circle");
+registry.get("status").querySelector = (sel) => (sel === ".ring-fill" ? ringFill : null);
 
-// 桩必须尊重真实 HTML 的 hidden 属性，否则测的就不是真页面
+// 桩必须尊重真实 HTML 的 hidden 属性与 class，否则测的就不是真页面
 const indexHtml = await readFile(resolve(ROOT, "index.html"), "utf8");
 for (const m of indexHtml.matchAll(/id="([^"]+)"[^>]*\shidden/g)) {
   const node = registry.get(m[1]);
   if (node) node.hidden = true;
+}
+for (const m of indexHtml.matchAll(/<[a-z]+[^>]*\sid="([^"]+)"[^>]*>/g)) {
+  const node = registry.get(m[1]);
+  const cls = /\sclass="([^"]*)"/.exec(m[0]);
+  if (node && cls) node.className = cls[1];
 }
 // 直接照真实 HTML 生成按钮，避免桩与页面不同步（含 class="on" 的初始状态）
 const hudButtons = [...indexHtml.matchAll(/<button[^>]*data-act="([^"]+)"[^>]*>/g)].map((m) => {
@@ -137,9 +145,10 @@ globalThis.document = {
 const rafQueue = [];
 // 窄屏开关：手机端行为（左右栏互斥、默认收起）靠它驱动
 let narrowScreen = false;
+const windowListeners = {};
 globalThis.window = {
   devicePixelRatio: 1,
-  addEventListener() {},
+  addEventListener(ev, fn) { (windowListeners[ev] ??= []).push(fn); },
   matchMedia: (query) => ({
     media: query,
     get matches() {
@@ -161,6 +170,35 @@ globalThis.fetch = async (url) => {
   const target = String(url ?? "");
   if (target.includes("mesh-core")) {
     return { ok: true, status: 200, headers: { get: () => null }, json: async () => coreJson };
+  }
+  if (target.includes("/api/status")) {
+    const iso = (offsetMs) => new Date(Date.now() + offsetMs).toISOString();
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      json: async () => ({
+        serverTime: iso(0),
+        data: { nodes: mesh.nodes.length, generatedAt: mesh.meta?.generatedAt ?? null },
+        readme: { indexed: 40, diskKB: 90 },
+        status: {
+          state: "crawling",
+          phase: "segments",
+          roundStartedAt: iso(-600000),
+          roundSeconds: 3600,
+          nextRunAt: iso(1800000), // 还剩一半 → 环应停在半格
+          segments: { total: 313, done: 282, pending: 0 },
+          indexed: mesh.nodes.length,
+          fetched: 339,
+          added: 7,
+          requests: 750,
+          budget: 600,
+          quotaRemaining: 4213,
+          readme: { indexed: 1200, target: 9826, thisRound: 150 },
+          lastRound: { startedAt: iso(-3600000), finishedAt: iso(-3400000), seconds: 200.4, state: "ok" },
+        },
+      }),
+    };
   }
   if (target.includes("/data/details/")) {
     const index = Number((target.match(/(\d+)\.json/) ?? [])[1] ?? 0);
@@ -681,6 +719,43 @@ test("v0.4.6 搜索：命中超过 100 个只做高亮、不画放射线（避�
   search.value = "";
   search.fire("input");
   pump(10);
+});
+
+test("v0.4.7 状态圆环：倒计时环 + 点开浮窗看采集进度，Esc / 点画布关闭", async () => {
+  const chip = registry.get("status");
+  const panel = registry.get("status-panel");
+  assert.equal(panel.hidden, true, "默认不该显示浮窗");
+  assert.ok(chip.className.includes("status-chip"), "圆环应挂在顶栏状态按钮上：" + chip.className);
+  assert.match(chip.title ?? "", /采集状态/, "圆环应带状态提示，实际：" + chip.title);
+
+  // 环：等一次 /api/status 回来（剩一半 → dashoffset 应约为半格）
+  await new Promise((r) => setTimeout(r, 30));
+  const LEN = 2 * Math.PI * 15.5;
+  const offset = Number(ringFill.style?.strokeDashoffset);
+  assert.ok(Number.isFinite(offset), "环应被写入 dashoffset，实际：" + ringFill.style?.strokeDashoffset);
+  assert.ok(Math.abs(offset - LEN / 2) < 4, "剩一半时间时环应停在半格，实际 offset " + offset.toFixed(1) + "（整圈 " + LEN.toFixed(1) + "）");
+  assert.ok(chip.classList.contains("crawling"), "采集中时圆环应带爬取态（转起来）");
+
+  chip.fire("click");
+  assert.equal(panel.hidden, false, "点击状态后浮窗应打开");
+  assert.equal(chip.attrs["aria-expanded"], "true", "浮窗打开时应同步 aria-expanded");
+  const text = [panel, ...panel.all].map((n) => n.textContent ?? "").join(" ");
+  assert.match(text, /采集状态/, "浮窗应有标题，实际：" + text);
+  assert.match(text, /采集中/, "浮窗应显示后端状态，实际：" + text);
+  assert.match(text, /已抓 282 \/ 313/, "浮窗应显示分段进度，实际：" + text);
+  assert.match(text, /1200 \/ 9826/, "浮窗应显示 README 索引进度，实际：" + text);
+  assert.match(text, /750 \/ 预算 600/, "浮窗应显示请求与预算，实际：" + text);
+
+  // Esc 关闭（app.js 把状态浮窗排在放大退回之前）
+  for (const fn of windowListeners.keydown ?? []) fn({ key: "Escape", target: {} });
+  assert.equal(panel.hidden, true, "Esc 应关闭浮窗");
+
+  // 点画布空白处关闭
+  chip.fire("click");
+  assert.equal(panel.hidden, false, "再点应重新打开");
+  registry.get("stage").fire("pointerdown", {});
+  assert.equal(panel.hidden, true, "点画布应关闭浮窗");
+  assert.equal(chip.attrs["aria-expanded"], "false");
 });
 
 test("v0.4.2 搜索：从圆心放射出指向命中仓库的直线，清空后消失", () => {

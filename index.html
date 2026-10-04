@@ -14,7 +14,7 @@
     <span class="sigil" aria-hidden="true">◈</span>
     <div class="brand-text">
       <b>插件生态图</b>
-      <small>插件生态扇区图 · v0.4.6</small>
+      <small>插件生态扇区图 · v0.4.7</small>
     </div>
   </div>
   <div class="prompt">
@@ -23,6 +23,16 @@
     <button id="search-clear" class="key" hidden>清除</button>
   </div>
   <div class="readouts">
+    <div class="status-wrap">
+      <button id="status" class="status-chip" aria-haspopup="true" aria-expanded="false" title="采集状态：圆环是下一次扫描的倒计时">
+        <svg class="status-ring" viewBox="0 0 36 36" width="22" height="22" aria-hidden="true">
+          <circle class="ring-track" cx="18" cy="18" r="15.5"></circle>
+          <circle class="ring-fill" cx="18" cy="18" r="15.5"></circle>
+        </svg>
+        <span>状态</span>
+      </button>
+      <div id="status-panel" class="status-panel" hidden role="dialog" aria-label="采集状态"></div>
+    </div>
     <span class="ro"><i>数据源</i><b>GitHub 搜索接口</b></span>
     <span class="ro"><i>快照</i><b id="snapshot">--</b></span>
   </div>

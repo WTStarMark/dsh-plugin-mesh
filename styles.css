@@ -231,6 +231,44 @@ input[type="range"]::-moz-range-thumb {
   border: 1px solid var(--border-l2); border-radius: var(--r-md); padding: 10px 12px;
   box-shadow: var(--shadow); backdrop-filter: blur(10px);
 }
+/* ---------------- 顶栏状态圆环（v0.4.7）---------------- */
+/* 圆环 = 下一次扫描的倒计时：底环 + 进度环，进度用 stroke-dashoffset 表示 */
+/* 浮窗挂在圆环正下方：靠 status-wrap 定位，不改动其它布局 */
+.status-wrap { position: relative; display: inline-flex; align-items: center; }
+.status-chip {
+  display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 11px 0 6px;
+  border: 1px solid var(--border-l1); border-radius: 999px; background: var(--bg-layer-1);
+  color: var(--label-2); font-size: 12px; cursor: pointer; transition: background .12s, color .12s;
+}
+.status-chip:hover, .status-chip[aria-expanded="true"] { background: var(--hover); color: var(--label-1); }
+.status-ring { display: block; transform: rotate(-90deg); }
+.ring-track { fill: none; stroke: var(--border-l2); stroke-width: 3.2; }
+.ring-fill {
+  fill: none; stroke: var(--accent); stroke-width: 3.2; stroke-linecap: round;
+  stroke-dasharray: 97.4; stroke-dashoffset: 97.4; transition: stroke-dashoffset .5s linear;
+}
+/* 正在采集：环不满格时也在转，避免看着像卡住 */
+.status-chip.crawling .status-ring { animation: status-spin 2.4s linear infinite; }
+@keyframes status-spin { to { transform: rotate(270deg); } }
+.status-chip.error .ring-fill { stroke: var(--warn); }
+
+.status-panel {
+  position: absolute; z-index: 9; top: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+  width: 320px; max-width: calc(100vw - 24px);
+  background: color-mix(in srgb, var(--bg-layer-1) 97%, transparent);
+  border: 1px solid var(--border-l2); border-radius: var(--r-md); padding: 12px 14px;
+  box-shadow: var(--shadow); backdrop-filter: blur(10px); font-size: 12px; color: var(--label-2);
+}
+.status-panel[hidden] { display: none; }
+.status-panel h4 { margin: 0 0 8px; font-size: 12.5px; font-weight: 600; color: var(--label-1); }
+.status-panel .sp-row { display: flex; justify-content: space-between; gap: 10px; padding: 3px 0; }
+.status-panel .sp-row i { font-style: normal; color: var(--label-3); }
+.status-panel .sp-row b { font-weight: 500; color: var(--label-1); font-family: var(--font-code); }
+.status-panel .sp-sep { height: 1px; background: var(--border-l1); margin: 8px 0; }
+.status-panel .sp-note { color: var(--label-3); line-height: 1.5; }
+.status-panel .sp-bar { height: 4px; border-radius: 2px; background: var(--bg-layer-2); overflow: hidden; margin-top: 4px; }
+.status-panel .sp-bar span { display: block; height: 100%; background: var(--accent); }
+
 .tooltip b { font-size: 12.5px; font-weight: 500; }
 .tooltip .tt-sub { color: var(--label-3); font-size: 11.5px; margin-top: 3px; }
 .tooltip .tt-desc { color: var(--label-2); font-size: 12px; margin-top: 6px; line-height: 1.55; }

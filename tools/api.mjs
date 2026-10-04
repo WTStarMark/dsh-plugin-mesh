@@ -545,6 +545,34 @@ export function createApi({ root }) {
    * 与 /api/repos 的区别是不返回节点字段（几万个 id 也只有几十 KB），
    * 并且额外告诉你有多少个是【只有 README 才命中】的。
    */
+  /**
+   * 采集进度状态：读采集器写的 data/cache/status.json，补上服务器时间与数据概况。
+   * 前端顶栏的"状态"圆环按 nextRunAt 倒计时，浮窗展示进度；文件不存在时 status 为 null。
+   */
+  let statusCache = { mtimeMs: -1, data: null };
+  async function status() {
+    const file = join(root, "data", "cache", "status.json");
+    const info = await stat(file).catch(() => null);
+    let data = null;
+    if (info) {
+      if (statusCache.mtimeMs !== info.mtimeMs) {
+        try {
+          statusCache = { mtimeMs: info.mtimeMs, data: JSON.parse(await readFile(file, "utf8")) };
+        } catch {
+          statusCache = { mtimeMs: info.mtimeMs, data: null };
+        }
+      }
+      data = statusCache.data;
+    }
+    const mesh = await load().catch(() => null);
+    return {
+      serverTime: new Date().toISOString(), // 前端用它校正倒计时（防客户端时钟不准）
+      data: mesh ? { nodes: (mesh.nodes ?? []).length, generatedAt: mesh.meta?.generatedAt ?? null } : null,
+      readme: await readmeStats().catch(() => null),
+      status: data,
+    };
+  }
+
   /** README 索引概况（给 /api/health 用：让"堆了多少数据"是可观测的） */
   async function readmeStats() {
     await loadReadmes();
@@ -584,7 +612,7 @@ export function createApi({ root }) {
     };
   }
 
-  return { load, search, searchIds, readmeStats, categories, one, cardSvg, cardPage, publicNode, slim };
+  return { load, search, searchIds, readmeStats, status, categories, one, cardSvg, cardPage, publicNode, slim };
 }
 
 /** API 自描述：给调用者一份可发现的端点清单 */
@@ -596,6 +624,7 @@ export function apiIndex(version) {
     endpoints: [
       { method: "GET", path: "/api", desc: "本清单" },
       { method: "GET", path: "/api/health", desc: "健康检查与数据概况（含 README 索引规模）" },
+      { method: "GET", path: "/api/status", desc: "采集进度状态：下一轮开始时间、阶段、分段与 README 进度、配额（顶栏状态圆环用）" },
       { method: "GET", path: "/api/categories", desc: "扇区（功能分类）与细枝及各自数量" },
       { method: "GET", path: "/api/repos?q=&category=&subcategory=&tag=&language=&minStars=&archived=&sort=stars|pushed|created|name&limit=&offset=&fields=all", desc: "检索仓库（默认 20 条，最多 100 条）" },
       { method: "GET", path: "/api/search?q=&limit=", desc: "紧凑检索：只回命中 id 与计数（含 README 正文命中）" },

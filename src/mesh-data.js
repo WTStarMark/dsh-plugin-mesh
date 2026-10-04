@@ -258,28 +258,42 @@ function countOwnerPairs(ownerIndex) {
 const EMPTY_IDS = [];
 
 /** 噪声作者阈值：与后端 backend/dsh_mesh/config.py 保持一致（两边都拦一道） */
-export const NOISE_OWNER_MIN_REPOS = 200;
-export const NOISE_OWNER_MAX_STARS = 1;
+export const NOISE_OWNER_MIN_REPOS = 300; // 主判据：仓库数（超过）
+export const NOISE_OWNER_ZERO_RATIO = 0.98; // 主判据：0 星占比（超过）
+export const NOISE_OWNER_STRICT_MIN_REPOS = 200; // 老判据：仓库数（超过）
+export const NOISE_OWNER_MAX_STARS = 1; // 老判据：最高星标（低于）
 
 /**
- * 噪声作者：被收录的仓库【超过】NOISE_OWNER_MIN_REPOS 个，且每个仓库星标都【低于】
- * NOISE_OWNER_MAX_STARS（默认即全部 0 星）。典型的批量刷标签垃圾号。
- * 两个条件必须同时满足 —— 宁可漏判，也不误伤高产但确实有受众的作者。
+ * 噪声作者：批量刷标签的垃圾号。两条判据命中任一 ——
+ *   1) 收录仓库数 > minRepos，且 0 星占比 > zeroRatio（默认 300 / 98%）
+ *   2) 收录仓库数 > strictMinRepos，且每个仓库都是 0 星（默认 200，老判据保留）
+ * 判定结果带 zeroRatio 与 reason，前端可显示"为什么被判"。
  */
 export function noiseOwners(nodes, options = {}) {
   const minRepos = options.minRepos ?? NOISE_OWNER_MIN_REPOS;
+  const zeroRatio = options.zeroRatio ?? NOISE_OWNER_ZERO_RATIO;
+  const strictMinRepos = options.strictMinRepos ?? NOISE_OWNER_STRICT_MIN_REPOS;
   const maxStars = options.maxStars ?? NOISE_OWNER_MAX_STARS;
   const groups = new Map();
   for (const n of nodes ?? []) {
     if (!n.owner) continue;
     let group = groups.get(n.owner);
-    if (!group) groups.set(n.owner, (group = { repos: 0, maxStars: 0 }));
+    if (!group) groups.set(n.owner, (group = { repos: 0, zeroStars: 0, maxStars: 0 }));
     group.repos += 1;
-    group.maxStars = Math.max(group.maxStars, n.stars || 0);
+    const stars = n.stars || 0;
+    if (stars === 0) group.zeroStars += 1;
+    group.maxStars = Math.max(group.maxStars, stars);
   }
   const noise = new Map();
   for (const [owner, group] of groups) {
-    if (group.repos > minRepos && group.maxStars < maxStars) noise.set(owner, group);
+    group.zeroRatio = group.repos ? group.zeroStars / group.repos : 0;
+    if (group.repos > minRepos && group.zeroRatio > zeroRatio) {
+      group.reason = "mass-publish";
+      noise.set(owner, group);
+    } else if (group.repos > strictMinRepos && group.maxStars < maxStars) {
+      group.reason = "all-zero-stars";
+      noise.set(owner, group);
+    }
   }
   return noise;
 }
@@ -350,7 +364,24 @@ export function stripNoiseOwners(mesh) {
   meta.sampleNodes = keep.length;
   meta.sampleEdges = edges.length;
   if (typeof meta.indexedNodes === "number") meta.indexedNodes = Math.max(keep.length, meta.indexedNodes - removed);
-  meta.noiseBlacklist = Object.fromEntries([...noise].map(([owner, g]) => [owner, { repos: g.repos, maxStars: g.maxStars }]));
+  // 分类统计也必须跟着剔除走：否则 meta.categories 还写着旧总数，
+  // 与 indexedNodes / nodes 对不上（数据自洽性回归测试会当场抓到）。
+  if (meta.categories && typeof meta.categories === "object") {
+    const counts = new Map();
+    for (const n of keep) counts.set(n.category, (counts.get(n.category) ?? 0) + 1);
+    const labels = new Map((meta.categories.distribution ?? []).map((d) => [d.id, d.label]));
+    meta.categories = {
+      ...meta.categories,
+      classified: keep.reduce((sum, n) => sum + (n.category === "other" ? 0 : 1), 0),
+      unclassified: counts.get("other") ?? 0,
+      distribution: [...counts.entries()]
+        .map(([id, count]) => ({ id, label: labels.get(id) ?? id, count }))
+        .sort((a, b) => b.count - a.count),
+    };
+  }
+  meta.noiseBlacklist = Object.fromEntries(
+    [...noise].map(([owner, g]) => [owner, { repos: g.repos, zeroRatio: g.zeroRatio, maxStars: g.maxStars, reason: g.reason }]),
+  );
   meta.noiseBlacklistSize = noise.size;
   meta.noiseNodesRemoved = removed;
 

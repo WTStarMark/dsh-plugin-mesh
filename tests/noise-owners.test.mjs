@@ -34,7 +34,24 @@ const node = (owner, i, stars = 0, category = "tools") => ({
   language: "JavaScript",
 });
 
-test("判据：超过 200 个仓库且全是 0 星才算噪声，两个条件缺一不可", () => {
+test("判据：超过 300 个仓库且 0 星占比超 98% 即判噪声（主判据）", () => {
+  const withStars = (owner, zero, starred) => [
+    ...Array.from({ length: zero }, (_, i) => node(owner, i)),
+    ...Array.from({ length: starred }, (_, i) => node(owner, "s" + i, 1)),
+  ];
+
+  const mass = withStars("mass", 295, 6); // 6/301 = 1.99% 有星 → 0 星 98.01% > 98%
+  assert.equal(mass.length, 301);
+  const found = noiseOwners(mass);
+  assert.deepEqual([...found.keys()], ["mass"]);
+  assert.equal(found.get("mass").reason, "mass-publish");
+  assert.ok(found.get("mass").zeroRatio > 0.98, "应记录 0 星占比，便于显示判定理由");
+
+  assert.equal(noiseOwners(withStars("below", 294, 7)).size, 0, "7/301 = 2.32% 有星 → 占比没过 98%，不判");
+  assert.equal(noiseOwners(withStars("exact300", 295, 5)).size, 0, "正好 300 个不算「超过」（且老判据也要求全 0 星）");
+});
+
+test("判据：超过 200 个仓库且全是 0 星也算噪声（老判据保留）", () => {
   const spam = Array.from({ length: 201 }, (_, i) => node("spammer", i));
   assert.deepEqual([...noiseOwners(spam).keys()], ["spammer"]);
 
@@ -73,7 +90,12 @@ test("mesh.json 契约：剔除噪声作者及其边，并如实改掉计数", (
   assert.equal(out.meta.sampleEdges, 1);
   assert.equal(out.meta.indexedNodes, 3);
   assert.equal(out.meta.noiseNodesRemoved, 201);
-  assert.deepEqual(out.meta.noiseBlacklist.spammer, { repos: 201, maxStars: 0 });
+  assert.deepEqual(out.meta.noiseBlacklist.spammer, {
+    repos: 201,
+    maxStars: 0,
+    zeroRatio: 1,
+    reason: "all-zero-stars",
+  });
 
   // 经由 prepare() 也不能留下悬空邻接
   const prepared = prepare(data);
@@ -143,10 +165,39 @@ test("查询 API 也不吐噪声仓库（旧快照兜底）", async () => {
   }
 });
 
-test("真实数据没有噪声作者：stripNoiseOwners 必须是零成本的空操作", () => {
-  assert.equal(stripNoiseOwners(mesh), mesh, "mesh.json 不该被复制重建");
-  assert.equal(stripNoiseOwners(core), core, "mesh-core.json 不该被复制重建");
-  assert.equal(noiseOwners(mesh.nodes).size, 0);
+test("没有噪声作者时 stripNoiseOwners 是零成本空操作（不复制、不改动）", () => {
+  const clean = { nodes: [node("normal", 1, 3), node("other", 2, 0)], edges: [], meta: {} };
+  assert.equal(stripNoiseOwners(clean), clean, "没有噪声作者时应原样返回同一个对象，不做任何重建");
+
+  // 真实快照里到底有没有噪声作者取决于数据本身（新判据上线后旧快照可能仍有），
+  // 所以这里按事实分支断言，而不是写死"一定没有"。
+  const real = noiseOwners(mesh.nodes);
+  if (real.size === 0) {
+    assert.equal(stripNoiseOwners(mesh), mesh, "真实数据无噪声时应零成本");
+    assert.equal(stripNoiseOwners(core), core, "mesh-core.json 同理");
+  } else {
+    const dropped = [...real.values()].reduce((sum, g) => sum + g.repos, 0);
+    const stripped = stripNoiseOwners(mesh);
+    assert.notEqual(stripped, mesh, "有噪声作者时必须真的重建");
+    assert.equal(stripped.nodes.length, mesh.nodes.length - dropped, "被剔除的节点数要等于噪声仓库数");
+    assert.deepEqual(
+      Object.fromEntries([...real.keys()].map((o) => [o, true])),
+      Object.fromEntries(Object.keys(stripped.meta.noiseBlacklist).map((o) => [o, true])),
+      "meta.noiseBlacklist 要记录被判的作者",
+    );
+    // 分类统计必须跟着剔除走，否则 meta.categories 与 indexedNodes 对不上
+    const cats = stripped.meta.categories;
+    assert.equal(
+      cats.classified + cats.unclassified,
+      stripped.nodes.length,
+      "剔除噪声后分类统计应对齐节点数（expected " + stripped.nodes.length + "，actual " + (cats.classified + cats.unclassified) + "）",
+    );
+    assert.equal(
+      cats.distribution.reduce((s, d) => s + d.count, 0),
+      stripped.nodes.length,
+      "扇区分布之和也应对齐节点数",
+    );
+  }
 });
 
 test("预计算产物：喂进去的噪声作者不会出现在 mesh-core.json 里", () => {

@@ -41,6 +41,7 @@ from dsh_mesh.config import (
     WHITELIST_TAGS,
 )
 from dsh_mesh.readmes import ReadmeIndex, fetch_batch as fetch_readmes
+from dsh_mesh.status import STATUS_FILE, next_run_at, write_status
 from dsh_mesh.segments import SegmentStore, segment_query
 from dsh_mesh.github import GitHubClient, load_token
 
@@ -52,6 +53,34 @@ def tag_totals_from(state: dict) -> dict[str, int]:
         if segment.get("state") == "done" and segment.get("total") is not None:
             totals[segment["topic"]] = totals.get(segment["topic"], 0) + segment["total"]
     return totals
+
+
+def _write_status(**fields) -> None:
+    """写采集进度状态。包一层是为了让测试能 mock collect.STATUS_FILE 做路径隔离 ——
+    直接调 dsh_mesh.status.write_status 的话，路径写死在模块里，测试跑一轮就会污染真实的 data/cache。"""
+    write_status(STATUS_FILE, **fields)
+
+
+def _report_progress(store, fetched: int, added: int, client, args, **extra) -> None:
+    """把当前进度写进 data/status.json（前端顶栏的"状态"圆环/浮窗读它）。dry-run 不写。"""
+    if getattr(args, "dry_run", False):
+        return
+    try:
+        coverage = store.coverage()
+        payload = {
+            "phase": "segments",
+            "segments": coverage.get("segments"),
+            "indexed": coverage.get("repos"),
+            "fetched": fetched,
+            "added": added,
+            "requests": client.stats.requests if client is not None else None,
+            "budget": getattr(args, "budget", 0),
+            "quotaRemaining": client.stats.rate_limit_remaining if client is not None else None,
+        }
+        payload.update(extra)
+        _write_status(**payload)
+    except Exception:  # noqa: BLE001 - 进度上报失败绝不能影响采集
+        pass
 
 
 def fetch_live(args, log, blacklist=None):
@@ -87,6 +116,7 @@ def fetch_live(args, log, blacklist=None):
         # 长任务要能续跑：每 5 段落盘一次，崩了也不丢整轮
         if (index + 1) % 5 == 0:
             store.save()
+            _report_progress(store, fetched, added_this_round, client, args, done=index + 1, total=len(batch))
     store.save()
 
     after = store.coverage()
@@ -98,14 +128,26 @@ def fetch_live(args, log, blacklist=None):
     # README 索引：抓完仓库后按预算补一批（供"搜索 README 内容"用，见 dsh_mesh/readmes.py）。
     # 放在爬取之后：热度高的仓库优先，且不挤占分段扫描的请求预算。
     readme_stats = None
-    if getattr(args, "readme_budget", 0) > 0:
+    if getattr(args, "readme_budget", 0) > 0 and not getattr(args, "from_store", False):
         try:
             min_stars = int(getattr(args, "readme_min_stars", 0) or 0)
             pool = [r for r in store.repos.values() if (r.get("stars") or 0) >= min_stars]
             if min_stars > 0:
                 log("README 索引：只看星标 ≥ " + str(min_stars) + " 的仓库（" + str(len(pool)) + " / " + str(len(store.repos)) + "）")
             index = ReadmeIndex(README_CACHE, max_chars=int(getattr(args, "readme_max_chars", 0) or 2000))
+            if not getattr(args, "dry_run", False):
+                _write_status(phase="readme")
             readme_stats = fetch_readmes(client, index, pool, args.readme_budget, log=log)
+            if readme_stats and not getattr(args, "dry_run", False):
+                _write_status(
+                    phase="readme",
+                    readme={
+                        "indexed": readme_stats.get("indexed"),
+                        "target": len(pool),
+                        "thisRound": readme_stats.get("requested"),
+                        "empty": readme_stats.get("empty"),
+                    },
+                )
         except Exception as exc:  # noqa: BLE001 - README 索引是加分项，失败不该拖垮采集
             log("⚠ README 索引本轮失败：" + str(exc))
 
@@ -231,25 +273,56 @@ def run_precompute(log, expected_nodes: int | None = None) -> None:
             log("预计算失败（不影响数据）：" + detail)
 
 
+def load_from_store(args, log):
+    """离线重建：直接用累积索引（data/cache/repos.json）构图，不联网、不消耗配额。
+
+    改了分类 / 噪声 / 相关性规则后，用它立刻把前端契约按新规则重算一遍，
+    不必等下一轮采集。跑的仍然是同一套 build_mesh + 预计算，只是数据源换成已抓到的记录。
+    """
+    store = SegmentStore(SEGMENT_STATE, REPO_CACHE)
+    raws = list(store.repos.values())
+    log("离线重建：读入累积索引 " + str(len(raws)) + " 条记录（零网络请求）")
+    return raws, tag_totals_from(store.state), None, {"mode": "store-rebuild", "token": "-"}
+
+
 def run_once(args, log) -> dict:
     started = time.time()
     log(f"=== 采集开始 {utcnow()} ===")
+    if not args.dry_run:
+        _write_status(
+            state="crawling",
+            phase="segments",
+            roundStartedAt=utcnow(),
+            roundSeconds=args.interval,
+            nextRunAt=next_run_at(time.time(), args.interval),
+            error=None,
+            fetched=0,
+            added=0,
+        )
     # 噪声作者黑名单：长期生效。命中者既不进累积索引、也不进前端契约。
     blacklist = snap.load_blacklist(NOISE_BLACKLIST)
     if blacklist:
         log("噪声黑名单：" + str(len(blacklist)) + " 个作者（" + "、".join(sorted(blacklist)[:5]) + ("…" if len(blacklist) > 5 else "") + "）")
     if args.from_raw:
         raws, tag_totals, stats, env = load_from_raw(log)
+    elif getattr(args, "from_store", False):
+        raws, tag_totals, stats, env = load_from_store(args, log)
     else:
         raws, tag_totals, stats, env = fetch_live(args, log, blacklist)
 
+    if not args.dry_run:
+        _write_status(state="building", phase="build")
     mesh = build_mesh(raws, tag_totals, blacklist=blacklist)
     noise_now = mesh["meta"].get("noiseBlacklist") or {}
     new_noise = {owner: info for owner, info in noise_now.items() if owner not in blacklist}
     if env.get("readme"):
         mesh["meta"]["readmeIndexed"] = env["readme"].get("indexed")
-    mesh["meta"]["kind"] = "sample-seed" if args.from_raw else "hourly-crawl"
-    mesh["meta"]["builtFrom"] = "data/sample-raw.json（离线复算）" if args.from_raw else "GitHub REST Search API"
+    if args.from_raw:
+        mesh["meta"]["kind"], mesh["meta"]["builtFrom"] = "sample-seed", "data/sample-raw.json（离线复算）"
+    elif getattr(args, "from_store", False):
+        mesh["meta"]["kind"], mesh["meta"]["builtFrom"] = "store-rebuild", "data/cache/repos.json（离线重建）"
+    else:
+        mesh["meta"]["kind"], mesh["meta"]["builtFrom"] = "hourly-crawl", "GitHub REST Search API"
     total_indexed = len(mesh["nodes"])
 
     elapsed = time.time() - started
@@ -274,7 +347,10 @@ def run_once(args, log) -> dict:
     if new_noise:
         log(
             "⚠ 新判定噪声作者 " + str(len(new_noise)) + " 个："
-            + "、".join(f"{owner}（{info['repos']} 个仓库 · 最高 {info['maxStars']} 星）" for owner, info in sorted(new_noise.items())[:5])
+            + "、".join(
+                f"{owner}（{info['repos']} 个仓库 · 0 星占比 {round(float(info.get('zeroRatio') or 0) * 100, 1)}% · {info.get('reason') or '?'}）"
+                for owner, info in sorted(new_noise.items())[:5]
+            )
         )
 
     if args.dry_run:
@@ -307,6 +383,8 @@ def run_once(args, log) -> dict:
     # 先按【完整索引】写快照，再裁剪给前端。
     # 顺序反了的话，快照只会记录前端展示的头部，diff 会把"掉出头部"误报成"消失"。
     # 索引与上一份完全一致时跳过写盘：不重复生成快照。
+    if not args.dry_run:
+        _write_status(state="building", phase="write")
     path, diff = snap.write_snapshot(mesh, SNAPSHOT_DIR, KEEP_SNAPSHOTS)
     summary["snapshot"] = str(path.relative_to(MESH_JSON.parent.parent)) if path else None
     summary["snapshotSkipped"] = path is None
@@ -319,6 +397,22 @@ def run_once(args, log) -> dict:
     )
     summary["frontendNodes"] = len(mesh["nodes"])
     summary["frontendEdges"] = len(mesh["edges"])
+    _write_status(
+        state="idle",
+        phase=None,
+        error=None,
+        nextRunAt=next_run_at(time.time(), args.interval),
+        lastRound={
+            "startedAt": summary["roundStartedAt"] if "roundStartedAt" in summary else None,
+            "finishedAt": utcnow(),
+            "seconds": round(time.time() - started, 1),
+            "state": "ok",
+            "indexed": total_indexed,
+        },
+        segments=None,
+        fetched=None,
+        added=None,
+    )
     snap.write_mesh(mesh, MESH_JSON)
     snap.write_last_crawl(summary, LAST_CRAWL)
 
@@ -350,6 +444,7 @@ def main(argv=None) -> int:
     parser.add_argument("--readme-max-chars", type=int, default=2000, help="每个仓库保留的 README 摘要字符数（越大越全、索引越大）")
     parser.add_argument("--readme-min-stars", type=int, default=1, help="只索引星标 ≥ N 的仓库（默认 1：跳过 0 星长尾，索引约减半；设 0 = 全量）")
     parser.add_argument("--from-raw", action="store_true", help="用 data/sample-raw.json 离线复算，不发网络请求")
+    parser.add_argument("--from-store", action="store_true", help="用累积索引 data/cache/repos.json 离线重建前端契约（改规则后立刻重算，不联网）")
     parser.add_argument("--dry-run", action="store_true", help="只算不写")
     parser.add_argument("--max-pages", type=int, default=10, help="每个分段最多翻几页（GitHub 上限 10 页 = 1000 条）")
     parser.add_argument("--budget", type=int, default=DEFAULT_BUDGET, help="每轮最多消耗多少次搜索请求（0 = 不限）")
@@ -372,8 +467,10 @@ def main(argv=None) -> int:
             run_once(args, log)
         except Exception as err:  # 单轮失败不能让常驻任务死掉
             log(f"[错误] 本轮采集失败：{type(err).__name__}: {err}")
+            _write_status(state="error", phase=None, error=f"{type(err).__name__}: {err}"[:200])
         wait = seconds_until_next(time.time(), args.interval)
         log(f"下一轮在 {wait / 60:.1f} 分钟后（{utcnow()}）")
+        _write_status(nextRunAt=next_run_at(time.time(), args.interval))
         time.sleep(wait)
 
 

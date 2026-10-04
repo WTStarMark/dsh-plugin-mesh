@@ -3,9 +3,9 @@
 **把带 `dsh` 系列 GitHub 标签的仓库，画成一张可交互的生态网络图。**
 
 [![在线访问](https://img.shields.io/badge/在线访问-104.129.51.126-2f7df6?style=flat-square)](http://104.129.51.126/)
-[![测试](https://img.shields.io/badge/tests-161%20JS%20%2B%2058%20Python-3fb8a8?style=flat-square)](#测试)
+[![测试](https://img.shields.io/badge/tests-163%20JS%20%2B%2064%20Python-3fb8a8?style=flat-square)](#测试)
 [![依赖](https://img.shields.io/badge/dependencies-0-57b894?style=flat-square)](#技术选型)
-[![版本](https://img.shields.io/badge/version-v0.4.6-9b8cf0?style=flat-square)](#)
+[![版本](https://img.shields.io/badge/version-v0.4.7-9b8cf0?style=flat-square)](#)
 
 👉 **在线地址：<http://104.129.51.126/>**
 
@@ -42,6 +42,7 @@
 | 扇区布局 | 按功能分区、同心散布；位置由可播种 PRNG 决定，**同一 seed 逐点可复现** |
 | 单扇区放大 | 点扇区 → 大扇区当整圆、细枝当扇区；`Esc` 或「← 返回全局」退回 |
 | 侧栏顺序 | 左栏：总览 → 功能扇区 → 筛选 → 划分依据 → 捕获标签 → 高频标签。右栏未选中：图例 → 操作提示 → 待复核清单；选中后：仓库档案 → 命中标签 → 仓库主题 → 关联 → 图例 → 操作提示 |
+| 状态圆环 | 顶栏圆环 = 下一次扫描的倒计时（读 `/api/status` 的 `nextRunAt`，本地每秒走格；正在采集时环会转）。点开浮窗看后端进度：阶段、分段、请求与配额、README 索引、上一轮耗时；拿不到状态就显示"无采集器状态" |
 | 三类连线 | 点选仓库就画出它的**同作者**（完整关系：不论几个同作者仓库都能互相指向）、**主题共现**（琥珀虚线）与**生态共鸣**（紫罗兰实线）；度数上限只裁主题边，owner 边豁免 |
 | 目标光圈 | 被连线指着的球按边色套光圈（主色 / 琥珀 / 紫罗兰）；同一球被两类线指着时外扩 2.4px 一档。连线两端退让到光圈外沿（`trimSegment`） |
 | 搜索指向 | 搜索后从圆心射出一道光（三层叠加，宽度随缩放自适应）指向每个命中；清空即消失。命中**超过 100 个只高亮、不画线**，状态栏注明原因 |
@@ -49,7 +50,7 @@
 | README 索引 | 采集器每轮补抓一批（默认 `--readme-budget 150`）：先补未抓过的（星标高优先），再刷 45 天前的；抓不到的记空串，不再重试 |
 | 索引体积 | 只存检索摘要（去徽章/图片/链接 URL/HTML/markdown 记号，截断 2000 字符）+ gzip，约 1.1KB/篇：1.9 万仓库约 20MB，默认跳过 0 星后约 **10MB**（`/api/health` 的 `readme` 字段可见）。旋钮：`--readme-max-chars`、`--readme-min-stars`（默认 1）、`--readme-budget 0`（关闭） |
 | 相关性判定 | 三档结论：**确认相关**（有 DSH 专有线索）/ **确认噪声**（与 DSH 无关、空壳、堆标签，可一键隐藏）/ **仍需人工**；只有真正模糊的才进「待复核」 |
-| 噪声黑名单 | 同一作者被收录 **超过 200 个**仓库、且**每个仓库星标都低于 1**（即全是 0 星）时判为垃圾账号：从扫描管道与累积索引里剔除，前端（含预计算产物）也不再展示 |
+| 噪声黑名单 | 两条判据任一命中即判垃圾账号：**① 收录超过 300 个仓库、且 0 星占比超过 98%**（批量刷标签号）；② 收录超过 200 个仓库、且全部 0 星。命中后从扫描管道与累积索引剔除，前端与预计算产物也不再展示；判定理由（仓库数 / 0 星占比 / 判据）记进 `meta.noiseBlacklist` |
 | 筛选 | 标签「与」语义、语言、归档状态、关键词搜索；筛选只淡化不移除，位置保持不变 |
 | 头像 | 并发 6、按 URL 去重、球太小不发请求；默认开 |
 | 手机端 | ≤900px 画布全屏、侧栏变底部抽屉且**左右互斥**、双指缩放、安全区适配 |
@@ -66,16 +67,17 @@
 ```bash
 git clone <repo> && cd dsh-plugin-mesh
 npm run serve:lan                        # http://<你的局域网IP>:8788/
-npm test                                 # 161 项前端测试
-python3 backend/tests/test_collector.py  # 58 项后端测试
+npm test                                 # 163 项前端测试
+python3 backend/tests/test_collector.py  # 64 项后端测试
 ```
 
 **采集数据**（需要 GitHub 令牌，见下）：
 
 ```bash
 cp .env.example .env     # 填入 GITHUB_TOKEN=...
-python3 backend/collect.py --once                 # 跑一轮
-python3 backend/collect.py --loop --interval 3600 # 常驻，每小时一轮
+python3 backend/collect.py --once                  # 跑一轮
+python3 backend/collect.py --loop --interval 3600  # 常驻，每小时一轮
+python3 backend/collect.py --from-store            # 改了规则后离线重算前端契约（不联网、不吃配额）
 ```
 
 > ⚠️ 用 pm2 托管时必须写 `--loop` 而不是 `--watch`：pm2 会把 `--watch` 认成它自己的文件监听开关，
@@ -185,8 +187,8 @@ GitHub 搜索 API
 ## 测试
 
 ```bash
-npm test                                  # 161 项：布局 / 连线 / 分类（协议基座·桌宠·非插件排除）/ 细枝 / 相关性判定 / 生态共鸣 / 面板 / 主题 / 噪声黑名单 / 服务加固 / 冒烟
-python3 backend/tests/test_collector.py   # 58 项：分类 / 分段扫描 / 快照 / 调度 / 采集顺序 / 噪声黑名单 / 三档判定 / 预计算容错
+npm test                                  # 163 项：布局 / 连线 / 分类（协议基座·桌宠·非插件排除）/ 细枝 / 相关性判定 / 生态共鸣 / 面板 / 主题 / 噪声黑名单 / 服务加固 / 冒烟
+python3 backend/tests/test_collector.py   # 64 项：分类 / 分段扫描 / 快照 / 调度 / 采集顺序 / 噪声黑名单 / 三档判定 / 预计算容错
 python3 backend/verify_parity.py          # 跨语言一致性（JS 管线 vs Python 采集器）
 ```
 
@@ -220,11 +222,11 @@ tools/
   preview-svg.mjs   预览渲染核心：站点 /preview.svg 与离线副本共用
   seed-sample.mjs  preview-ascii.mjs
 backend/
-  collect.py        采集入口（--once / --loop / --budget / --from-raw）
+  collect.py        采集入口（--once / --loop / --budget / --from-store / --from-raw）
   dsh_mesh/         github / segments / classify / build / snapshot / config
   verify_parity.py  跨语言一致性校验
   check_token.py    令牌自检（只打印配额数字）
-  tests/            58 项测试（前端 161 项在根目录 tests/）
+  tests/            64 项测试（前端 163 项在根目录 tests/）
 docs/               data-contract.md 与预览图
 ```
 
@@ -254,6 +256,7 @@ API 与前端**共用同一个端口**：不需要另外开服务、不需要任
 | GET | `/api/categories` | 扇区（功能分类）与细枝，含各自数量 |
 | GET | `/api/repos` | 检索仓库（过滤 / 排序 / 翻页），`q` 同时匹配 **README 正文** |
 | GET | `/api/search?q=&limit=` | 紧凑检索：只回命中 id 与计数（含 README 命中），供前端搜索框高亮用 |
+| GET | `/api/status` | 采集进度状态：`nextRunAt`（下一轮开始）、阶段、分段与 README 进度、请求与配额；不缓存 |
 | GET | `/api/repos/:owner/:name` | 单个仓库详情 + 同作者 / 主题共现连线 |
 | GET | `/api/card/:owner/:name.svg` | 可分享的 SVG 卡片（见下一节） |
 | GET | `/preview.svg`（同 `/api/preview.svg`） | README 预览图：按当前数据实时渲染的生态图（`?theme=dark|light&size=&sample=`），ETag + 5 分钟缓存 |

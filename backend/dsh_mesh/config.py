@@ -20,6 +20,7 @@ LAST_CRAWL = DATA_DIR / "last-crawl.json"
 REPO_CACHE = CACHE_DIR / "repos.json"          # 累积索引（所有见过的仓库）
 SEGMENT_STATE = CACHE_DIR / "segments.json"     # 分段扫描队列状态
 README_CACHE = CACHE_DIR / "readmes.json.gz"    # README 检索摘要（gzip；供"搜索 README 内容"，约 10MB/1.9 万仓库）
+STATUS_FILE = CACHE_DIR / "status.json"         # 采集进度状态（前端顶栏"状态"圆环/浮窗读它）
 DEFAULT_BUDGET = 120     # 每轮最多消耗多少次搜索请求
 REFRESH_HOURS = 6.0      # 超过这个时长没刷新的段会重新排队
 ENV_FILE = ROOT / ".env"
@@ -43,14 +44,17 @@ DEGREE_CAP = 14       # 只裁剪"主题共现"边；"同作者"是硬关系，�
 OWNER_CLIQUE_MAX = 8  # 同作者成员不超过它就两两相连，超过则用星形拓扑
 REVIEW_THRESHOLD = 2  # 旧口径（相关度 <= 它 => 待复核）已由 analyze_relevance 的三档结论取代，保留供参考
 
-# 噪声黑名单：同一作者被收录的仓库数【超过】NOISE_OWNER_MIN_REPOS，
-# 且每个仓库的星标都【低于】NOISE_OWNER_MAX_STARS（默认即全部 0 星）=> 判为垃圾账号。
-# 两个条件都刻意保守：既要有"一个人几百上千个仓库"的量，又要"一颗星都没有"，
-# 避免误伤高产但确实有受众的正常作者。命中后：
+# 噪声黑名单：命中任一判据即视为批量刷标签的垃圾号 ——
+#   1) 主判据：收录仓库数【超过】NOISE_OWNER_MIN_REPOS，且 0 星仓库占比【超过】NOISE_OWNER_ZERO_RATIO
+#      （按一个人发布 300+ 个仓库、几乎全都无人关注来判断；允许极少数仓库拿到一两颗星）
+#   2) 老判据：收录仓库数【超过】NOISE_OWNER_STRICT_MIN_REPOS，且每个仓库都是 0 星
+# 命中后：
 #   1) 从累积索引与后续扫描管道里剔除（不再消耗请求配额）；
 #   2) 前端契约（mesh.json / mesh-core.json）里不再出现。
-NOISE_OWNER_MIN_REPOS = 200
-NOISE_OWNER_MAX_STARS = 1
+NOISE_OWNER_MIN_REPOS = 300          # 主判据：仓库数门槛（超过，不含等于）
+NOISE_OWNER_ZERO_RATIO = 0.98        # 主判据：0 星占比门槛（超过，不含等于）
+NOISE_OWNER_STRICT_MIN_REPOS = 200   # 老判据：仓库数门槛
+NOISE_OWNER_MAX_STARS = 1            # 老判据：最高星标门槛
 NOISE_BLACKLIST = DATA_DIR / "noise-blacklist.json"  # 已判定的噪声作者（人工可编辑）
 
 # 快照

@@ -12,6 +12,7 @@ import { createSectorLayout } from "./layout-sector.js";
 import { PALETTES, themeOf, DEFAULT_PALETTE, DEFAULT_MODE } from "./palettes.js";
 import { buildLinks, countByType } from "./links.js";
 import { createGraphView } from "./graph.js";
+import { createStatusWidget } from "./status.js";
 
 
 const dom = {
@@ -33,7 +34,23 @@ const dom = {
   telemetry: document.getElementById("telemetry"),
   stage: document.getElementById("stage"),
   canvas: document.getElementById("graph"),
+  statusChip: document.getElementById("status"),
+  statusPanel: document.getElementById("status-panel"),
 };
+
+/**
+ * 顶栏状态圆环：倒计时到下一次扫描，点开看采集器进度。
+ * 接口不可用时（本地静态预览）环保持空环、浮窗给一句说明，不影响其它功能。
+ */
+const statusWidget = createStatusWidget({
+  chip: dom.statusChip,
+  panel: dom.statusPanel,
+  fetcher:
+    typeof fetch === "function"
+      ? () =>
+          fetch("/api/status").then((res) => (res.ok ? res.json() : null))
+      : null,
+});
 
 /** 圆心：官方仓库 */
 const HUB_ID = "deepseek-ai/deepseek-harness";
@@ -631,6 +648,10 @@ function bindChrome() {
     if (!typing && ev.key === "[") { state.hideRail = !state.hideRail; applyPanels(); return; }
     if (!typing && ev.key === "]") { state.hideDossier = !state.hideDossier; applyPanels(); return; }
     if (ev.key === "Escape") {
+      if (statusWidget.isOpen()) {
+        statusWidget.setOpen(false);
+        return;
+      }
       // 有放大就先退回全局，其次才清选中
       if (state.focusCategory) {
         actions.focusGroup(null);
@@ -796,6 +817,16 @@ async function main() {
       applyPanels();
     }
   });
+
+  // 状态圆环：点开浮窗；点画布空白处或按 Esc 关闭（Esc 挂在上面那个 keydown 里）
+  if (dom.statusChip) {
+    dom.statusChip.addEventListener("click", (ev) => {
+      ev?.stopPropagation?.();
+      statusWidget.toggle();
+    });
+  }
+  dom.stage?.addEventListener("pointerdown", () => statusWidget.setOpen(false));
+  statusWidget.start();
 
   // 访问数 / 同时在线：拿不到就整栏隐藏，绝不影响站点
   startStats({

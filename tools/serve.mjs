@@ -24,7 +24,7 @@ import { createApi, apiIndex, validNamePart } from "./api.mjs";
 import { renderPreviewSvg, sceneFromCore } from "./preview-svg.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const VERSION = "0.4.6";
+const VERSION = "0.4.7";
 /** 卡片默认去处（线上站点），可用环境变量 SITE_URL 或请求参数 ?link= 覆盖 */
 const SITE_URL = process.env.SITE_URL ?? "http://104.129.51.126/";
 
@@ -302,6 +302,11 @@ async function handleApi(req, res, method, pathname, url) {
       200,
       { ...API_CACHE, ...CORS },
     );
+    return;
+  }
+  if (pathname === "/api/status") {
+    // 不缓存：圆环要秒级倒计时，采集器也会随时更新进度
+    sendJson(res, { ok: true, version: VERSION, ...(await api.status()) }, 200, CORS);
     return;
   }
   if (pathname === "/api/categories") {

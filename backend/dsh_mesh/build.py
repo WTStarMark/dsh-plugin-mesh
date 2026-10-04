@@ -46,6 +46,8 @@ from .config import (
     HUB_ID,
     NOISE_OWNER_MAX_STARS,
     NOISE_OWNER_MIN_REPOS,
+    NOISE_OWNER_STRICT_MIN_REPOS,
+    NOISE_OWNER_ZERO_RATIO,
     OWNER_CLIQUE_MAX,
     WHITELIST_TAGS,
 )
@@ -154,24 +156,42 @@ def relevance_score(repo: dict) -> int:
 def find_noise_owners(
     nodes: list[dict],
     min_repos: int = NOISE_OWNER_MIN_REPOS,
+    zero_ratio: float = NOISE_OWNER_ZERO_RATIO,
+    strict_min_repos: int = NOISE_OWNER_STRICT_MIN_REPOS,
     max_stars: int = NOISE_OWNER_MAX_STARS,
 ) -> dict[str, dict]:
-    """噪声作者：被收录的仓库【超过】min_repos 个，且每个仓库星标都【低于】max_stars。
+    """噪声作者：批量刷标签的垃圾号。两条判据命中任一即可 ——
 
-    这类账号通常是批量刷标签的垃圾号（一个人几百上千个 0 星仓库）。
-    两个条件必须同时满足，宁可漏判也不误伤正常作者。
+      1) 收录仓库数 > min_repos，且 0 星仓库占比 > zero_ratio（默认 300 / 98%）
+      2) 收录仓库数 > strict_min_repos，且每个仓库都是 0 星（默认 200，老判据保留）
+
+    第 1 条是"量大且几乎无人关注"：一个人发 300+ 个仓库，几乎全是 0 星。
+    留 2% 的余地，是因为刷号者偶尔会互刷或自己点一两个星（实测样本：1286 个仓库里 15 个有星）。
+    判定结果带上 zeroRatio 与 reason，便于前端与排查时看清"为什么被判"。
     """
     groups: dict[str, list[dict]] = {}
     for node in nodes:
         groups.setdefault(node["owner"], []).append(node)
     noise: dict[str, dict] = {}
     for owner, group in groups.items():
-        if len(group) <= min_repos:
-            continue
-        top = max(int(n.get("stars") or 0) for n in group)
-        if top >= max_stars:
-            continue
-        noise[owner] = {"repos": len(group), "maxStars": top}
+        total = len(group)
+        stars = [int(n.get("stars") or 0) for n in group]
+        zero = sum(1 for s in stars if s == 0)
+        top = max(stars) if stars else 0
+        ratio = zero / total if total else 0.0
+        reason = None
+        if total > min_repos and ratio > zero_ratio:
+            reason = "mass-publish"
+        elif total > strict_min_repos and top < max_stars:
+            reason = "all-zero-stars"
+        if reason:
+            noise[owner] = {
+                "repos": total,
+                "zeroStars": zero,
+                "zeroRatio": round(ratio, 4),
+                "maxStars": top,
+                "reason": reason,
+            }
     return noise
 
 

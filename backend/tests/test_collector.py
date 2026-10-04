@@ -223,7 +223,35 @@ def fake_repo(owner: str, name: str, stars: int = 0, topics=("dsh", "dsh-plugin"
 
 
 class NoiseBlacklistTest(unittest.TestCase):
-    """噪声黑名单：同一作者被收录 >200 个仓库、且每个仓库星标都 <1 => 剔除。"""
+    """噪声黑名单：>300 个仓库且 0 星占比 >98%（主判据），或 >200 个仓库且全是 0 星（老判据）=> 剔除。"""
+
+    def test_mass_publish_owner_is_noise(self):
+        """主判据：一个人发 300+ 个仓库、0 星占比超 98% —— 典型批量刷标签号。"""
+        raws = [fake_repo("mass", f"dsh-mass-{i}") for i in range(295)]
+        raws += [fake_repo("mass", f"dsh-mass-s{i}", stars=1) for i in range(6)]  # 6/301 = 1.99% 有星
+        mesh = build_mesh(raws, {})
+        self.assertNotIn("mass", {n["owner"] for n in mesh["nodes"]}, "应被剔除")
+        info = mesh["meta"]["noiseBlacklist"]["mass"]
+        self.assertEqual(info["repos"], 301)
+        self.assertGreater(info["zeroRatio"], 0.98)
+        self.assertEqual(info["reason"], "mass-publish")
+        self.assertEqual(info["maxStars"], 1)
+
+    def test_mass_publish_below_ratio_is_kept(self):
+        """0 星占比没超过 98% 就不判（留 2% 余地，但不能无限制放宽）。"""
+        raws = [fake_repo("border", f"dsh-b-{i}") for i in range(294)]
+        raws += [fake_repo("border", f"dsh-b-s{i}", stars=1) for i in range(7)]  # 7/301 = 2.32%
+        mesh = build_mesh(raws, {})
+        self.assertIn("border", {n["owner"] for n in mesh["nodes"]})
+        self.assertEqual(mesh["meta"]["noiseBlacklist"], {})
+
+    def test_exactly_300_repos_is_kept(self):
+        """正好 300 个不算「超过」（这些仓库还有星，老判据也不适用）。"""
+        raws = [fake_repo("n300", f"dsh-n-{i}") for i in range(295)]
+        raws += [fake_repo("n300", f"dsh-n-s{i}", stars=2) for i in range(5)]
+        mesh = build_mesh(raws, {})
+        self.assertEqual(len(mesh["nodes"]), 300)
+        self.assertEqual(mesh["meta"]["noiseBlacklist"], {})
 
     def test_owner_over_threshold_with_all_zero_stars_is_noise(self):
         from dsh_mesh.build import find_noise_owners
@@ -405,9 +433,15 @@ class RunOnceOrderTest(unittest.TestCase):
 
         with mock.patch.object(collect, "MESH_JSON", TMP / "mesh.json"), mock.patch.object(
             collect, "SNAPSHOT_DIR", TMP / "snapshots"
-        ), mock.patch.object(collect, "LAST_CRAWL", TMP / "last-crawl.json"):
+        ), mock.patch.object(collect, "LAST_CRAWL", TMP / "last-crawl.json"), mock.patch.object(
+            collect, "STATUS_FILE", TMP / "status.json"
+        ):
             code = collect.main(["--from-raw", "--frontend-limit", "100", "--quiet"])
         self.assertEqual(code, 0)
+        # 状态文件也必须落在临时目录：跑测试不能污染真实的 data/cache
+        status = json.loads((TMP / "status.json").read_text(encoding="utf-8"))
+        self.assertEqual(status["state"], "idle")
+        self.assertEqual(status["lastRound"]["indexed"], 593)
 
         mesh = json.loads((TMP / "mesh.json").read_text(encoding="utf-8"))
         self.assertEqual(len(mesh["nodes"]), 100, "前端契约应被裁剪到 100 个节点")
@@ -571,7 +605,81 @@ class ReadmeIndexTest(unittest.TestCase):
         self.assertEqual(idx.docs["no/readme"]["t"], "", "没有 README 也要记账，避免每轮重复试探")
         self.assertEqual(idx.needs(repos, 10), [], "抓过之后（含空）本轮不该再排")
 
-    def test_save_and_reload_roundtrip(self):
+    def test_status_file_merges_and_reports_next_run(self):
+        """状态文件：合并式写入（每次只更新自己那几个字段）+ 下一轮时间对齐周期边界。"""
+        import json
+        import time
+
+        from dsh_mesh.status import next_run_at, read_status, write_status
+
+        path = self._tmp().with_suffix(".status.json")
+        write_status(path, state="crawling", roundSeconds=3600, segments={"total": 313, "done": 10})
+        write_status(path, segments={"total": 313, "done": 25}, fetched=99)
+        data = read_status(path)
+        self.assertEqual(data["state"], "crawling", "没提到的字段必须保留")
+        self.assertEqual(data["roundSeconds"], 3600)
+        self.assertEqual(data["segments"]["done"], 25, "再次写入应覆盖同名字段")
+        self.assertEqual(data["fetched"], 99)
+        self.assertIn("updatedAt", data)
+
+        write_status(path, phase=None)
+        self.assertNotIn("phase", read_status(path), "传 None 表示删除该字段")
+
+        now = 1_700_000_000.0  # 固定时刻，避免测试抖动
+        eta = next_run_at(now, 3600)
+        self.assertRegex(eta, r"^\d{4}-\d{2}-\d{2}T\d{2}:00:00Z$", "应落在整点边界：" + eta)
+        self.assertGreaterEqual((__import__("datetime").datetime.strptime(eta, "%Y-%m-%dT%H:%M:%SZ") - __import__("datetime").datetime.utcfromtimestamp(now)).total_seconds(), 60.0)
+
+    def test_status_write_is_atomic_and_tolerates_missing_file(self):
+        from dsh_mesh.status import read_status, write_status
+
+        path = self._tmp().with_suffix(".status2.json")
+        self.assertEqual(read_status(path), {}, "文件不存在时读成空字典，不抛错")
+        write_status(path, state="idle")
+        self.assertTrue(path.exists())
+        self.assertFalse(path.with_name(path.name + ".tmp").exists(), "临时文件必须已被原子替换掉")
+
+    def test_collector_progress_reporting_respects_dry_run(self):
+        """采集器的进度上报入口：真跑时写、dry-run 绝不写，且字段来自当前进度。"""
+        import types
+
+        import collect  # backend/collect.py（sys.path 已含 backend）
+
+        class FakeStore:
+            def coverage(self):
+                return {"segments": {"total": 313, "done": 282, "pending": 0}, "repos": 19008}
+
+        class FakeClient:
+            stats = types.SimpleNamespace(requests=750, rate_limit_remaining=4213)
+
+        calls = []
+
+        def fake_write(path, **kw):  # 包装层必须把 STATUS_FILE 传下来，否则测试无法隔离路径
+            calls.append({"path": path, **kw})
+
+        original = collect.write_status
+        collect.write_status = fake_write
+        try:
+            args = types.SimpleNamespace(dry_run=True, budget=600)
+            collect._report_progress(FakeStore(), 339, 7, FakeClient(), args)
+            self.assertEqual(calls, [], "dry-run 不应写状态文件")
+
+            args.dry_run = False
+            collect._report_progress(FakeStore(), 339, 7, FakeClient(), args, done=282, total=313)
+        finally:
+            collect.write_status = original
+
+        self.assertEqual(len(calls), 1, "正常跑应写一次")
+        payload = calls[0]
+        self.assertEqual(payload["path"], collect.STATUS_FILE, "应写入 STATUS_FILE（测试可 mock 它做隔离）")
+        self.assertEqual(payload["phase"], "segments")
+        self.assertEqual(payload["segments"]["done"], 282)
+        self.assertEqual(payload["indexed"], 19008)
+        self.assertEqual(payload["fetched"], 339)
+        self.assertEqual(payload["requests"], 750)
+        self.assertEqual(payload["quotaRemaining"], 4213)
+
+    def test_readme_save_and_reload_roundtrip(self):
         from dsh_mesh.readmes import ReadmeIndex
 
         path = self._tmp()

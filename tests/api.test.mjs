@@ -90,6 +90,31 @@ test("紧凑检索：采集器写的 gzip 索引（readmes.json.gz）也能读�
   await rm(tmp, { recursive: true, force: true });
 });
 
+test("状态接口：采集器状态文件存在时透出进度，缺失时降级为 null（v0.4.7）", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "mesh-status-"));
+  await mkdir(join(tmp, "data", "cache"), { recursive: true });
+  await writeFile(
+    join(tmp, "data", "mesh.json"),
+    JSON.stringify({ nodes: [{ id: "u/a", name: "a", owner: "u", stars: 1, description: "", topics: [], matchedTags: [], category: "tools", categoryLabel: "工具命令" }], edges: [], clusters: [], meta: { generatedAt: "2026-10-04T10:00:00Z" } }),
+  );
+  const local = createApi({ root: tmp });
+
+  const before = await local.status();
+  assert.equal(before.status, null, "没有状态文件时 status 应为 null（本地静态预览）");
+  assert.equal(before.data.nodes, 1, "顺手带回数据概况");
+  assert.ok(Date.parse(before.serverTime) > 0, "必须给服务器时间，前端用它校正倒计时");
+
+  await writeFile(
+    join(tmp, "data", "cache", "status.json"),
+    JSON.stringify({ state: "crawling", roundSeconds: 3600, nextRunAt: "2026-10-04T14:00:00Z", segments: { total: 313, done: 282 } }),
+  );
+  const after = await local.status();
+  assert.equal(after.status.state, "crawling");
+  assert.equal(after.status.roundSeconds, 3600);
+  assert.equal(after.status.segments.done, 282);
+  await rm(tmp, { recursive: true, force: true });
+});
+
 test("检索：过滤、排序、分页都真的生效（从数据自身推导，不写死数字）", async () => {
   const all = await api.search(new URLSearchParams("limit=5&fields=all"));
   assert.equal(all.items.length, 5, "应返回 5 条");
@@ -237,8 +262,8 @@ test("颜色与名称校验：稳定、可预期", () => {
 });
 
 test("API 自描述：端点清单完整", () => {
-  const index = apiIndex("0.4.6");
-  assert.equal(index.version, "0.4.6");
+  const index = apiIndex("0.4.7");
+  assert.equal(index.version, "0.4.7");
   const paths = index.endpoints.map((e) => e.path).join(" ");
   for (const need of ["/api/health", "/api/categories", "/api/repos", "/api/card", "/card/"]) {
     assert.ok(paths.includes(need), "清单应包含 " + need);
