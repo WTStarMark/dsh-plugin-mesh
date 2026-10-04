@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -95,6 +96,34 @@ def pick_repo(item: dict) -> dict:
 def normalize_repo(item: dict) -> dict:
     """本地缓存里存的可能已经是裁剪过的记录（owner 是字符串），也可能还是原始 API 响应。"""
     return pick_repo(item) if "full_name" in item else item
+
+
+ALIASES_JSON = ROOT / "data" / "cache" / "aliases.json"
+
+
+def load_aliases(path=None) -> dict[str, str]:
+    """改名别名表（旧名 → 现名），由 tools/dedupe-renames.mjs 经 API 核对后写出。
+
+    采集器的 SegmentStore 已经在加载/合并时归一；这里再兜一道，
+    让 --from-raw 之类的离线构建也不会把旧名当成另一个仓库。
+    """
+    path = path or ALIASES_JSON
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 - 别名表是加分项
+        return {}
+    raw = data.get("aliases") if isinstance(data, dict) else None
+    out: dict[str, str] = {}
+    for k, v in (raw or {}).items():
+        cur = str(v)
+        for _ in range(5):  # 跟随多级链
+            nxt = (raw or {}).get(cur)
+            if not nxt or nxt == cur:
+                break
+            cur = str(nxt)
+        if k and cur and k != cur:
+            out[str(k)] = cur
+    return out
 
 
 def owner_of(repo: dict) -> str:
@@ -209,8 +238,12 @@ def build_mesh(
     skipped_blacklisted = 0
     excluded_repos: dict[str, str] = {}
 
+    aliases = load_aliases()
     for raw in raw_repos:
         repo = normalize_repo(raw)
+        if aliases and str(repo.get("id")) in aliases:
+            fixed = aliases[str(repo["id"])]
+            repo = dict(repo, id=fixed, name=fixed.split("/")[-1], htmlUrl="https://github.com/" + fixed)
         if owner_of(repo) in blacklist:
             skipped_blacklisted += 1
             continue

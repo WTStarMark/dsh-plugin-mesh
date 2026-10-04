@@ -139,9 +139,13 @@ def subdivide(segment: dict, now: datetime | None = None) -> list[dict]:
 class SegmentStore:
     """段队列 + 累积索引。两个文件都可断点续跑。"""
 
-    def __init__(self, state_path: Path, repos_path: Path, blacklist=None):
+    def __init__(self, state_path: Path, repos_path: Path, blacklist=None, aliases_path: Path | None = None):
         self.state_path = state_path
         self.repos_path = repos_path
+        # 改名别名表（旧名 → 现名），由 tools/dedupe-renames.mjs 经 API 核对后写出。
+        # 有了它，后续扫描即使从 GitHub 搜索索引拿到旧名，也会被归一成现名，不会再冒出第二个球。
+        self.aliases_path = Path(aliases_path) if aliases_path else Path(repos_path).parent / "aliases.json"
+        self.aliases: dict[str, str] = self._load_aliases()
         self.state = self._load_state()
         self.repos: dict[str, dict] = self._load_repos()
         # 噪声作者黑名单：这些 owner 的仓库一律不进累积索引（省配额、也省得再被剔除一次）
@@ -161,12 +165,51 @@ class SegmentStore:
         return {"version": SCHEMA_VERSION, "updatedAt": None, "segments": {}}
 
     def _load_repos(self) -> dict[str, dict]:
+        repos: dict[str, dict] = {}
         if self.repos_path.exists():
             try:
-                return json.loads(self.repos_path.read_text(encoding="utf-8")).get("repos", {})
+                repos = json.loads(self.repos_path.read_text(encoding="utf-8")).get("repos", {})
             except (OSError, json.JSONDecodeError):
-                pass
-        return {}
+                repos = {}
+        self.repos = repos
+        self._apply_aliases()  # 旧名 → 现名（别名表来自经 API 核对的迁移）
+        return self.repos
+
+    def _load_aliases(self) -> dict[str, str]:
+        try:
+            data = json.loads(self.aliases_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        raw = data.get("aliases") if isinstance(data, dict) else None
+        return {str(k): str(v) for k, v in (raw or {}).items() if k and v and k != v}
+
+    def canonical(self, rid: str) -> str:
+        """把（可能是旧名的）键解析成现名；跟随多级别名，防止 A→B→C 这种链。"""
+        seen = set()
+        cur = rid
+        while cur in self.aliases and cur not in seen:
+            seen.add(cur)
+            cur = self.aliases[cur]
+        return cur
+
+    def _apply_aliases(self) -> int:
+        """把索引里残留的旧名键挪到现名下（现名已存在就合并，保留信息更多的记录）。"""
+        moved = 0
+        for key in [k for k in self.repos if k in self.aliases]:
+            target = self.canonical(key)
+            record = self.repos.pop(key)
+            if target in self.repos:
+                keep = self.repos[target]
+                history = set(keep.get("renamedFrom") or ()) | set(record.get("renamedFrom") or ()) | {key}
+                # 谁更新用谁，但把改名痕迹合并起来
+                newer = record if str(record.get("updatedAt") or "") > str(keep.get("updatedAt") or "") else keep
+                newer = dict(newer, renamedFrom=sorted(history))
+                self.repos[target] = newer
+            else:
+                record = dict(record, id=target, renamedFrom=sorted(set(record.get("renamedFrom") or ()) | {key}))
+                self.repos[target] = record
+            moved += 1
+        return moved
 
     def _reindex_github(self) -> None:
         """重建 githubId → 索引键 的映射（老记录没有 githubId 就跳过）。"""
@@ -319,6 +362,11 @@ class SegmentStore:
                 continue
             if self.blacklist and owner_of(record) in self.blacklist:
                 continue  # 噪声作者：不进累积索引
+            # 旧名归一：GitHub 搜索索引有延迟，改名后仍可能返回旧 full_name
+            canonical = self.canonical(rid)
+            if canonical != rid:
+                record = dict(record, id=canonical, renamedFrom=sorted(set(record.get("renamedFrom") or ()) | {rid}))
+                rid = canonical
             # 规模在"整个记录处理之前"取：改名会先 pop 旧键再插新键，中途取会算错
             size_before = len(self.repos)
             gid = record.get("githubId")

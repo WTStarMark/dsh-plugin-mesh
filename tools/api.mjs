@@ -479,7 +479,8 @@ export function apiIndex(version) {
       { method: "GET", path: "/api/categories", desc: "扇区（功能分类）与细枝及各自数量" },
       { method: "GET", path: "/api/repos?q=&category=&subcategory=&tag=&language=&minStars=&archived=&sort=stars|pushed|created|name&limit=&offset=&fields=all", desc: "检索仓库（默认 20 条，最多 100 条）" },
       { method: "GET", path: "/api/repos/:owner/:name", desc: "单个仓库详情，含同作者/主题共现连线" },
-      { method: "GET", path: "/api/card/:owner/:name.svg?theme=light|dark", desc: "可分享的 SVG 卡片" },
+      { method: "GET", path: "/preview.svg?theme=dark|light&size=&sample=", desc: "README 预览图：按当前数据实时渲染的生态图（也可走 /api/preview.svg）" },
+    { method: "GET", path: "/api/card/:owner/:name.svg?theme=light|dark", desc: "可分享的 SVG 卡片" },
       { method: "GET", path: "/card/:owner/:name", desc: "卡片分享页（预览 + 嵌入代码）" },
     ],
   };

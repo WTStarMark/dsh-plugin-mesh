@@ -1,20 +1,23 @@
 #!/usr/bin/env node
 /**
- * 生成 README 用的预览图（SVG）。
+ * 生成 README 用的预览图（离线副本）。
  *
- * 为什么要自己画：本项目没有无头浏览器，截不了图；但布局与配色的代码就在仓库里，
- * 直接复用同一套 createSectorLayout + 配色，产出的预览图永远和当前代码一致，
- * 不会出现"README 里的图还是三个版本前"的问题。
+ * 现在 README 默认用站点实时接口 http://104.129.51.126/preview.svg（每次采集后自动更新），
+ * 本工具用于两种场景：
+ *   1. 生成仓库内的静态副本 docs/preview*.svg（断网/接口挂了也能看，且随版本留档）
+ *   2. 本地核对：--png 自己 rasterize 一张，在没有浏览器/rsvg 的机器上也能"肉眼看图"
  *
- * 用法：node tools/snapshot-svg.mjs [--out docs/preview.svg] [--size 1400] [--theme dark]
+ * 用法：
+ *   node tools/snapshot-svg.mjs --out docs/preview.svg       --theme dark
+ *   node tools/snapshot-svg.mjs --out docs/preview-light.svg --theme light
+ *   node tools/snapshot-svg.mjs --layout --png dist/check.png   # 现场跑布局（mesh-core 不存在时）
  */
 
 import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { deflateSync } from "node:zlib";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createSectorLayout } from "../src/layout-sector.js";
-import { buildLinks } from "../src/links.js";
-import { prepare, groupColor } from "../src/mesh-data.js";
+import { renderPreviewSvg, sceneFromCore, sceneFromLayout, previewView, pickSample, radiusOf } from "./preview-svg.mjs";
 import { PALETTES } from "../src/palettes.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -23,109 +26,140 @@ const argOf = (name, fallback) => {
   const i = argv.indexOf(name);
   return i > -1 ? argv[i + 1] : fallback;
 };
-
 const OUT = resolve(ROOT, argOf("--out", "docs/preview.svg"));
 const SIZE = Number(argOf("--size", "1400"));
-const THEME_MODE = argOf("--theme", "dark");
+const THEME = argOf("--theme", "dark");
+const SAMPLE = Number(argOf("--sample", "7000"));
+const PNG = argv.includes("--png") ? resolve(ROOT, argOf("--png", "dist/preview-check.png")) : null;
 const HUB_ID = "deepseek-ai/deepseek-harness";
 
-const mesh = JSON.parse(await readFile(resolve(ROOT, "data/mesh.json"), "utf8"));
-const prepared = prepare(mesh);
-const theme = PALETTES.fresh[THEME_MODE];
-const canvas = theme.canvas;
-
-const layout = createSectorLayout({
-  nodes: prepared.nodes,
-  centerId: HUB_ID,
-  groupOf: (n) => n.category ?? "other",
-  labelOf: (n, key) => n.categoryLabel ?? key,
-  seed: "readme-preview",
-});
-
-const links = buildLinks(prepared, layout).filter((l) => l.type === "owner");
-
-// 布局坐标 → 画布坐标：等比铺满（坐标在 layout.x/y 数组里，索引用 layout.index）
-let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-for (let i = 0; i < layout.size; i++) {
-  minX = Math.min(minX, layout.x[i] - 14); maxX = Math.max(maxX, layout.x[i] + 14);
-  minY = Math.min(minY, layout.y[i] - 14); maxY = Math.max(maxY, layout.y[i] + 14);
-}
-const span = Math.max(maxX - minX, maxY - minY);
-const scale = (SIZE * 0.92) / span;
-const cx = SIZE / 2;
-const cy = SIZE / 2;
-const midX = (minX + maxX) / 2;
-const midY = (minY + maxY) / 2;
-const px = (x) => cx + (x - midX) * scale;
-const py = (y) => cy + (y - midY) * scale;
-
-const esc = (s) => String(s).replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]));
-const colorOf = new Map();
-prepared.nodes.forEach((n, i) => {
-  const cat = n.category ?? "other";
-  if (!colorOf.has(n.id)) colorOf.set(n.id, groupColor(cat, layout.arms.findIndex((a) => a.id === cat)));
-});
-
-const parts = [];
-parts.push('<svg xmlns="http://www.w3.org/2000/svg" width="' + SIZE + '" height="' + SIZE + '" viewBox="0 0 ' + SIZE + " " + SIZE + '" role="img" aria-label="插件生态图预览">');
-parts.push('<rect width="' + SIZE + '" height="' + SIZE + '" fill="' + canvas.bg + '"/>');
-
-// 扇区柔光
-for (const arm of layout.arms) {
-  if (!arm.members.length) continue;
-  const color = groupColor(arm.id, layout.arms.findIndex((a) => a.id === arm.id));
-  const a0 = arm.startAngle;
-  const a1 = arm.endAngle;
-  const r = arm.endRadius * 1.04;
-  const inner = Math.max(4, arm.rMin * 0.5);
-  const p = (ang, rad) => [px(Math.cos(ang) * rad), py(Math.sin(ang) * rad)];
-  const [x0, y0] = p(a0, inner);
-  const [x1, y1] = p(a0, r);
-  const [x2, y2] = p(a1, r);
-  const [x3, y3] = p(a1, inner);
-  parts.push(
-    '<path d="M' + x0.toFixed(1) + " " + y0.toFixed(1) + " L" + x1.toFixed(1) + " " + y1.toFixed(1) +
-      " A" + r.toFixed(1) + " " + r.toFixed(1) + " 0 0 1 " + x2.toFixed(1) + " " + y2.toFixed(1) +
-      " L" + x3.toFixed(1) + " " + y3.toFixed(1) + " Z" + '" fill="' + color + '" opacity="0.07"/>',
-  );
+let scene;
+if (argv.includes("--layout")) {
+  const [{ createSectorLayout }, { prepare, groupColor }] = await Promise.all([
+    import("../src/layout-sector.js"),
+    import("../src/mesh-data.js"),
+  ]);
+  const mesh = JSON.parse(await readFile(resolve(ROOT, "data/mesh.json"), "utf8"));
+  const prepared = prepare(mesh);
+  const layout = createSectorLayout({
+    nodes: prepared.nodes,
+    centerId: HUB_ID,
+    groupOf: (n) => n.category ?? "other",
+    labelOf: (n, key) => n.categoryLabel ?? key,
+    seed: "readme-preview",
+  });
+  layout.run(200); // 必须真跑布局，否则节点全在原点、扇区楔形会被甩到画布外
+  scene = sceneFromLayout(layout, prepared);
+  scene.hubId = HUB_ID;
+  void groupColor;
+} else {
+  const core = JSON.parse(await readFile(resolve(ROOT, argOf("--core", "data/mesh-core.json")), "utf8"));
+  scene = sceneFromCore(core);
+  scene.hubId = scene.hubId ?? HUB_ID;
 }
 
-// 同作者连线
-for (const l of links.slice(0, 1200)) {
-  if (l.a == null || l.b == null) continue;
-  parts.push('<line x1="' + px(layout.x[l.a]).toFixed(1) + '" y1="' + py(layout.y[l.a]).toFixed(1) + '" x2="' + px(layout.x[l.b]).toFixed(1) + '" y2="' + py(layout.y[l.b]).toFixed(1) + '" stroke="' + canvas.accent + '" stroke-width="0.7" opacity="0.18"/>');
-}
-
-// 节点：球底色白/黑 + 分类色外环
-for (let i = 0; i < layout.size; i++) {
-  const n = layout.nodes[i];
-  if (!n || n.id === HUB_ID) continue;
-  const r = Math.max(2.2, Math.min(11, 2.2 + Math.log10(1 + (n.stars || 0)) * 2.2));
-  const color = colorOf.get(n.id) ?? canvas.accent;
-  parts.push('<circle cx="' + px(layout.x[i]).toFixed(1) + '" cy="' + py(layout.y[i]).toFixed(1) + '" r="' + r.toFixed(1) + '" fill="' + canvas.ball + '" stroke="' + color + '" stroke-width="' + Math.max(1.2, r * 0.34).toFixed(1) + '"/>');
-}
-
-// 圆心主仓库
-const hubIndex = layout.index.get(HUB_ID);
-if (hubIndex !== undefined) {
-  parts.push('<circle cx="' + px(layout.x[hubIndex]).toFixed(1) + '" cy="' + py(layout.y[hubIndex]).toFixed(1) + '" r="17" fill="' + canvas.ball + '" stroke="' + canvas.accent + '" stroke-width="5"/>');
-}
-
-// 扇区标签
-parts.push('<g font-family="-apple-system,Segoe UI,PingFang SC,Microsoft YaHei,sans-serif" font-size="' + Math.round(SIZE / 78) + '" font-weight="600" fill="' + canvas.text + '">');
-for (const arm of layout.arms) {
-  const dist = arm.endRadius + 30;
-  const x = px(Math.cos(arm.angle) * dist);
-  const y = py(Math.sin(arm.angle) * dist);
-  if (x < 10 || y < 10 || x > SIZE - 10 || y > SIZE - 10) continue;
-  const color = groupColor(arm.id, layout.arms.findIndex((a) => a.id === arm.id));
-  parts.push('<text x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" text-anchor="middle" fill="' + color + '">' + esc(arm.label ?? arm.id) + "</text>");
-  parts.push('<text x="' + x.toFixed(1) + '" y="' + (y + SIZE / 78 + 3).toFixed(1) + '" text-anchor="middle" font-size="' + Math.round(SIZE / 100) + '" font-weight="400" fill="' + canvas.text + '" opacity="0.6">' + arm.count + " 个仓库</text>");
-}
-parts.push("</g>");
-parts.push("</svg>");
-
+const svg = renderPreviewSvg(scene, { theme: THEME, size: SIZE, sample: SAMPLE });
 await mkdir(dirname(OUT), { recursive: true });
-await writeFile(OUT, parts.join("\n"), "utf8");
-console.log("已生成 " + OUT);
-console.log("  节点 " + layout.nodes.length + " · 扇区 " + layout.arms.length + " · 同作者连线 " + links.length + " 条 · " + THEME_MODE);
+await writeFile(OUT, svg, "utf8");
+console.log("已生成 " + OUT.replace(ROOT + "/", ""));
+console.log(
+  "  主题 " + THEME + " · 仓库 " + scene.total + " · 扇区 " + scene.arms.filter((a) => a.count).length +
+    " · 画了 " + (svg.match(/<use /g) ?? []).length + " 个球 · " + (svg.length / 1024).toFixed(0) + " KB",
+);
+
+// ---- 可选：自己 rasterize 一张 PNG，供无浏览器环境肉眼核对 ----
+if (PNG) {
+  const W = Number(argOf("--png-size", "900"));
+  const canvas = (PALETTES.fresh[THEME] ?? PALETTES.fresh.dark).canvas;
+  const { scale, px, py, midX, midY } = previewView(scene, SIZE);
+  const hex2rgb = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+  const bg = hex2rgb(canvas.bg);
+  const buf = Buffer.alloc(W * W * 3);
+  for (let i = 0; i < W * W; i++) {
+    buf[i * 3] = bg[0];
+    buf[i * 3 + 1] = bg[1];
+    buf[i * 3 + 2] = bg[2];
+  }
+  const k = W / SIZE;
+  const { groupColor } = await import("../src/mesh-data.js");
+  const armColor = (id) => hex2rgb(groupColor(id, scene.arms.findIndex((a) => a.id === id)));
+  // 扇区
+  for (const a of scene.arms) {
+    if (!a.count) continue;
+    const c = armColor(a.id);
+    const outer = (a.endRadius ?? 0) * 1.04;
+    const inner = Math.max(0, (a.rMin ?? 0) * 0.55);
+    for (let y = 0; y < W; y++) {
+      for (let x = 0; x < W; x++) {
+        const lx = midX + (x / k - SIZE / 2) / scale;
+        const ly = midY + (y / k - SIZE / 2) / scale;
+        const r = Math.hypot(lx, ly);
+        if (r > outer || r < inner) continue;
+        let ang = Math.atan2(ly, lx);
+        while (ang < a.startAngle) ang += Math.PI * 2;
+        if (ang > a.endAngle) continue;
+        const o = (y * W + x) * 3;
+        buf[o] = Math.round(buf[o] * 0.9 + c[0] * 0.1);
+        buf[o + 1] = Math.round(buf[o + 1] * 0.9 + c[1] * 0.1);
+        buf[o + 2] = Math.round(buf[o + 2] * 0.9 + c[2] * 0.1);
+      }
+    }
+  }
+  // 球（与渲染用同一套抽样，不靠正则反推）
+  const drawNodes = pickSample(
+    scene.nodes.filter((n) => Number.isFinite(n.x) && Number.isFinite(n.y) && n.id !== scene.hubId),
+    SAMPLE,
+  );
+  for (const n of drawNodes) {
+    const c = hex2rgb(groupColor(n.category, scene.arms.findIndex((a) => a.id === n.category)) ?? canvas.accent);
+    const cx0 = Math.round(px(n.x) * k);
+    const cy0 = Math.round(py(n.y) * k);
+    const rr = Math.max(1, Math.round(radiusOf(n) * k));
+    for (let y = cy0 - rr; y <= cy0 + rr; y++) for (let x = cx0 - rr; x <= cx0 + rr; x++) {
+      if (x < 0 || y < 0 || x >= W || y >= W) continue;
+      if ((x - cx0) ** 2 + (y - cy0) ** 2 > rr * rr) continue;
+      const o = (y * W + x) * 3;
+      buf[o] = c[0];
+      buf[o + 1] = c[1];
+      buf[o + 2] = c[2];
+    }
+  }
+  const raw = Buffer.alloc((W * 3 + 1) * W);
+  for (let y = 0; y < W; y++) {
+    raw[y * (W * 3 + 1)] = 0;
+    buf.copy(raw, y * (W * 3 + 1) + 1, y * W * 3, (y + 1) * W * 3);
+  }
+  const table = [];
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let j = 0; j < 8; j++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    table[n] = c >>> 0;
+  }
+  const crc32 = (b) => {
+    let c = 0xffffffff;
+    for (const byte of b) c = table[(c ^ byte) & 0xff] ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  };
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(data.length);
+    const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(body));
+    return Buffer.concat([len, body, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(W, 0);
+  ihdr.writeUInt32BE(W, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 2;
+  const png = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", ihdr),
+    chunk("IDAT", deflateSync(raw, { level: 9 })),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
+  await mkdir(dirname(PNG), { recursive: true });
+  await writeFile(PNG, png);
+  console.log("  核对图 " + PNG.replace(ROOT + "/", "") + "（" + (png.length / 1024).toFixed(0) + " KB）");
+}

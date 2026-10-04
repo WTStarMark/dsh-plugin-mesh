@@ -21,9 +21,10 @@ import { createHash } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import { networkInterfaces } from "node:os";
 import { createApi, apiIndex, validNamePart } from "./api.mjs";
+import { renderPreviewSvg, sceneFromCore } from "./preview-svg.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const VERSION = "0.4.4";
+const VERSION = "0.4.5";
 /** 卡片默认去处（线上站点），可用环境变量 SITE_URL 或请求参数 ?link= 覆盖 */
 const SITE_URL = process.env.SITE_URL ?? "http://104.129.51.126/";
 
@@ -173,7 +174,59 @@ function sendJson(res, data, code = 200, extra = {}) {
 const CORS = { "access-control-allow-origin": "*", "access-control-allow-methods": "GET, HEAD, OPTIONS" };
 const API_CACHE = { "cache-control": "public, max-age=300" };
 
-function sendSvg(res, svg, code = 200) {
+/**
+ * README 预览图：按【当前预计算数据】实时渲染，采集器更新数据后图自己就变。
+ * 缓存到 mesh-core.json 的 mtime 变化为止；响应带 ETag + max-age=300，
+ * GitHub 的图片代理（camo）会按这个节奏回源，所以 README 里的图最迟 5 分钟跟上。
+ */
+const previewCache = new Map();
+async function previewSvg(theme, size, sample) {
+  const file = join(ROOT, "data/mesh-core.json");
+  const info = await stat(file).catch(() => null);
+  if (!info) return null;
+  const key = theme + "|" + size + "|" + sample;
+  const hit = previewCache.get(key);
+  if (hit && hit.mtimeMs === info.mtimeMs) return hit;
+  const core = JSON.parse(await readFile(file, "utf8"));
+  const svg = renderPreviewSvg(sceneFromCore(core), { theme, size, sample });
+  const entry = { svg, etag: '"' + createHash("sha1").update(svg).digest("hex").slice(0, 20) + '"', mtimeMs: info.mtimeMs };
+  previewCache.set(key, entry);
+  return entry;
+}
+
+async function handlePreview(req, res, method, url) {
+  if (method !== "GET" && method !== "HEAD") {
+    deny(res, 405, "405 只允许 GET / HEAD");
+    return;
+  }
+  const theme = url.searchParams.get("theme") === "light" ? "light" : "dark";
+  const size = Math.min(2000, Math.max(600, Number(url.searchParams.get("size")) || 1400));
+  const sample = Math.min(20000, Math.max(500, Number(url.searchParams.get("sample")) || 6000));
+  const entry = await previewSvg(theme, size, sample);
+  if (!entry) {
+    sendSvg(
+      res,
+      '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="200"><rect width="600" height="200" fill="#0d1524"/><text x="30" y="105" font-family="sans-serif" font-size="16" fill="#8fa3c0">预览数据尚未生成（等待首次预计算）</text></svg>',
+      503,
+      { "cache-control": "no-store" },
+    );
+    return;
+  }
+  if (req.headers["if-none-match"] === entry.etag) {
+    res.writeHead(304, { etag: entry.etag, "cache-control": "public, max-age=300, must-revalidate", ...SECURITY_HEADERS });
+    res.end();
+    console.log("304 " + url.pathname + " (" + theme + ")");
+    return;
+  }
+  sendSvg(res, entry.svg, 200, {
+    etag: entry.etag,
+    "cache-control": "public, max-age=300, must-revalidate",
+    "access-control-allow-origin": "*",
+  });
+  console.log("200 " + url.pathname + " (" + theme + ", " + (entry.svg.length / 1024).toFixed(0) + "KB)");
+}
+
+function sendSvg(res, svg, code = 200, extra = {}) {
   const body = Buffer.from(svg);
   res.writeHead(code, {
     "content-type": "image/svg+xml; charset=utf-8",
@@ -181,6 +234,7 @@ function sendSvg(res, svg, code = 200) {
     ...API_CACHE,
     ...CORS,
     ...SECURITY_HEADERS,
+    ...extra, // 调用方可以覆盖缓存策略/ETag（预览图要按数据 mtime 缓存）
   });
   res.end(body);
 }
@@ -228,6 +282,10 @@ async function handleApi(req, res, method, pathname, url) {
   // 查询接口一律只读：除访问统计的 /api/ping（POST）外，写方法全部拒绝
   if (pathname !== "/api/ping" && method !== "GET" && method !== "HEAD") {
     sendJson(res, { error: "只读接口，只允许 GET / HEAD" }, 405, CORS);
+    return;
+  }
+  if (pathname === "/api/preview.svg") {
+    await handlePreview(req, res, method, url);
     return;
   }
   if (pathname === "/api") {
@@ -353,6 +411,11 @@ const server = createServer(async (req, res) => {
   let pathname = decodeURIComponent(url.pathname);
   if (pathname.endsWith("/") && pathname !== "/") pathname = pathname.slice(0, -1);
 
+  // README 预览图：实时按当前数据渲染（静态白名单之外，单独一条路由）
+  if (pathname === "/preview.svg") {
+    await handlePreview(req, res, method, url);
+    return;
+  }
   // 接口路由：只认白名单里的两个，其余 404，绝不落到静态文件逻辑
   if (pathname === "/api" || pathname.startsWith("/api/")) {
     await handleApi(req, res, method, pathname, url);

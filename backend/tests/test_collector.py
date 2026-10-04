@@ -560,6 +560,53 @@ class RenameTest(unittest.TestCase):
             self.assertEqual(store.merge([rec]), 1)
             self.assertEqual(store.merge([rec]), 0)
 
+    def test_store_aliases_move_old_key_on_load(self):
+        """别名表（旧名→现名）在加载时就要把旧名键挪走：GitHub 搜索索引延迟时靠它兜底。"""
+        import tempfile
+
+        from dsh_mesh.segments import SegmentStore
+
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "segments.json"
+            repos = Path(tmp) / "repos.json"
+            repos.write_text(
+                json.dumps({"count": 1, "repos": {"u/old": {"id": "u/old", "owner": "u", "name": "old", "updatedAt": "2026-01-01T00:00:00Z"}}}),
+                encoding="utf-8",
+            )
+            (Path(tmp) / "aliases.json").write_text(json.dumps({"aliases": {"u/old": "u/new"}}), encoding="utf-8")
+            store = SegmentStore(state, repos)
+            self.assertNotIn("u/old", store.repos, "加载时旧名键应被归一")
+            self.assertIn("u/new", store.repos)
+            self.assertEqual(store.repos["u/new"]["renamedFrom"], ["u/old"])
+
+    def test_store_aliases_canonicalize_incoming_records(self):
+        """扫描若拿到旧名（搜索索引延迟），merge 时要归一到现名，而不是再插一条。"""
+        import tempfile
+
+        from dsh_mesh.segments import SegmentStore
+
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "aliases.json").write_text(json.dumps({"aliases": {"u/old": "u/new"}}), encoding="utf-8")
+            store = SegmentStore(Path(tmp) / "segments.json", Path(tmp) / "repos.json")
+            added = store.merge([{"id": "u/old", "githubId": 5, "owner": "u", "name": "old", "topics": ["dsh-plugin"]}])
+            self.assertEqual(added, 1)
+            self.assertNotIn("u/old", store.repos)
+            self.assertIn("u/new", store.repos)
+            self.assertEqual(store.repos["u/new"]["githubId"], 5)
+            self.assertEqual(store.repos["u/new"]["renamedFrom"], ["u/old"])
+
+    def test_aliases_follow_chains(self):
+        import tempfile
+
+        from dsh_mesh.segments import SegmentStore
+
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "aliases.json").write_text(
+                json.dumps({"aliases": {"a/one": "b/two", "b/two": "c/three"}}), encoding="utf-8"
+            )
+            store = SegmentStore(Path(tmp) / "segments.json", Path(tmp) / "repos.json")
+            self.assertEqual(store.canonical("a/one"), "c/three", "多级别名要跟到底")
+
     def test_build_dedupes_by_github_id_and_adopts_newer_name(self):
         def rec(full_name, name, updated, gid=7):
             return {

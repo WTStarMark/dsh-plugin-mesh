@@ -3,20 +3,23 @@
 **把带 `dsh` 系列 GitHub 标签的仓库，画成一张可交互的生态网络图。**
 
 [![在线访问](https://img.shields.io/badge/在线访问-104.129.51.126-2f7df6?style=flat-square)](http://104.129.51.126/)
-[![测试](https://img.shields.io/badge/tests-159%20JS%20%2B%2050%20Python-3fb8a8?style=flat-square)](#测试)
+[![测试](https://img.shields.io/badge/tests-159%20JS%20%2B%2053%20Python-3fb8a8?style=flat-square)](#测试)
 [![依赖](https://img.shields.io/badge/dependencies-0-57b894?style=flat-square)](#技术选型)
-[![版本](https://img.shields.io/badge/version-v0.4.4-9b8cf0?style=flat-square)](#)
+[![版本](https://img.shields.io/badge/version-v0.4.5-9b8cf0?style=flat-square)](#)
 
 👉 **在线地址：<http://104.129.51.126/>**
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/preview.svg">
-  <source media="(prefers-color-scheme: light)" srcset="docs/preview-light.svg">
-  <img alt="插件生态图预览：19 个功能扇区，圆心是官方仓库" src="docs/preview-light.svg" width="100%">
+  <source media="(prefers-color-scheme: dark)" srcset="http://104.129.51.126/preview.svg?theme=dark">
+  <source media="(prefers-color-scheme: light)" srcset="http://104.129.51.126/preview.svg?theme=light">
+  <img alt="插件生态图预览：功能扇区与仓库球，圆心是官方仓库" src="http://104.129.51.126/preview.svg?theme=light" width="100%">
 </picture>
 
-> 上图由 `node tools/snapshot-svg.mjs` 从真实数据生成 —— 复用前端的布局与配色代码，
-> 所以它永远和当前代码一致，不会出现「README 里的图还是三个版本前」的情况。
+> 上图由**站点按当前数据实时渲染**（[`/preview.svg`](http://104.129.51.126/preview.svg)，也可加 `?theme=dark|light&size=1400&sample=6000`）：
+> 读的是采集器每小时产出的预计算契约 `data/mesh-core.json`，复用前端的布局与配色代码 ——
+> **数据一更新，图自己就变**，不需要往仓库里提交图片，也就不会再出现「README 里的图还是三个版本前」。
+> 断网或接口不可用时，可看仓库内同一渲染器生成的静态副本 [`docs/preview.svg`](docs/preview.svg) / [`docs/preview-light.svg`](docs/preview-light.svg)
+> （`node tools/snapshot-svg.mjs --theme dark --out docs/preview.svg`）。
 
 ---
 
@@ -64,7 +67,7 @@
 git clone <repo> && cd dsh-plugin-mesh
 npm run serve:lan                        # http://<你的局域网IP>:8788/
 npm test                                 # 159 项前端测试
-python3 backend/tests/test_collector.py  # 50 项后端测试
+python3 backend/tests/test_collector.py  # 53 项后端测试
 ```
 
 **采集数据**（需要 GitHub 令牌，见下）：
@@ -147,6 +150,7 @@ GitHub 搜索 API
 | 排除 exclude | **桌面客户端**排除客户端插件：名字带 plugin/插件/extension/skill/theme 的一律不算；描述里「本仓库是一个客户端」这类自述可救回 |
 | 细枝 | 每个扇区内再按同一套规则挑 3~8 个细枝（共 79 条），用于单扇区放大 |
 | 生态语境 | **协议基座**（生态规范 / 互操作协议 / 接口契约 + 侧边栏底座、皮肤框架这类"别人长在上面"的基座）：先过一道生态语境门槛，再由"基座自述"强命中直接胜出 —— 否则「最大公约数」「标准差」「NocoBase 式基础设施」都会被误抓；样本再少也不并进「其他」（keepIds） |
+| 改名别名表 | `data/cache/aliases.json`（旧名 → 现名，由经 API 核对的迁移写出）：采集器在**加载**与**合并**时都按它归一 —— GitHub 搜索索引对改名有延迟，会继续返回旧名，别名表保证不会再冒出第二个球；`build.py` 另兜一道，离线构建同样归一。迁移工具检测到采集器在跑会拒绝执行（避免"边跑边改、被它的定期保存覆盖"） |
 | 改名去重 | 仓库改名后 `full_name` 变了、GitHub 数字 id 不变：采集记录保留 `githubId`，累积索引按它认人（改名 = 就地挪键 + 记 `renamedFrom`，不再新旧并存）；构图时按 `githubId` 兜底去重并采用更新的名字。老数据用 `tools/dedupe-renames.mjs` 迁移（同作者+同创建时间找嫌疑 → 逐个问 GitHub → 合并/就地改名，先备份再写） |
 | 非插件排除 | 挂 dsh 标签但 DSH 是别的意思（如 DeepHash-pytorch 的 DSH = Deep Supervised Hashing）的仓库不进索引：判据是 tools/categories.mjs 与 classify.py 里的 NOT_PLUGIN_PATTERNS，两条管线逐条一致 |
 | 生态共鸣 | 人工策展的"基座 → 长在它上面的插件"（紫罗兰实线）：以生态签 + 名字自述为归属信号，再逐仓抓 README 复核"依赖/扩展/遵循"语境（词边界匹配，dsh-stddev 不会误判成 dsh-std）；清单在 tools/ecosystem.json，策展工具 tools/curate-ecosystem.mjs 可复跑 |
@@ -182,7 +186,7 @@ GitHub 搜索 API
 
 ```bash
 npm test                                  # 159 项：布局 / 连线 / 分类（协议基座·桌宠·非插件排除）/ 细枝 / 相关性判定 / 生态共鸣 / 面板 / 主题 / 噪声黑名单 / 服务加固 / 冒烟
-python3 backend/tests/test_collector.py   # 50 项：分类 / 分段扫描 / 快照 / 调度 / 采集顺序 / 噪声黑名单 / 三档判定 / 预计算容错
+python3 backend/tests/test_collector.py   # 53 项：分类 / 分段扫描 / 快照 / 调度 / 采集顺序 / 噪声黑名单 / 三档判定 / 预计算容错
 python3 backend/verify_parity.py          # 跨语言一致性（JS 管线 vs Python 采集器）
 ```
 
@@ -212,14 +216,15 @@ tools/
   serve.mjs         加固版静态服务（白名单 + 统计 API）
   categories.mjs    分类规则表（与 Python 逐条对齐）
   reclassify.mjs    就地重分类（不重新采集）
-  snapshot-svg.mjs  README 预览图生成
+  snapshot-svg.mjs  README 预览图离线副本（--png 可生成核对图）
+  preview-svg.mjs   预览渲染核心：站点 /preview.svg 与离线副本共用
   seed-sample.mjs  preview-ascii.mjs
 backend/
   collect.py        采集入口（--once / --loop / --budget / --from-raw）
   dsh_mesh/         github / segments / classify / build / snapshot / config
   verify_parity.py  跨语言一致性校验
   check_token.py    令牌自检（只打印配额数字）
-  tests/            50 项测试（前端 159 项在根目录 tests/）
+  tests/            53 项测试（前端 159 项在根目录 tests/）
 docs/               data-contract.md 与预览图
 ```
 
@@ -250,6 +255,7 @@ API 与前端**共用同一个端口**：不需要另外开服务、不需要任
 | GET | `/api/repos` | 检索仓库（过滤 / 排序 / 翻页） |
 | GET | `/api/repos/:owner/:name` | 单个仓库详情 + 同作者 / 主题共现连线 |
 | GET | `/api/card/:owner/:name.svg` | 可分享的 SVG 卡片（见下一节） |
+| GET | `/preview.svg`（同 `/api/preview.svg`） | README 预览图：按当前数据实时渲染的生态图（`?theme=dark|light&size=&sample=`），ETag + 5 分钟缓存 |
 | GET | `/card/:owner/:name` | 卡片分享页（预览 + 嵌入代码） |
 | GET | `/api/stats` | 访问统计（只读） |
 | POST | `/api/ping` | 上报一次访问（前端自动调用，唯一接受 POST 的接口） |

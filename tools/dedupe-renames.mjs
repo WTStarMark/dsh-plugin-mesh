@@ -117,7 +117,32 @@ function makeResolver(token) {
 }
 
 /** 缓存模式：累积索引 {updatedAt,count,repos:{键:记录}} —— 治本，改完下一轮构建就没有重复了 */
+/** 有没有采集器正在跑？它在内存里存着整份索引，我们边跑边改会被它的定期保存覆盖。 */
+async function collectorRunning() {
+  try {
+    const { readdir, readFile: rf } = await import("node:fs/promises");
+    for (const pid of await readdir("/proc")) {
+      if (!/^\d+$/.test(pid)) continue;
+      try {
+        const cmd = (await rf("/proc/" + pid + "/cmdline", "utf8")).replace(/\0/g, " ");
+        if (/collect\.py/.test(cmd) && !cmd.includes("dedupe-renames")) return pid;
+      } catch {
+        /* 进程刚好退出 */
+      }
+    }
+  } catch {
+    /* 非 Linux 或没权限：跳过检查 */
+  }
+  return null;
+}
+
 async function runCacheMode(cachePath, DRY, token) {
+  const running = await collectorRunning();
+  if (running && !process.argv.includes("--force")) {
+    console.error("检测到采集器正在运行（pid " + running + "）：它会在每 5 段/每轮结束时把内存里的旧索引写回磁盘，");
+    console.error("现在改会被覆盖。请先停采集器（pm2 stop dsh-mesh-collector）再跑本工具，确认无误后可用 --force 跳过此检查。");
+    process.exit(3);
+  }
   const cache = JSON.parse(await readFile(cachePath, "utf8"));
   const repos = cache.repos ?? {};
   const records = Object.values(repos);
@@ -160,6 +185,34 @@ async function runCacheMode(cachePath, DRY, token) {
   await rename(tmp, cachePath);
   console.log("累积索引 " + before + " → " + Object.keys(out).length + "（删除旧名 " + drop.size + "、就地改名 " + rekeyed + "、回填 githubId " + backfilled + "）");
   console.log("备份: " + cachePath.replace(ROOT + "/", "") + ".bak-" + stamp + ".json");
+
+  // 写别名表：采集器下次加载/合并时会按它把旧名归一，避免搜索索引延迟又把旧名带回来
+  const aliasPath = resolve(dirname(cachePath), "aliases.json");
+  let aliasDoc = { aliases: {} };
+  try {
+    aliasDoc = JSON.parse(await readFile(aliasPath, "utf8"));
+  } catch {
+    /* 首次 */
+  }
+  const aliases = { ...(aliasDoc.aliases ?? {}) };
+  // 历史上（本功能上线前）做过的改名也要并进来：它们只记在账本里，
+  // 否则采集器遇到那些旧名字时仍然认不出来（EAC 那几对就是这么漏掉的）。
+  try {
+    const ledger = JSON.parse(await readFile(resolve(ROOT, "data/renames.json"), "utf8"));
+    for (const r of [...(ledger.renames ?? []), ...(ledger.renamesInPlace ?? [])]) aliases[r.from] = r.to;
+  } catch {
+    /* 没有账本就只写本次的 */
+  }
+  for (const r of [...plan.renames, ...plan.updates]) aliases[r.from] = r.to;
+  // 链式别名归一：A→B、B→C 时把 A 直接指到 C
+  const resolveAlias = (to) => {
+    let cur = to;
+    for (let i = 0; i < 5 && aliases[cur]; i++) cur = aliases[cur];
+    return cur;
+  };
+  for (const k of Object.keys(aliases)) aliases[k] = resolveAlias(aliases[k]);
+  await writeFile(aliasPath, JSON.stringify({ updatedAt: new Date().toISOString(), aliases }, null, 1), "utf8");
+  console.log("别名表: " + aliasPath.replace(ROOT + "/", "") + "（共 " + Object.keys(aliases).length + " 条，采集器会按它把旧名归一）");
 }
 
 async function main() {
