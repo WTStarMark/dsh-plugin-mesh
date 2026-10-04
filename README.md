@@ -3,9 +3,9 @@
 **把带 `dsh` 系列 GitHub 标签的仓库，画成一张可交互的生态网络图。**
 
 [![在线访问](https://img.shields.io/badge/在线访问-104.129.51.126-2f7df6?style=flat-square)](http://104.129.51.126/)
-[![测试](https://img.shields.io/badge/tests-153%20JS%20%2B%2046%20Python-3fb8a8?style=flat-square)](#测试)
+[![测试](https://img.shields.io/badge/tests-159%20JS%20%2B%2050%20Python-3fb8a8?style=flat-square)](#测试)
 [![依赖](https://img.shields.io/badge/dependencies-0-57b894?style=flat-square)](#技术选型)
-[![版本](https://img.shields.io/badge/version-v0.4.3-9b8cf0?style=flat-square)](#)
+[![版本](https://img.shields.io/badge/version-v0.4.4-9b8cf0?style=flat-square)](#)
 
 👉 **在线地址：<http://104.129.51.126/>**
 
@@ -63,8 +63,8 @@
 ```bash
 git clone <repo> && cd dsh-plugin-mesh
 npm run serve:lan                        # http://<你的局域网IP>:8788/
-npm test                                 # 153 项前端测试
-python3 backend/tests/test_collector.py  # 46 项后端测试
+npm test                                 # 159 项前端测试
+python3 backend/tests/test_collector.py  # 50 项后端测试
 ```
 
 **采集数据**（需要 GitHub 令牌，见下）：
@@ -147,6 +147,7 @@ GitHub 搜索 API
 | 排除 exclude | **桌面客户端**排除客户端插件：名字带 plugin/插件/extension/skill/theme 的一律不算；描述里「本仓库是一个客户端」这类自述可救回 |
 | 细枝 | 每个扇区内再按同一套规则挑 3~8 个细枝（共 79 条），用于单扇区放大 |
 | 生态语境 | **协议基座**（生态规范 / 互操作协议 / 接口契约 + 侧边栏底座、皮肤框架这类"别人长在上面"的基座）：先过一道生态语境门槛，再由"基座自述"强命中直接胜出 —— 否则「最大公约数」「标准差」「NocoBase 式基础设施」都会被误抓；样本再少也不并进「其他」（keepIds） |
+| 改名去重 | 仓库改名后 `full_name` 变了、GitHub 数字 id 不变：采集记录保留 `githubId`，累积索引按它认人（改名 = 就地挪键 + 记 `renamedFrom`，不再新旧并存）；构图时按 `githubId` 兜底去重并采用更新的名字。老数据用 `tools/dedupe-renames.mjs` 迁移（同作者+同创建时间找嫌疑 → 逐个问 GitHub → 合并/就地改名，先备份再写） |
 | 非插件排除 | 挂 dsh 标签但 DSH 是别的意思（如 DeepHash-pytorch 的 DSH = Deep Supervised Hashing）的仓库不进索引：判据是 tools/categories.mjs 与 classify.py 里的 NOT_PLUGIN_PATTERNS，两条管线逐条一致 |
 | 生态共鸣 | 人工策展的"基座 → 长在它上面的插件"（紫罗兰实线）：以生态签 + 名字自述为归属信号，再逐仓抓 README 复核"依赖/扩展/遵循"语境（词边界匹配，dsh-stddev 不会误判成 dsh-std）；清单在 tools/ecosystem.json，策展工具 tools/curate-ecosystem.mjs 可复跑 |
 | 策展基座 | 清单里的基座（侧边栏底座 / TUI 基座 / 互操作元协议 / 生态共识规范 / 皮肤框架）**直接归入协议基座**（categoryCurated 标记）：它们正文未必写着"基座"二字，但确实是别人长在上面的地基 |
@@ -180,8 +181,8 @@ GitHub 搜索 API
 ## 测试
 
 ```bash
-npm test                                  # 153 项：布局 / 连线 / 分类（协议基座·桌宠·非插件排除）/ 细枝 / 相关性判定 / 生态共鸣 / 面板 / 主题 / 噪声黑名单 / 服务加固 / 冒烟
-python3 backend/tests/test_collector.py   # 46 项：分类 / 分段扫描 / 快照 / 调度 / 采集顺序 / 噪声黑名单 / 三档判定 / 预计算容错
+npm test                                  # 159 项：布局 / 连线 / 分类（协议基座·桌宠·非插件排除）/ 细枝 / 相关性判定 / 生态共鸣 / 面板 / 主题 / 噪声黑名单 / 服务加固 / 冒烟
+python3 backend/tests/test_collector.py   # 50 项：分类 / 分段扫描 / 快照 / 调度 / 采集顺序 / 噪声黑名单 / 三档判定 / 预计算容错
 python3 backend/verify_parity.py          # 跨语言一致性（JS 管线 vs Python 采集器）
 ```
 
@@ -218,7 +219,7 @@ backend/
   dsh_mesh/         github / segments / classify / build / snapshot / config
   verify_parity.py  跨语言一致性校验
   check_token.py    令牌自检（只打印配额数字）
-  tests/            46 项测试（前端 153 项在根目录 tests/）
+  tests/            50 项测试（前端 159 项在根目录 tests/）
 docs/               data-contract.md 与预览图
 ```
 

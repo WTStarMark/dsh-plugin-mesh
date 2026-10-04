@@ -171,8 +171,8 @@ test("颜色与名称校验：稳定、可预期", () => {
 });
 
 test("API 自描述：端点清单完整", () => {
-  const index = apiIndex("0.4.3");
-  assert.equal(index.version, "0.4.3");
+  const index = apiIndex("0.4.4");
+  assert.equal(index.version, "0.4.4");
   const paths = index.endpoints.map((e) => e.path).join(" ");
   for (const need of ["/api/health", "/api/categories", "/api/repos", "/api/card", "/card/"]) {
     assert.ok(paths.includes(need), "清单应包含 " + need);

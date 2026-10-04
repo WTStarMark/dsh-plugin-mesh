@@ -515,6 +515,83 @@ class GitHubClientTest(unittest.TestCase):
         self.assertEqual(sleeps, [2.0])
 
 
+class RenameTest(unittest.TestCase):
+    """改名去重（0.4.4）：full_name 会变、数字 id 不变，索引与构图都要按数字 id 认人。"""
+
+    def test_pick_repo_keeps_github_numeric_id(self):
+        from dsh_mesh.build import pick_repo
+
+        record = pick_repo(
+            {
+                "full_name": "u/name",
+                "id": 123456,
+                "name": "name",
+                "owner": {"login": "u", "type": "User"},
+                "stargazers_count": 1,
+                "topics": ["dsh-plugin"],
+            }
+        )
+        self.assertEqual(record["id"], "u/name")
+        self.assertEqual(record["githubId"], 123456)
+
+    def test_store_merge_treats_rename_as_same_repo(self):
+        import tempfile
+
+        from dsh_mesh.segments import SegmentStore
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = SegmentStore(Path(tmp) / "segments.json", Path(tmp) / "repos.json")
+            before = {"id": "u/old-name", "githubId": 42, "owner": "u", "name": "old-name", "topics": ["dsh-plugin"]}
+            after = {"id": "u/new-name", "githubId": 42, "owner": "u", "name": "new-name", "topics": ["dsh-plugin"]}
+            self.assertEqual(store.merge([before]), 1)
+            self.assertEqual(store.merge([after]), 0, "改名不该被算成新仓库")
+            self.assertNotIn("u/old-name", store.repos, "旧名字记录必须挪走，不能新旧并存")
+            self.assertIn("u/new-name", store.repos)
+            self.assertEqual(store.repos["u/new-name"]["renamedFrom"], ["u/old-name"])
+
+    def test_store_merge_without_github_id_falls_back_to_name(self):
+        import tempfile
+
+        from dsh_mesh.segments import SegmentStore
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = SegmentStore(Path(tmp) / "segments.json", Path(tmp) / "repos.json")
+            rec = {"id": "u/x", "owner": "u", "name": "x", "topics": ["dsh-plugin"]}
+            self.assertEqual(store.merge([rec]), 1)
+            self.assertEqual(store.merge([rec]), 0)
+
+    def test_build_dedupes_by_github_id_and_adopts_newer_name(self):
+        def rec(full_name, name, updated, gid=7):
+            return {
+                "id": full_name,
+                "githubId": gid,
+                "name": name,
+                "owner": "u",
+                "ownerType": "User",
+                "htmlUrl": "https://github.com/" + full_name,
+                "stars": 3,
+                "forks": 0,
+                "openIssues": 0,
+                "createdAt": "2026-01-01T00:00:00Z",
+                "pushedAt": updated,
+                "updatedAt": updated,
+                "language": "TS",
+                "license": None,
+                "archived": False,
+                "fork": False,
+                "description": "dsh 插件",
+                "homepage": None,
+                "sizeKb": 1,
+                "topics": ["dsh-plugin"],
+            }
+
+        mesh = build_mesh(
+            [rec("u/old-name", "old-name", "2026-01-01T00:00:00Z"), rec("u/new-name", "new-name", "2026-02-02T00:00:00Z")],
+            {},
+        )
+        self.assertEqual([n["id"] for n in mesh["nodes"]], ["u/new-name"], "同一 githubId 只留一个节点，用更新的名字")
+
+
 class SegmentTest(unittest.TestCase):
     """分段扫描：细分层级、叶子、队列预算、累积索引。"""
 

@@ -35,3 +35,7 @@ dist/
 # 临时提交信息文件
 .commit-msg.txt
 .gh-*.mjs
+data/renames.json
+
+# 改名迁移的备份（体积大，机器生成）
+data/*.bak-*.json

@@ -66,7 +66,10 @@ def pick_repo(item: dict) -> dict:
     owner = (item.get("owner") or {})
     license_info = item.get("license") or {}
     return {
+        # id 是对外展示的 owner/name（会随改名变化）；githubId 是 GitHub 的稳定数字 id，
+        # 改名不变 —— 累积索引靠它识别"同一个仓库换了名字"，否则新旧两个球会一直在图里。
         "id": item.get("full_name"),
+        "githubId": item.get("id"),
         "name": item.get("name"),
         "owner": owner.get("login") or "?",
         "ownerType": owner.get("type"),
@@ -220,9 +223,16 @@ def build_mesh(
         if not matched or not repo["id"]:
             continue  # 精确命中：标签必须真的在它自己的 topics 里
         matched.sort(key=WHITELIST_TAGS.index)
-        if repo["id"] in seen:
-            prev = seen[repo["id"]]
+        # 同一个仓库的稳定身份是 githubId（改名不变）；老记录没有它时退回 id。
+        # 两条同名记录并存（改名前后各一条）时，采用"更新"的那条作展示身份。
+        key = str(repo.get("githubId") or repo["id"])
+        if key in seen:
+            prev = seen[key]
             prev["matchedTags"] = sorted(set(prev["matchedTags"]) | set(matched), key=WHITELIST_TAGS.index)
+            if str(repo.get("updatedAt") or "") > str(prev.get("updatedAt") or ""):
+                for field in ("id", "githubId", "name", "owner", "ownerType", "avatar", "htmlUrl"):
+                    if repo.get(field) is not None:
+                        prev[field] = repo[field]
             continue
         repo["matchedTags"] = matched
         repo["primaryTag"] = matched[0]
@@ -233,7 +243,7 @@ def build_mesh(
         repo["review"] = verdict["review"]
         repo["verdict"] = verdict["verdict"]
         repo["reason"] = verdict["reason"]
-        seen[repo["id"]] = repo
+        seen[key] = repo
         nodes.append(repo)
 
     # 本轮新识别的噪声作者：连同它们的仓库一起剔除，并并入黑名单长期生效

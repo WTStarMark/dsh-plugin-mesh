@@ -146,6 +146,9 @@ class SegmentStore:
         self.repos: dict[str, dict] = self._load_repos()
         # 噪声作者黑名单：这些 owner 的仓库一律不进累积索引（省配额、也省得再被剔除一次）
         self.blacklist: set[str] = set(blacklist or ())
+        # githubId → 索引键：改名后 full_name 变了，但 githubId 不变，靠它把旧记录认出来
+        self._by_github: dict[str, str] = {}
+        self._reindex_github()
 
     def _load_state(self) -> dict:
         if self.state_path.exists():
@@ -164,6 +167,14 @@ class SegmentStore:
             except (OSError, json.JSONDecodeError):
                 pass
         return {}
+
+    def _reindex_github(self) -> None:
+        """重建 githubId → 索引键 的映射（老记录没有 githubId 就跳过）。"""
+        self._by_github = {}
+        for key, record in self.repos.items():
+            gid = record.get("githubId")
+            if gid is not None:
+                self._by_github[str(gid)] = key
 
     def save(self) -> None:
         """落盘。顺序很重要：【先写仓库数据，后写队列状态】。
@@ -294,6 +305,13 @@ class SegmentStore:
         return {"split": False, "added": added, "children": 0}
 
     def merge(self, records: list[dict]) -> int:
+        """并入累积索引。返回新识别到的仓库数。
+
+        改名处理：仓库改名后 full_name（也就是 id）会变，但 GitHub 的数字 id 不变。
+        因此带 githubId 的记录会先按 githubId 找到旧键：如果旧键的名字和这次不一样，
+        说明改名了 —— 把旧记录挪到新名字下（留下 renamedFrom 痕迹），而不是新增一条，
+        否则生态图里会同时出现改名前后两个球。
+        """
         added = 0
         for record in records:
             rid = record.get("id")
@@ -301,9 +319,26 @@ class SegmentStore:
                 continue
             if self.blacklist and owner_of(record) in self.blacklist:
                 continue  # 噪声作者：不进累积索引
-            if rid not in self.repos:
-                added += 1
+            # 规模在"整个记录处理之前"取：改名会先 pop 旧键再插新键，中途取会算错
+            size_before = len(self.repos)
+            gid = record.get("githubId")
+            if gid is not None:
+                prev_key = self._by_github.get(str(gid))
+                if prev_key is not None and prev_key != rid:
+                    old = self.repos.pop(prev_key, None)
+                    if old is not None:
+                        history = list(old.get("renamedFrom") or [])
+                        history.append(prev_key)
+                        record = dict(record, renamedFrom=sorted(set(history)))
+                    self._by_github.pop(str(gid), None)
+                self._by_github[str(gid)] = rid
+            prev = self.repos.get(rid)
+            if prev is not None and not record.get("renamedFrom") and prev.get("renamedFrom"):
+                record = dict(record, renamedFrom=prev["renamedFrom"])
+            # "新增"按索引规模的真实增量算：改名是"挪个位置"，规模不变，不该计入新增
             self.repos[rid] = record
+            if len(self.repos) > size_before:
+                added += 1
         return added
 
     def drop_owners(self, owners) -> int:
@@ -315,6 +350,7 @@ class SegmentStore:
         for rid in removed:
             self.repos.pop(rid, None)
         self.blacklist |= targets
+        self._reindex_github()
         return len(removed)
 
     def coverage(self) -> dict:

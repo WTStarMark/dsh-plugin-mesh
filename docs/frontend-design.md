@@ -177,6 +177,28 @@
 产物 `tools/ecosystem.json` 随代码走（`data/` 不参与部署），两条管线在构建时把它变成 `type: "resonance"` 的边；
 前端用紫罗兰实线绘制，并在连线图例里给出当前选中项的条数。
 
+## 五点九五、v0.4.4：改名去重（新旧两个球）
+
+GitHub 改名后 `full_name`（也就是图里的节点 id）会变，但**数字 id 不变**。旧实现把数字 id 丢了、
+累积索引又以 `full_name` 为键 —— 于是改名后新名字成为一条新记录，旧名字那条永远留在索引里，
+生态图上就出现"同一个仓库两个球"。
+
+三处一起改：
+
+| 位置 | 改动 |
+|---|---|
+| `pick_repo` / `pickRepo` | 记录里保留 `githubId`（GitHub 数字 id），JS 与 Python 同步 |
+| `SegmentStore.merge` | 按 `githubId` 认人：发现旧键名字与本次不同，就把旧记录**挪到新名字下**（记 `renamedFrom`），而不是新增一条；"新增数"按索引规模的真实增量算 |
+| `build_mesh` / `buildMesh` | 构图兜底：同一 `githubId` 只留一个节点，且采用 `updatedAt` 更新的那条作展示身份 |
+
+存量数据用 `tools/dedupe-renames.mjs` 迁移：按"同作者 + 同创建时间"（`created_at` 不可变）筛嫌疑，
+逐個问 GitHub（`/repos/{owner}/{name}` 会自动跟到改名后的名字）拿到数字 id 与当前 full_name，
+同一 id 收敛成一个（保留当前名字那条），只有旧名字的就地改名并同步改写边的两端。
+产物：原文件先备份成 `data/mesh.<stamp>.bak.json`，改名账本写进 `data/renames.json` 与 `meta.renames`。
+
+删过节点之后必须重建**同作者边**（原来的星形枢纽可能已经不在了，残留边会让同作者部分仓库失联）——
+这一步由 `tools/reclassify.mjs` 按与采集器一致的算法（≤8 用完全图，超过用星标最高的当枢纽）重做。
+
 ## 六、已知不足（诚实清单）
 
 - 没有无头浏览器：视觉呈现（扇区观感、标签遮挡、圈密度）未经真机验证，只验证了逻辑与不崩。

@@ -85,7 +85,45 @@ for (const base of ecosystem.bases ?? []) {
     resonance += 1;
   }
 }
+// ---- 4b) 同作者边：按当前节点集重建 ----
+// 删过节点之后，原来的"星形枢纽"可能已经不在了，残留的 owner 边会让同一作者的部分仓库失联
+// （tests/data.test.mjs 的连通性用例会抓这个）。这里按与采集器完全一致的算法重建：
+// 作者成员 ≤ OWNER_CLIQUE_MAX 用完全图，超过就用"星标最高的那个当枢纽"的星形拓扑。
+const OWNER_CLIQUE_MAX = 8;
+const ownerless = edges.filter((e) => e.type !== "owner");
+const byOwner = new Map();
+for (const n of mesh.nodes) {
+  if (!byOwner.has(n.owner)) byOwner.set(n.owner, []);
+  byOwner.get(n.owner).push(n);
+}
+let ownerEdges = 0;
+let ownerStarEdges = 0;
+for (const [owner, group] of byOwner) {
+  if (group.length < 2) continue;
+  if (group.length <= OWNER_CLIQUE_MAX) {
+    for (let i = 0; i < group.length; i++) {
+      for (let j = i + 1; j < group.length; j++) {
+        const [a, b] = group[i].id < group[j].id ? [group[i].id, group[j].id] : [group[j].id, group[i].id];
+        ownerless.push({ source: a, target: b, type: "owner", weight: 1, via: [owner] });
+        ownerEdges++;
+      }
+    }
+  } else {
+    const hub = group.reduce((a, b) => (b.stars > a.stars ? b : a));
+    for (const n of group) {
+      if (n.id === hub.id) continue;
+      const [a, b] = hub.id < n.id ? [hub.id, n.id] : [n.id, hub.id];
+      ownerless.push({ source: a, target: b, type: "owner", weight: 1, via: [owner] });
+      ownerEdges++;
+      ownerStarEdges++;
+    }
+  }
+}
+edges.length = 0;
+edges.push(...ownerless);
 mesh.edges = edges;
+mesh.meta.ownerEdges = ownerEdges;
+mesh.meta.ownerStarEdges = ownerStarEdges;
 mesh.meta.resonanceEdges = resonance;
 mesh.meta.ecosystemBases = (ecosystem.bases ?? []).filter((b) => b.enabled !== false).map((b) => b.id);
 mesh.meta.ecosystemDisabled = (ecosystem.bases ?? []).filter((b) => b.enabled === false).map((b) => b.id);

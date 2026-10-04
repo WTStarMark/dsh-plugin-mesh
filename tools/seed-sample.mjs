@@ -54,6 +54,8 @@ const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 function pickRepo(it) {
   return {
     id: it.full_name,
+    // GitHub 的稳定数字 id：改名不变，累积索引/去重靠它认人（见 backend/dsh_mesh/segments.py）
+    githubId: it.id ?? null,
     name: it.name,
     owner: it.owner?.login ?? "?",
     ownerType: it.owner?.type ?? null,
@@ -82,11 +84,19 @@ function buildMesh(rawRepos, queryMeta) {
     const matchedTags = WHITELIST.filter((t) => r.topics.includes(t));
     if (!matchedTags.length) continue; // 精确命中才算数：只认 topics[] 里的白名单标签
     if (nonPluginReason(r)) continue; // 非 DSH 语境（例如 DSH 指深度哈希）不进索引
-    if (seen.has(r.id)) {
-      const prev = seen.get(r.id);
+    // 稳定身份是 githubId（改名不变），老记录没有它时退回 id
+    const key = String(r.githubId ?? r.id);
+    if (seen.has(key)) {
+      const prev = seen.get(key);
       prev.matchedTags = [...new Set([...prev.matchedTags, ...matchedTags])].sort(
         (a, b) => WHITELIST.indexOf(a) - WHITELIST.indexOf(b),
       );
+      // 改名前后各一条时，采用更新的那条作展示身份
+      if (String(r.updatedAt ?? "") > String(prev.updatedAt ?? "")) {
+        for (const field of ["id", "githubId", "name", "owner", "ownerType", "avatar", "htmlUrl"]) {
+          if (r[field] !== undefined && r[field] !== null) prev[field] = r[field];
+        }
+      }
       continue;
     }
     const verdict = analyzeRelevance({ ...r, matchedTags });
@@ -101,7 +111,7 @@ function buildMesh(rawRepos, queryMeta) {
       verdict: verdict.verdict,
       reason: verdict.reason,
     };
-    seen.set(r.id, node);
+    seen.set(key, node);
     nodes.push(node);
   }
 
