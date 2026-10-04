@@ -4,7 +4,7 @@
  * 状态变更路径永远是：改 state -> applyHighlight() -> 重绘 / 重渲染面板。
  * 过滤一律「淡化」而非「移除」，保证同一份数据在任意过滤下位置一致、可对比。
  */
-import { loadMeshBest, prepare, prepareCore, precomputedLayout, matches, formatStars, groupColor, starThreshold, ownerSiblings, stripNoiseOwners, isConfirmedNoise, EDGE_TYPE_BY_CODE, EDGE_STYLES } from "./mesh-data.js";
+import { loadMeshBest, prepare, prepareCore, precomputedLayout, matches, formatStars, groupColor, starThreshold, ownerSiblings, stripNoiseOwners, isConfirmedNoise, EDGE_TYPE_BY_CODE, EDGE_STYLES, RAY_HIT_LIMIT } from "./mesh-data.js";
 import { createDetailStore } from "./details.js";
 import { createStore } from "./cache.js";
 import { startStats, formatCount } from "./stats.js";
@@ -57,6 +57,9 @@ const state = {
   focusCategory: null, // 单扇区放大：非空时只铺该分类，扇区变成它的细枝分类
   query: "",
   searchHits: null, // 搜索命中集合：画布据此从圆心画放射线
+  readmeHits: null, // README 正文命中（服务端返回，只给 id）：与本地命中合并后一起高亮/画线
+  readmeTotal: 0,
+  readmeIndexed: 0,
   neighborFocus: null,
   selectedId: null,
   // 默认只开"标签"与"头像"：连线一律默认关闭，想看哪类关系自己点开
@@ -277,7 +280,9 @@ function computeHighlight() {
   // 搜索命中：单独记一份，不受其它筛选影响 —— 放射线指向的是"搜索命中的仓库"
   let searchSet = null;
   for (const n of prepared.nodes) {
-    const hit = state.query ? matches(n, state.query) : false;
+    // 本地命中（id/描述/topics）当场算；README 命中来自服务端（正文太大，不放进前端契约）
+    const readmeHit = state.query && state.readmeHits ? state.readmeHits.has(n.id) : false;
+    const hit = state.query ? matches(n, state.query) || readmeHit : false;
     if (hit) (searchSet ??= new Set()).add(n.id);
     // 标签之间取"与"：仓库必须同时具备所有已开启的标签才高亮。
     // 用"或"会失效——标签高度重叠（多数仓库同时挂 dsh 与 dsh-plugin），关掉任何一个都几乎筛不掉东西。
@@ -333,12 +338,19 @@ function updateStatus(highlight) {
   const arms = layout && Array.isArray(layout.arms) ? layout.arms.length : 0;
   const by = state.groupBy === "language" ? "语言" : "功能分类";
   const head = "圆心：" + HUB_ID + " · 共 " + arms + " 个扇区，每个 " + (arms ? (360 / arms).toFixed(1) : "0") + "°，按" + by + "划分";
-  // 搜索时把放射线也读出来：不然用户不知道那些线是搜索的结果
-  const rays = state.query && state.searchHits ? " · 放射线指向 " + state.searchHits.size + " 个搜索命中" : "";
+  // 搜索时把命中数与放射线情况讲清楚：命中太多就不画线（见 RAY_HIT_LIMIT），否则用户会以为坏了
+  let rays = "";
+  if (state.query && state.searchHits) {
+    const n = state.searchHits.size;
+    const readme = state.readmeTotal > 0 ? "（其中 README 正文命中 " + state.readmeTotal + " 个，已索引 " + state.readmeIndexed + " 篇）" : "";
+    rays = n > RAY_HIT_LIMIT
+      ? " · 搜索命中 " + n + " 个" + readme + "，超过 " + RAY_HIT_LIMIT + " 个只做高亮、不画放射线（避免卡顿）"
+      : " · 放射线指向 " + n + " 个搜索命中" + readme;
+  }
   dom.hint.textContent = head + " · 当前命中 " + hit + " / " + prepared.nodes.length + " 个仓库" + rays;
   dom.hint.title =
     "滚轮缩放 · 拖拽平移 · 单击选中 · 双击聚焦其关联仓库" +
-    (state.query ? " · 搜索命中的仓库有从圆心射出的放射线" : "") +
+    (state.query ? " · 搜索命中超过 " + RAY_HIT_LIMIT + " 个时不画放射线（只高亮），避免浏览器卡顿" : "") +
     (state.neighborFocus ? " · 当前「只看关联仓库」：点画布空白处或按 Esc 即可退出" : "");
 }
 
@@ -456,11 +468,53 @@ const actions = {
   },
 };
 
+/**
+ * README 正文检索（v0.4.6）：正文太大，进不了前端契约，所以走服务端的紧凑接口
+ * （只回命中 id）。真源是采集器每轮抓的 data/cache/readmes.json。
+ *
+ * 防抖 260ms：打字过程中不必每键都发请求；接口不可用（离线/静态托管）时静默跳过，
+ * 本地检索（id/描述/topics）照常工作。
+ */
+let readmeTimer = null;
+let readmeAbort = null;
+function scheduleReadmeSearch(q) {
+  if (readmeTimer) clearTimeout(readmeTimer);
+  if (readmeAbort) {
+    try {
+      readmeAbort.abort();
+    } catch {
+      /* 取消失败无所谓 */
+    }
+  }
+  if (!q) {
+    state.readmeHits = null;
+    state.readmeTotal = 0;
+    return;
+  }
+  readmeTimer = setTimeout(async () => {
+    if (typeof fetch !== "function" || typeof AbortController === "undefined") return;
+    readmeAbort = new AbortController();
+    try {
+      const res = await fetch("/api/search?limit=800&q=" + encodeURIComponent(q), { signal: readmeAbort.signal });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (state.query !== q) return; // 期间又改了输入，丢弃这次结果
+      state.readmeHits = new Set(data.readme?.ids ?? []);
+      state.readmeTotal = data.readme?.total ?? 0;
+      state.readmeIndexed = data.readme?.indexed ?? 0;
+      apply({ rail: false, inspector: false, edgeChips: false });
+    } catch {
+      /* 接口不可用或请求被取消：保留本地检索结果 */
+    }
+  }, 260);
+}
+
 function runSearch() {
   const q = dom.search.value.trim();
   state.query = q;
   dom.searchClear.hidden = !q;
   apply({ inspector: false, edgeChips: false });
+  scheduleReadmeSearch(q);
 }
 
 function firstMatch() {

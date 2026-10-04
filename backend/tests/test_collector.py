@@ -515,6 +515,138 @@ class GitHubClientTest(unittest.TestCase):
         self.assertEqual(sleeps, [2.0])
 
 
+class ReadmeIndexTest(unittest.TestCase):
+    """README 索引（0.4.6）：支撑"搜索仓库 README 内容"。"""
+
+    def _tmp(self):
+        import tempfile
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        return Path(tmp.name) / "readmes.json"
+
+    def test_needs_prioritizes_missing_then_stale(self):
+        from dsh_mesh.readmes import ReadmeIndex
+
+        idx = ReadmeIndex(self._tmp())
+        repos = [{"id": "a/low", "stars": 1}, {"id": "b/high", "stars": 900}, {"id": "c/mid", "stars": 50}]
+        picked = idx.needs(repos, 2)
+        self.assertEqual([r["id"] for r in picked], ["b/high", "c/mid"], "没抓过的按星标降序优先")
+
+        idx.put("b/high", "内容", fetched_at="2020-01-01T00:00:00Z")  # 很旧 → 属于过期队列
+        idx.put("c/mid", "内容", fetched_at="2999-01-01T00:00:00Z")  # 很新
+        again = idx.needs(repos, 2)
+        self.assertIn("b/high", [r["id"] for r in again], "过期的应被重新排队")
+        self.assertNotIn("c/mid", [r["id"] for r in again], "刚抓过的不该重复抓")
+
+    def test_normalize_truncates_and_strips_control_chars(self):
+        from dsh_mesh.readmes import ReadmeIndex
+
+        idx = ReadmeIndex(self._tmp(), max_chars=100)
+        text = idx.normalize("# 标题\n\n\n\n正文\x00\x07   多个空格    合并" + "x" * 500)
+        self.assertLessEqual(len(text), 100)
+        self.assertNotIn("\x00", text)
+        self.assertNotIn("\x07", text)
+        self.assertNotIn("    ", text, "连续空白应被压掉")
+        self.assertEqual(idx.normalize(None), "")
+        self.assertEqual(idx.normalize(""), "")
+
+    def test_fetch_batch_records_empty_readme_to_avoid_retry(self):
+        from dsh_mesh.readmes import ReadmeIndex, fetch_batch
+
+        class FakeClient:
+            def __init__(self):
+                self.asked = []
+
+            def readme(self, rid):
+                self.asked.append(rid)
+                return None if rid.startswith("no/") else "# hi"
+
+        idx = ReadmeIndex(self._tmp())
+        client = FakeClient()
+        repos = [{"id": "has/readme", "stars": 2}, {"id": "no/readme", "stars": 1}]
+        out = fetch_batch(client, idx, repos, budget=10, log=lambda *_: None)
+        self.assertEqual(sorted(client.asked), ["has/readme", "no/readme"])
+        self.assertEqual((out["fetched"], out["empty"]), (1, 1))
+        self.assertEqual(idx.docs["no/readme"]["t"], "", "没有 README 也要记账，避免每轮重复试探")
+        self.assertEqual(idx.needs(repos, 10), [], "抓过之后（含空）本轮不该再排")
+
+    def test_save_and_reload_roundtrip(self):
+        from dsh_mesh.readmes import ReadmeIndex
+
+        path = self._tmp()
+        idx = ReadmeIndex(path)
+        idx.put("a/b", "# 标题\n正文")
+        idx.save()
+        again = ReadmeIndex(path)
+        self.assertEqual(again.stats()["count"], 1)
+        self.assertIn("正文", again.docs["a/b"]["t"])
+        self.assertTrue(path.exists())
+
+    def test_digest_drops_badges_links_html_and_urls(self):
+        """只存"检索摘要"：徽章/图片/URL/HTML 都去掉——既省体积，也避免随机串误命中。"""
+        from dsh_mesh.readmes import ReadmeIndex
+
+        idx = ReadmeIndex(self._tmp(), max_chars=2000)
+        raw = (
+            "<h1 align=\"center\">项目名</h1>\n"
+            "![build](https://img.shields.io/badge/x-1?style=flat)\n"
+            "## 安装\n"
+            "看 [文档](https://example.com/very/long/path?a=1) 或访问 https://example.com/other\n"
+            "\u0060\u0060\u0060bash\nnpm i foo\n\u0060\u0060\u0060\n"
+        )
+        out = idx.normalize(raw)
+        self.assertNotIn("img.shields.io", out)
+        self.assertNotIn("https://", out)
+        self.assertNotIn("<h1", out)
+        self.assertIn("文档", out, "链接文字要保留")
+        self.assertIn("安装", out)
+        self.assertIn("npm i foo", out, "代码块里的安装命令要保留")
+
+    def test_gzip_storage_roundtrip_and_size(self):
+        """落盘走 gzip：内容能原样读回，且明显小于原 JSON。"""
+        import gzip
+        import json
+
+        from dsh_mesh.readmes import ReadmeIndex
+
+        path = self._tmp().with_suffix(".json.gz")
+        idx = ReadmeIndex(path, max_chars=2000)
+        for i in range(20):
+            idx.put("u/repo%d" % i, ("# 标题\n" + "正文内容 " * 200))
+        idx.save()
+        self.assertTrue(path.exists())
+        self.assertEqual(path.read_bytes()[:2], b"\x1f\x8b", "应当是 gzip 魔数")
+        plain = len(json.dumps({"docs": idx.docs}, ensure_ascii=False).encode("utf-8"))
+        self.assertLess(len(gzip.decompress(path.read_bytes())), plain + 1)
+        again = ReadmeIndex(path)
+        self.assertEqual(again.stats()["count"], 20)
+        self.assertEqual(again.docs["u/repo0"]["t"], idx.docs["u/repo0"]["t"])
+
+    def test_gzip_reader_also_accepts_plain_json(self):
+        """迁移期兼容：老的 readmes.json 也要能读。"""
+        import json
+
+        from dsh_mesh.readmes import ReadmeIndex
+
+        path = self._tmp()
+        path.write_text(json.dumps({"count": 1, "docs": {"a/b": {"t": "老格式", "f": "2026-01-01T00:00:00Z"}}}), encoding="utf-8")
+        idx = ReadmeIndex(path)
+        self.assertEqual(idx.docs["a/b"]["t"], "老格式")
+
+    def test_readme_fetch_failure_does_not_break_collector(self):
+        """fetch_batch 里 client.readme 抛异常（网络抖动）时不该把整轮采集带崩。"""
+        from dsh_mesh.readmes import ReadmeIndex, fetch_batch
+
+        class BoomClient:
+            def readme(self, rid):
+                raise RuntimeError("network down")
+
+        idx = ReadmeIndex(self._tmp())
+        with self.assertRaises(RuntimeError):
+            fetch_batch(BoomClient(), idx, [{"id": "a/b", "stars": 1}], budget=1, log=lambda *_: None)
+
+
 class RenameTest(unittest.TestCase):
     """改名去重（0.4.4）：full_name 会变、数字 id 不变，索引与构图都要按数字 id 认人。"""
 

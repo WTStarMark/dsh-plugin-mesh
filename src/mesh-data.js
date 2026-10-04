@@ -433,6 +433,13 @@ export function isConfirmedNoise(node) {
   return !!node.review && !(node.relevance > 0);
 }
 
+/**
+ * 搜索命中的"最多画多少条放射线"（v0.4.6）。
+ * 命中一多（比如搜 "dsh" 命中上万），每帧要建上万条路径 + 描边，浏览器直接卡死；
+ * 超过这个数就只做高亮、不画放射线，并在状态栏说明原因。
+ */
+export const RAY_HIT_LIMIT = 100;
+
 /** 搜索匹配：仓库名 / 作者 / 描述 / 标签 */
 export function matches(node, query) {
   if (!query) return false;

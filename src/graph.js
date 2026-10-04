@@ -5,7 +5,7 @@
  * 球体在足够大时显示作者头像（并发受限、按 URL 去重、失败不重试）。
  * 画法刻意保持克制：细线、低对比、柔和光点与柔和扇区光。
  */
-import { colorOfTag, groupColor, EDGE_STYLES, ownerSiblings } from "./mesh-data.js";
+import { colorOfTag, groupColor, EDGE_STYLES, ownerSiblings, RAY_HIT_LIMIT } from "./mesh-data.js";
 import { themeOf } from "./palettes.js";
 import { createAvatarStore } from "./avatars.js";
 
@@ -390,6 +390,9 @@ export function createGraphView(canvas, hooks = {}) {
    */
   function drawSearchRays() {
     if (!layout || !searchHits || searchHits.size === 0) return;
+    // 命中太多就不画（v0.4.6）：上万条路径会让每帧的建路径+描边把主线程占满，
+    // 用户看到的就是"搜索一卡一卡"。高亮照旧，状态栏会说明为什么没有放射线。
+    if (searchHits.size > RAY_HIT_LIMIT) return;
     const hub = layout.center && layout.center.index >= 0 ? layout.center.index : -1;
     const [cx, cy] = hub >= 0 ? toScreen(layout.x[hub], layout.y[hub]) : toScreen(0, 0);
 

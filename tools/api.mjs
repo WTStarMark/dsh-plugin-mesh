@@ -8,7 +8,8 @@
  *   4. 输出可缓存：数据每小时更新，API 响应给 5 分钟公共缓存。
  */
 
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
+import { gunzipSync } from "node:zlib";
 import { join } from "node:path";
 import { stripNoiseOwners } from "../src/mesh-data.js";
 
@@ -160,6 +161,11 @@ const FONT = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue
 
 export function createApi({ root }) {
   let cache = { at: 0, mesh: null };
+  // README 索引：采集器每轮抓一批，落盘 data/cache/readmes.json。
+  // 检索时把它拼成【一个全小写的大字符串】，用 indexOf 找命中位置、再二分定位到仓库 id——
+  // 这样每次查询只有一次内存扫描，不必对几万篇正文逐篇 toLowerCase()。
+  let readmeCache = { mtimeMs: -1, blob: "", ids: [], offsets: [], indexed: 0 };
+  const README_SEP = "\u0000";
 
   async function load() {
     const now = Date.now();
@@ -169,6 +175,67 @@ export function createApi({ root }) {
     const mesh = stripNoiseOwners(JSON.parse(raw));
     cache = { at: now, mesh };
     return mesh;
+  }
+
+  async function loadReadmes() {
+    // 优先读 gzip 版（采集器写的是 readmes.json.gz，约 10MB/1.9 万仓库）；
+    // 老的 readmes.json 也认，方便迁移期与测试夹具。
+    let file = null;
+    let info = null;
+    for (const candidate of [join(root, "data", "cache", "readmes.json.gz"), join(root, "data", "cache", "readmes.json")]) {
+      const s = await stat(candidate).catch(() => null);
+      if (s) {
+        file = candidate;
+        info = s;
+        break;
+      }
+    }
+    if (!file) return readmeCache;
+    if (readmeCache.mtimeMs === info.mtimeMs) return readmeCache;
+    try {
+      const raw = await readFile(file);
+      const data = JSON.parse(file.endsWith(".gz") ? gunzipSync(raw).toString("utf8") : raw.toString("utf8"));
+      const docs = data.docs ?? {};
+      const parts = [];
+      const ids = [];
+      const offsets = [];
+      let at = 0;
+      for (const [id, doc] of Object.entries(docs)) {
+        const text = String(doc?.t ?? "").toLowerCase();
+        if (!text) continue;
+        ids.push(id);
+        offsets.push(at);
+        parts.push(text);
+        at += text.length + 1;
+      }
+      readmeCache = { mtimeMs: info.mtimeMs, blob: parts.join(README_SEP), ids, offsets, indexed: Number(data.count ?? ids.length) || ids.length };
+    } catch {
+      readmeCache = { mtimeMs: info.mtimeMs, blob: "", ids: [], offsets: [], indexed: 0 };
+    }
+    return readmeCache;
+  }
+
+  /** README 命中集合（小写子串；q 需已小写） */
+  function readmeHits(q) {
+    const out = new Set();
+    const { blob, ids, offsets } = readmeCache;
+    if (!q || !blob) return out;
+    let i = blob.indexOf(q);
+    while (i !== -1) {
+      let lo = 0;
+      let hi = offsets.length - 1;
+      let hit = 0;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (offsets[mid] <= i) {
+          hit = mid;
+          lo = mid + 1;
+        } else hi = mid - 1;
+      }
+      out.add(ids[hit]);
+      i = blob.indexOf(q, i + 1);
+    }
+    return out;
   }
 
   function publicNode(n) {
@@ -232,19 +299,28 @@ export function createApi({ root }) {
     if (minStars > 0) hits = hits.filter((n) => (n.stars ?? 0) >= minStars);
     if (archived === "hide") hits = hits.filter((n) => !n.archived);
     if (archived === "only") hits = hits.filter((n) => n.archived);
+    let readme = { indexed: 0, total: 0 };
     if (q) {
+      await loadReadmes();
+      const viaReadme = readmeHits(q);
+      readme = { indexed: readmeCache.indexed, total: 0 };
+      const before = hits.length;
       hits = hits.filter((n) => {
         const hay = [n.id, n.description, (n.topics ?? []).join(" "), (n.matchedTags ?? []).join(" ")]
           .join(" ")
           .toLowerCase();
-        return hay.includes(q);
+        return hay.includes(q) || viaReadme.has(n.id);
       });
+      // 只看 README 才命中的那部分（用于响应里如实区分）
+      readme.total = hits.filter((n) => viaReadme.has(n.id)).length;
+      void before;
     }
     const total = hits.length;
     hits = hits.slice().sort(SORTS[sortKey]);
     const page = hits.slice(offset, offset + limit);
     return {
       query: { q, category, subcategory, tag, language, minStars, archived, sort: sortKey, limit, offset },
+      readme,
       total,
       count: page.length,
       offset,
@@ -464,7 +540,51 @@ export function createApi({ root }) {
     return body.join("\n");
   }
 
-  return { load, search, categories, one, cardSvg, cardPage, publicNode, slim };
+  /**
+   * 紧凑检索：只回命中 id 与计数，供前端搜索框做"高亮 + 放射线"。
+   * 与 /api/repos 的区别是不返回节点字段（几万个 id 也只有几十 KB），
+   * 并且额外告诉你有多少个是【只有 README 才命中】的。
+   */
+  /** README 索引概况（给 /api/health 用：让"堆了多少数据"是可观测的） */
+  async function readmeStats() {
+    await loadReadmes();
+    let bytes = 0;
+    for (const candidate of [join(root, "data", "cache", "readmes.json.gz"), join(root, "data", "cache", "readmes.json")]) {
+      const s = await stat(candidate).catch(() => null);
+      if (s) {
+        bytes = s.size;
+        break;
+      }
+    }
+    return { indexed: readmeCache.indexed, diskKB: Math.round(bytes / 1024), memoryBytes: readmeCache.blob.length };
+  }
+
+  async function searchIds(params) {
+    const mesh = await load();
+    const q = String(params.get("q") ?? "").trim().toLowerCase();
+    const cap = Math.min(2000, Math.max(1, Number(params.get("limit") ?? 500) || 500));
+    if (!q) return { q: "", total: 0, ids: [], readme: { indexed: 0, total: 0, ids: [] } };
+    await loadReadmes();
+    const viaReadme = readmeHits(q);
+    const ids = [];
+    const readmeIds = [];
+    for (const n of mesh.nodes ?? []) {
+      const hay = [n.id, n.description, (n.topics ?? []).join(" "), (n.matchedTags ?? []).join(" ")].join(" ").toLowerCase();
+      const local = hay.includes(q);
+      const readme = viaReadme.has(n.id);
+      if (!local && !readme) continue;
+      if (ids.length < cap) ids.push(n.id);
+      if (readme && readmeIds.length < cap) readmeIds.push(n.id);
+    }
+    return {
+      q,
+      total: ids.length < cap ? ids.length : ids.length,
+      ids,
+      readme: { indexed: readmeCache.indexed, total: readmeIds.length, ids: readmeIds },
+    };
+  }
+
+  return { load, search, searchIds, readmeStats, categories, one, cardSvg, cardPage, publicNode, slim };
 }
 
 /** API 自描述：给调用者一份可发现的端点清单 */
@@ -475,9 +595,10 @@ export function apiIndex(version) {
     docs: "只读、无需鉴权、与前端同端口。数据每小时更新，响应带 5 分钟公共缓存。",
     endpoints: [
       { method: "GET", path: "/api", desc: "本清单" },
-      { method: "GET", path: "/api/health", desc: "健康检查与数据概况" },
+      { method: "GET", path: "/api/health", desc: "健康检查与数据概况（含 README 索引规模）" },
       { method: "GET", path: "/api/categories", desc: "扇区（功能分类）与细枝及各自数量" },
       { method: "GET", path: "/api/repos?q=&category=&subcategory=&tag=&language=&minStars=&archived=&sort=stars|pushed|created|name&limit=&offset=&fields=all", desc: "检索仓库（默认 20 条，最多 100 条）" },
+      { method: "GET", path: "/api/search?q=&limit=", desc: "紧凑检索：只回命中 id 与计数（含 README 正文命中）" },
       { method: "GET", path: "/api/repos/:owner/:name", desc: "单个仓库详情，含同作者/主题共现连线" },
       { method: "GET", path: "/preview.svg?theme=dark|light&size=&sample=", desc: "README 预览图：按当前数据实时渲染的生态图（也可走 /api/preview.svg）" },
     { method: "GET", path: "/api/card/:owner/:name.svg?theme=light|dark", desc: "可分享的 SVG 卡片" },

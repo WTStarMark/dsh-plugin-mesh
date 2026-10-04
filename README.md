@@ -3,9 +3,9 @@
 **把带 `dsh` 系列 GitHub 标签的仓库，画成一张可交互的生态网络图。**
 
 [![在线访问](https://img.shields.io/badge/在线访问-104.129.51.126-2f7df6?style=flat-square)](http://104.129.51.126/)
-[![测试](https://img.shields.io/badge/tests-159%20JS%20%2B%2053%20Python-3fb8a8?style=flat-square)](#测试)
+[![测试](https://img.shields.io/badge/tests-161%20JS%20%2B%2058%20Python-3fb8a8?style=flat-square)](#测试)
 [![依赖](https://img.shields.io/badge/dependencies-0-57b894?style=flat-square)](#技术选型)
-[![版本](https://img.shields.io/badge/version-v0.4.5-9b8cf0?style=flat-square)](#)
+[![版本](https://img.shields.io/badge/version-v0.4.6-9b8cf0?style=flat-square)](#)
 
 👉 **在线地址：<http://104.129.51.126/>**
 
@@ -15,11 +15,8 @@
   <img alt="插件生态图预览：功能扇区与仓库球，圆心是官方仓库" src="http://104.129.51.126/preview.svg?theme=light" width="100%">
 </picture>
 
-> 上图由**站点按当前数据实时渲染**（[`/preview.svg`](http://104.129.51.126/preview.svg)，也可加 `?theme=dark|light&size=1400&sample=6000`）：
-> 读的是采集器每小时产出的预计算契约 `data/mesh-core.json`，复用前端的布局与配色代码 ——
-> **数据一更新，图自己就变**，不需要往仓库里提交图片，也就不会再出现「README 里的图还是三个版本前」。
-> 断网或接口不可用时，可看仓库内同一渲染器生成的静态副本 [`docs/preview.svg`](docs/preview.svg) / [`docs/preview-light.svg`](docs/preview-light.svg)
-> （`node tools/snapshot-svg.mjs --theme dark --out docs/preview.svg`）。
+> 预览图由站点实时渲染（`/preview.svg?theme=dark|light`），读 `data/mesh-core.json`，随采集更新。
+> 静态副本：[`docs/preview.svg`](docs/preview.svg) · [`docs/preview-light.svg`](docs/preview-light.svg)（`node tools/snapshot-svg.mjs --theme dark`）。
 
 ---
 
@@ -44,10 +41,13 @@
 |---|---|
 | 扇区布局 | 按功能分区、同心散布；位置由可播种 PRNG 决定，**同一 seed 逐点可复现** |
 | 单扇区放大 | 点扇区 → 大扇区当整圆、细枝当扇区；`Esc` 或「← 返回全局」退回 |
-| 侧栏顺序 | 左栏：总览 → 功能扇区 → 筛选 → 其余（划分依据 / 捕获标签 / 高频标签）。右栏未选中时：图例 → 操作提示 → 待复核清单；**点开项目球后**：仓库档案 → 命中标签 → 仓库主题 → 关联 → 图例 → 操作提示（让档案内容占前排，图例与操作提示压到最底部）。顺序由 `renderRail` / `renderInspector` 的组装数组决定，并有 DOM 顺序回归测试 |
+| 侧栏顺序 | 左栏：总览 → 功能扇区 → 筛选 → 划分依据 → 捕获标签 → 高频标签。右栏未选中：图例 → 操作提示 → 待复核清单；选中后：仓库档案 → 命中标签 → 仓库主题 → 关联 → 图例 → 操作提示 |
 | 三类连线 | 点选仓库就画出它的**同作者**（完整关系：不论几个同作者仓库都能互相指向）、**主题共现**（琥珀虚线）与**生态共鸣**（紫罗兰实线）；度数上限只裁主题边，owner 边豁免 |
-| 目标光圈 | 被连线指着的球，球边缘按边色套一圈光圈（主色 / 琥珀 / 紫罗兰一一对应），同一球被两类线指着时按 2.4px 一档外扩、两种颜色同时可见；连线两端退让到光圈外沿再画（`trimSegment`），不插进球里、不压光圈 |
-| 搜索指向 | 搜索后从圆心打出一道光（外层光晕 + 内层光芯 + 落点光斑，宽度随缩放自适应），照向每个命中的仓库球；清空搜索即消失 |
+| 目标光圈 | 被连线指着的球按边色套光圈（主色 / 琥珀 / 紫罗兰）；同一球被两类线指着时外扩 2.4px 一档。连线两端退让到光圈外沿（`trimSegment`） |
+| 搜索指向 | 搜索后从圆心射出一道光（三层叠加，宽度随缩放自适应）指向每个命中；清空即消失。命中**超过 100 个只高亮、不画线**，状态栏注明原因 |
+| 搜索范围 | 本地即时匹配仓库名 / 作者 / 描述 / topics；README 内容走 `GET /api/search`（防抖 260ms），服务端只回命中 id。接口不可用时只用本地匹配 |
+| README 索引 | 采集器每轮补抓一批（默认 `--readme-budget 150`）：先补未抓过的（星标高优先），再刷 45 天前的；抓不到的记空串，不再重试 |
+| 索引体积 | 只存检索摘要（去徽章/图片/链接 URL/HTML/markdown 记号，截断 2000 字符）+ gzip，约 1.1KB/篇：1.9 万仓库约 20MB，默认跳过 0 星后约 **10MB**（`/api/health` 的 `readme` 字段可见）。旋钮：`--readme-max-chars`、`--readme-min-stars`（默认 1）、`--readme-budget 0`（关闭） |
 | 相关性判定 | 三档结论：**确认相关**（有 DSH 专有线索）/ **确认噪声**（与 DSH 无关、空壳、堆标签，可一键隐藏）/ **仍需人工**；只有真正模糊的才进「待复核」 |
 | 噪声黑名单 | 同一作者被收录 **超过 200 个**仓库、且**每个仓库星标都低于 1**（即全是 0 星）时判为垃圾账号：从扫描管道与累积索引里剔除，前端（含预计算产物）也不再展示 |
 | 筛选 | 标签「与」语义、语言、归档状态、关键词搜索；筛选只淡化不移除，位置保持不变 |
@@ -66,8 +66,8 @@
 ```bash
 git clone <repo> && cd dsh-plugin-mesh
 npm run serve:lan                        # http://<你的局域网IP>:8788/
-npm test                                 # 159 项前端测试
-python3 backend/tests/test_collector.py  # 53 项后端测试
+npm test                                 # 161 项前端测试
+python3 backend/tests/test_collector.py  # 58 项后端测试
 ```
 
 **采集数据**（需要 GitHub 令牌，见下）：
@@ -83,7 +83,7 @@ python3 backend/collect.py --loop --interval 3600 # 常驻，每小时一轮
 
 ## 需要什么样的 GitHub 令牌
 
-采集器只读**公开仓库**的搜索接口，令牌本身**不需要任何仓库权限** —— 唯一作用是提高配额：
+采集器只读**公开仓库**的搜索接口，令牌不需要任何仓库权限，唯一作用是提高配额：
 
 | 项 | 要求 |
 |---|---|
@@ -149,12 +149,12 @@ GitHub 搜索 API
 | 门槛 gate | **插件市场**必须「名字本身就是汇总」（末段/首段是 market/store/registry/合集/导航…）或描述明确自述「收录/汇集」；给市场加按钮的插件不算 |
 | 排除 exclude | **桌面客户端**排除客户端插件：名字带 plugin/插件/extension/skill/theme 的一律不算；描述里「本仓库是一个客户端」这类自述可救回 |
 | 细枝 | 每个扇区内再按同一套规则挑 3~8 个细枝（共 79 条），用于单扇区放大 |
-| 生态语境 | **协议基座**（生态规范 / 互操作协议 / 接口契约 + 侧边栏底座、皮肤框架这类"别人长在上面"的基座）：先过一道生态语境门槛，再由"基座自述"强命中直接胜出 —— 否则「最大公约数」「标准差」「NocoBase 式基础设施」都会被误抓；样本再少也不并进「其他」（keepIds） |
-| 改名别名表 | `data/cache/aliases.json`（旧名 → 现名，由经 API 核对的迁移写出）：采集器在**加载**与**合并**时都按它归一 —— GitHub 搜索索引对改名有延迟，会继续返回旧名，别名表保证不会再冒出第二个球；`build.py` 另兜一道，离线构建同样归一。迁移工具检测到采集器在跑会拒绝执行（避免"边跑边改、被它的定期保存覆盖"） |
-| 改名去重 | 仓库改名后 `full_name` 变了、GitHub 数字 id 不变：采集记录保留 `githubId`，累积索引按它认人（改名 = 就地挪键 + 记 `renamedFrom`，不再新旧并存）；构图时按 `githubId` 兜底去重并采用更新的名字。老数据用 `tools/dedupe-renames.mjs` 迁移（同作者+同创建时间找嫌疑 → 逐个问 GitHub → 合并/就地改名，先备份再写） |
+| 生态语境 | **协议基座**＝生态规范 / 互操作协议 / 接口契约，以及侧边栏底座、皮肤框架这类基座。先过生态语境门槛，再让"基座自述"强命中直接胜出，避免「最大公约数」「标准差」误抓；样本再少也不并进「其他」（keepIds） |
+| 改名别名表 | `data/cache/aliases.json`（旧名 → 现名）在加载与合并时归一，避免搜索索引延迟把旧名带回来；`build.py` 离线构建同样处理。迁移工具在采集器运行时拒绝执行 |
+| 改名去重 | 采集记录保留 `githubId`（改名不变），累积索引按它认人：改名即就地挪键并记 `renamedFrom`；构图再按 `githubId` 兜底去重。存量数据用 `tools/dedupe-renames.mjs` 迁移 |
 | 非插件排除 | 挂 dsh 标签但 DSH 是别的意思（如 DeepHash-pytorch 的 DSH = Deep Supervised Hashing）的仓库不进索引：判据是 tools/categories.mjs 与 classify.py 里的 NOT_PLUGIN_PATTERNS，两条管线逐条一致 |
-| 生态共鸣 | 人工策展的"基座 → 长在它上面的插件"（紫罗兰实线）：以生态签 + 名字自述为归属信号，再逐仓抓 README 复核"依赖/扩展/遵循"语境（词边界匹配，dsh-stddev 不会误判成 dsh-std）；清单在 tools/ecosystem.json，策展工具 tools/curate-ecosystem.mjs 可复跑 |
-| 策展基座 | 清单里的基座（侧边栏底座 / TUI 基座 / 互操作元协议 / 生态共识规范 / 皮肤框架）**直接归入协议基座**（categoryCurated 标记）：它们正文未必写着"基座"二字，但确实是别人长在上面的地基 |
+| 生态共鸣 | 人工策展的「基座 → 长在它上面的插件」（紫罗兰实线）：归属信号用生态签或名字自述，再逐仓抓 README 复核依赖/扩展/遵循语境。清单 `tools/ecosystem.json`，策展工具可复跑 |
+| 策展基座 | 清单里的基座直接归入协议基座（`categoryCurated`），正文不一定写"基座"二字 |
 | 共鸣开关 | 每个基座带 `enabled` 字段：置 false 只停【共鸣边】，基座身份与协议基座归类不受影响（皮肤框架当前临时关闭，改回 true 即恢复） |
 | 三档判定 | 相关性不再只有一个 review 布尔：analyze_relevance 给出 related / noise / manual + 一句话原因（JS 在 tools/relevance.mjs，Python 在 build.py，两份逐条一致） |
 | re.ASCII | Python 的 `\b` 默认是 Unicode 语义（中文算 word char），必须加 `re.ASCII` 才与 JS 一致 |
@@ -185,8 +185,8 @@ GitHub 搜索 API
 ## 测试
 
 ```bash
-npm test                                  # 159 项：布局 / 连线 / 分类（协议基座·桌宠·非插件排除）/ 细枝 / 相关性判定 / 生态共鸣 / 面板 / 主题 / 噪声黑名单 / 服务加固 / 冒烟
-python3 backend/tests/test_collector.py   # 53 项：分类 / 分段扫描 / 快照 / 调度 / 采集顺序 / 噪声黑名单 / 三档判定 / 预计算容错
+npm test                                  # 161 项：布局 / 连线 / 分类（协议基座·桌宠·非插件排除）/ 细枝 / 相关性判定 / 生态共鸣 / 面板 / 主题 / 噪声黑名单 / 服务加固 / 冒烟
+python3 backend/tests/test_collector.py   # 58 项：分类 / 分段扫描 / 快照 / 调度 / 采集顺序 / 噪声黑名单 / 三档判定 / 预计算容错
 python3 backend/verify_parity.py          # 跨语言一致性（JS 管线 vs Python 采集器）
 ```
 
@@ -224,7 +224,7 @@ backend/
   dsh_mesh/         github / segments / classify / build / snapshot / config
   verify_parity.py  跨语言一致性校验
   check_token.py    令牌自检（只打印配额数字）
-  tests/            53 项测试（前端 159 项在根目录 tests/）
+  tests/            58 项测试（前端 161 项在根目录 tests/）
 docs/               data-contract.md 与预览图
 ```
 
@@ -252,7 +252,8 @@ API 与前端**共用同一个端口**：不需要另外开服务、不需要任
 | GET | `/api` | 端点清单（自描述，建议先看这个） |
 | GET | `/api/health` | 健康检查 + 数据概况（节点数、生成时间） |
 | GET | `/api/categories` | 扇区（功能分类）与细枝，含各自数量 |
-| GET | `/api/repos` | 检索仓库（过滤 / 排序 / 翻页） |
+| GET | `/api/repos` | 检索仓库（过滤 / 排序 / 翻页），`q` 同时匹配 **README 正文** |
+| GET | `/api/search?q=&limit=` | 紧凑检索：只回命中 id 与计数（含 README 命中），供前端搜索框高亮用 |
 | GET | `/api/repos/:owner/:name` | 单个仓库详情 + 同作者 / 主题共现连线 |
 | GET | `/api/card/:owner/:name.svg` | 可分享的 SVG 卡片（见下一节） |
 | GET | `/preview.svg`（同 `/api/preview.svg`） | README 预览图：按当前数据实时渲染的生态图（`?theme=dark|light&size=&sample=`），ETag + 5 分钟缓存 |
@@ -270,6 +271,9 @@ curl -s "$BASE/api/repos?sort=stars&limit=5"
 
 # 2. 搜关键词（匹配 owner/name、描述、topics、命中标签）
 curl -s "$BASE/api/repos?q=皮肤&limit=3&fields=all"
+
+# 检索（含 README 正文）：只要命中 id 与计数，体积很小
+curl -s "$BASE/api/search?q=sidebar&limit=500"
 
 # 3. 某个扇区下的仓库（扇区 id 从 /api/categories 拿）
 curl -s "$BASE/api/repos?category=skin&sort=stars&limit=10"

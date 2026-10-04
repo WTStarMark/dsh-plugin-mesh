@@ -5,7 +5,10 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readFile, mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { gzipSync } from "node:zlib";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApi, categoryColor, xmlEscape, validNamePart, apiIndex, MAX_LIMIT, textWidth, wrapText, DEFAULT_SITE } from "../tools/api.mjs";
@@ -22,6 +25,69 @@ test("分类总览：扇区与细枝计数自洽", async () => {
     const subSum = s.subcategories.reduce((n, x) => n + x.count, 0);
     assert.ok(subSum <= s.count, "细枝计数不能超过所属扇区：" + s.id);
   }
+});
+
+test("紧凑检索：README 正文命中也能搜到，并如实区分（v0.4.6）", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "mesh-api-"));
+  await mkdir(join(tmp, "data", "cache"), { recursive: true });
+  const node = (id, description) => ({
+    id,
+    name: id.split("/")[1],
+    owner: id.split("/")[0],
+    stars: 5,
+    description,
+    topics: ["dsh-plugin"],
+    matchedTags: ["dsh-plugin"],
+    category: "tools",
+    categoryLabel: "工具命令",
+  });
+  await writeFile(
+    join(tmp, "data", "mesh.json"),
+    JSON.stringify({ nodes: [node("u/plain", "普通仓库，描述里没有那个词"), node("u/readme-only", "描述里也没有")], edges: [], clusters: [], meta: {} }),
+  );
+  await writeFile(
+    join(tmp, "data", "cache", "readmes.json"),
+    JSON.stringify({ count: 1, docs: { "u/readme-only": { t: "这里写着 zzz-unique-token 的用法", f: "2026-10-04T00:00:00Z" } } }),
+  );
+  const local = createApi({ root: tmp });
+
+  const byReadme = await local.searchIds(new URLSearchParams("q=zzz-unique-token"));
+  assert.deepEqual(byReadme.ids, ["u/readme-only"], "README 正文命中应能搜到");
+  assert.equal(byReadme.readme.total, 1, "应如实标记为 README 命中");
+  assert.equal(byReadme.readme.indexed, 1, "应回传已索引篇数");
+
+  const byField = await local.searchIds(new URLSearchParams("q=plain"));
+  assert.ok(byField.ids.includes("u/plain"), "本地字段命中照常");
+  assert.equal(byField.readme.total, 0, "不是 README 命中的不该混进来");
+
+  const repos = await local.search(new URLSearchParams("q=zzz-unique-token"));
+  assert.equal(repos.total, 1, "/api/repos 也要能按 README 正文搜到");
+  assert.equal(repos.readme.total, 1);
+
+  const empty = await local.searchIds(new URLSearchParams("q="));
+  assert.deepEqual(empty.ids, [], "空查询不返回结果");
+  await rm(tmp, { recursive: true, force: true });
+});
+
+test("紧凑检索：采集器写的 gzip 索引（readmes.json.gz）也能读（v0.4.6 主路径）", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "mesh-api-gz-"));
+  await mkdir(join(tmp, "data", "cache"), { recursive: true });
+  await writeFile(
+    join(tmp, "data", "mesh.json"),
+    JSON.stringify({
+      nodes: [{ id: "u/only-readme", name: "only-readme", owner: "u", stars: 3, description: "描述里没有", topics: ["dsh-plugin"], matchedTags: ["dsh-plugin"], category: "tools", categoryLabel: "工具命令" }],
+      edges: [],
+      clusters: [],
+      meta: {},
+    }),
+  );
+  const payload = { count: 1, docs: { "u/only-readme": { t: "摘要里写着 zzz-gz-token", f: "2026-10-04T00:00:00Z" } } };
+  await writeFile(join(tmp, "data", "cache", "readmes.json.gz"), gzipSync(Buffer.from(JSON.stringify(payload))));
+  const local = createApi({ root: tmp });
+  const hit = await local.searchIds(new URLSearchParams("q=zzz-gz-token"));
+  assert.deepEqual(hit.ids, ["u/only-readme"], "gzip 索引应能直接读");
+  assert.equal(hit.readme.indexed, 1);
+  await rm(tmp, { recursive: true, force: true });
 });
 
 test("检索：过滤、排序、分页都真的生效（从数据自身推导，不写死数字）", async () => {
@@ -171,8 +237,8 @@ test("颜色与名称校验：稳定、可预期", () => {
 });
 
 test("API 自描述：端点清单完整", () => {
-  const index = apiIndex("0.4.5");
-  assert.equal(index.version, "0.4.5");
+  const index = apiIndex("0.4.6");
+  assert.equal(index.version, "0.4.6");
   const paths = index.endpoints.map((e) => e.path).join(" ");
   for (const need of ["/api/health", "/api/categories", "/api/repos", "/api/card", "/card/"]) {
     assert.ok(paths.includes(need), "清单应包含 " + need);

@@ -37,8 +37,10 @@ from dsh_mesh.config import (
     SAMPLE_RAW,
     SEGMENT_STATE,
     SNAPSHOT_DIR,
+    README_CACHE,
     WHITELIST_TAGS,
 )
+from dsh_mesh.readmes import ReadmeIndex, fetch_batch as fetch_readmes
 from dsh_mesh.segments import SegmentStore, segment_query
 from dsh_mesh.github import GitHubClient, load_token
 
@@ -93,8 +95,23 @@ def fetch_live(args, log, blacklist=None):
         + str(added_this_round) + "）| 分段：待抓 " + str(after["segments"]["pending"])
         + " / 已抓 " + str(after["segments"]["done"]) + " / 已细分 " + str(after["segments"]["split"])
     )
+    # README 索引：抓完仓库后按预算补一批（供"搜索 README 内容"用，见 dsh_mesh/readmes.py）。
+    # 放在爬取之后：热度高的仓库优先，且不挤占分段扫描的请求预算。
+    readme_stats = None
+    if getattr(args, "readme_budget", 0) > 0:
+        try:
+            min_stars = int(getattr(args, "readme_min_stars", 0) or 0)
+            pool = [r for r in store.repos.values() if (r.get("stars") or 0) >= min_stars]
+            if min_stars > 0:
+                log("README 索引：只看星标 ≥ " + str(min_stars) + " 的仓库（" + str(len(pool)) + " / " + str(len(store.repos)) + "）")
+            index = ReadmeIndex(README_CACHE, max_chars=int(getattr(args, "readme_max_chars", 0) or 2000))
+            readme_stats = fetch_readmes(client, index, pool, args.readme_budget, log=log)
+        except Exception as exc:  # noqa: BLE001 - README 索引是加分项，失败不该拖垮采集
+            log("⚠ README 索引本轮失败：" + str(exc))
+
     raws = list(store.repos.values())
     return raws, tag_totals_from(store.state), client.stats, {
+        "readme": readme_stats,
         "token": bool(token),
         "mode": "segmented",
         "segments": after["segments"],
@@ -229,6 +246,8 @@ def run_once(args, log) -> dict:
     mesh = build_mesh(raws, tag_totals, blacklist=blacklist)
     noise_now = mesh["meta"].get("noiseBlacklist") or {}
     new_noise = {owner: info for owner, info in noise_now.items() if owner not in blacklist}
+    if env.get("readme"):
+        mesh["meta"]["readmeIndexed"] = env["readme"].get("indexed")
     mesh["meta"]["kind"] = "sample-seed" if args.from_raw else "hourly-crawl"
     mesh["meta"]["builtFrom"] = "data/sample-raw.json（离线复算）" if args.from_raw else "GitHub REST Search API"
     total_indexed = len(mesh["nodes"])
@@ -245,6 +264,7 @@ def run_once(args, log) -> dict:
         "frontendEdges": None,
         "tagTotals": tag_totals,
         "stats": stats.as_dict() if stats is not None else None,
+        "readme": env.get("readme"),
         "seconds": round(elapsed, 1),
     }
 
@@ -326,6 +346,9 @@ def main(argv=None) -> int:
     parser.add_argument("--once", action="store_true", help="只跑一次（默认）")
     parser.add_argument("--watch", "--loop", dest="watch", action="store_true", help="常驻，按 --interval 周期执行（pm2 下必须用 --loop：pm2 会把 --watch 认成它自己的文件监听开关，导致每次落盘都重启进程）")
     parser.add_argument("--interval", type=int, default=DEFAULT_INTERVAL, help="周期秒数，默认 3600（每小时）")
+    parser.add_argument("--readme-budget", type=int, default=150, help="每轮抓多少个仓库的 README（供搜索 README 内容；0 = 完全关闭）")
+    parser.add_argument("--readme-max-chars", type=int, default=2000, help="每个仓库保留的 README 摘要字符数（越大越全、索引越大）")
+    parser.add_argument("--readme-min-stars", type=int, default=1, help="只索引星标 ≥ N 的仓库（默认 1：跳过 0 星长尾，索引约减半；设 0 = 全量）")
     parser.add_argument("--from-raw", action="store_true", help="用 data/sample-raw.json 离线复算，不发网络请求")
     parser.add_argument("--dry-run", action="store_true", help="只算不写")
     parser.add_argument("--max-pages", type=int, default=10, help="每个分段最多翻几页（GitHub 上限 10 页 = 1000 条）")

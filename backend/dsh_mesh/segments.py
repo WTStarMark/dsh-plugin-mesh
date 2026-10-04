@@ -405,9 +405,16 @@ class SegmentStore:
         return {"segments": self.pending_summary(), "repos": len(self.repos)}
 
 
-def _atomic_write(path: Path, text: str) -> None:
+def _atomic_write(path: Path, data) -> None:
+    """原子写：先写临时文件再替换，任何时刻被杀都不会留下半截文件。
+
+    data 可以是 str（普通文本）或 bytes（gzip 之类的二进制）。
+    """
     tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(text, encoding="utf-8")
+    if isinstance(data, (bytes, bytearray)):
+        tmp.write_bytes(data)
+    else:
+        tmp.write_text(data, encoding="utf-8")
     os.replace(tmp, path)  # 原子替换：要么是旧内容，要么是完整新内容
 
 

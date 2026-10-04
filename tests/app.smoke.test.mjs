@@ -651,6 +651,38 @@ test("v0.4.3 生态共鸣：点选基座仓库会画出紫罗兰实线", () => {
   pump(10);
 });
 
+test("v0.4.6 搜索：命中超过 100 个只做高亮、不画放射线（避免卡顿）", () => {
+  const search = registry.get("search");
+  const canvas = registry.get("graph");
+  hudButtons.find((b) => b.dataset.act === "fit").fire("click");
+  canvas.fire("pointerdown", { clientX: 5, clientY: 5, pointerId: 91 });
+  canvas.fire("pointerup", { clientX: 5, clientY: 5, pointerId: 91 });
+  canvas.fire("pointerleave");
+  pump(10);
+
+  // 泛查询：命中必然远超 100（"dsh" 几乎每个仓库都沾）→ 只高亮，不画线
+  const before = drawCalls.lineTo;
+  search.value = "dsh";
+  search.fire("input");
+  pump(30);
+  const hintWide = registry.get("hint").textContent;
+  assert.match(hintWide, /超过 100 个只做高亮/, "泛搜索应在状态栏说明不画放射线，实际：" + hintWide);
+  assert.equal(drawCalls.lineTo - before, 0, "命中过多时不该再画放射线，实际新增 " + (drawCalls.lineTo - before));
+
+  // 窄查询：直接拿一个真实仓库 id，命中数必然是 1 → 照常画射线
+  const target = coreJson.nodes.find((n) => n.id !== "deepseek-ai/deepseek-harness");
+  const before2 = drawCalls.lineTo;
+  search.value = target.id;
+  search.fire("input");
+  pump(30);
+  assert.ok(drawCalls.lineTo - before2 > 0, "窄查询应照常画放射线，实际新增 " + (drawCalls.lineTo - before2));
+  assert.match(registry.get("hint").textContent, /放射线指向/, "窄查询的状态栏应提示放射线");
+
+  search.value = "";
+  search.fire("input");
+  pump(10);
+});
+
 test("v0.4.2 搜索：从圆心放射出指向命中仓库的直线，清空后消失", () => {
   const search = registry.get("search");
   const canvas = registry.get("graph");

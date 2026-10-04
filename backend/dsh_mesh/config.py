@@ -19,6 +19,7 @@ SAMPLE_MESH = DATA_DIR / "sample-mesh.json" # JS 管线的冻结参照物（跨�
 LAST_CRAWL = DATA_DIR / "last-crawl.json"
 REPO_CACHE = CACHE_DIR / "repos.json"          # 累积索引（所有见过的仓库）
 SEGMENT_STATE = CACHE_DIR / "segments.json"     # 分段扫描队列状态
+README_CACHE = CACHE_DIR / "readmes.json.gz"    # README 检索摘要（gzip；供"搜索 README 内容"，约 10MB/1.9 万仓库）
 DEFAULT_BUDGET = 120     # 每轮最多消耗多少次搜索请求
 REFRESH_HOURS = 6.0      # 超过这个时长没刷新的段会重新排队
 ENV_FILE = ROOT / ".env"

@@ -83,9 +83,16 @@ class GitHubClient:
         return headers
 
     def _request(self, url: str, attempt: int = 0) -> dict:
+        return json.loads(self._open(url, attempt, accept="application/vnd.github+json").decode("utf-8"))
+
+    def _open(self, url: str, attempt: int = 0, accept: str | None = None) -> bytes:
+        """底层请求：返回原始字节（JSON 与 README 原文都走这里，重试逻辑只写一份）。"""
         if self.dry_run:
             raise RuntimeError("dry-run 模式不应发起真实请求")
-        req = urllib.request.Request(url, headers=self._headers())
+        headers = self._headers()
+        if accept:
+            headers["Accept"] = accept
+        req = urllib.request.Request(url, headers=headers)
         try:
             self.stats.requests += 1
             with urllib.request.urlopen(req, timeout=30) as resp:
@@ -95,7 +102,7 @@ class GitHubClient:
                 remaining = resp.headers.get("X-RateLimit-Remaining")
                 if remaining is not None:
                     self.stats.rate_limit_remaining = int(remaining)
-                return json.loads(body.decode("utf-8"))
+                return body
         except urllib.error.HTTPError as err:
             # 有些环境下 HTTPError 没有可读的 body（fp 为空），读失败也不能把重试路径带崩
             try:
@@ -107,11 +114,11 @@ class GitHubClient:
                 self.stats.retries += 1
                 wait = self._retry_delay(err, attempt)
                 self._sleep(wait)
-                return self._request(url, attempt + 1)
+                return self._open(url, attempt + 1, accept=accept)
             if err.code >= 500 and attempt < 3:
                 self.stats.retries += 1
                 self._sleep(2 ** attempt)
-                return self._request(url, attempt + 1)
+                return self._open(url, attempt + 1, accept=accept)
             raise RuntimeError(f"GitHub 返回 {err.code}：{body}") from err
 
     def _retry_delay(self, err: urllib.error.HTTPError, attempt: int) -> float:
@@ -139,6 +146,18 @@ class GitHubClient:
         self.stats.pages += 1
         self.stats.items += len(payload.get("items", []))
         return payload
+
+    def readme(self, repo_id: str) -> str | None:
+        """抓仓库 README 原文（raw 格式，省去 base64 解码）。
+
+        返回 None 表示"这个仓库没有可读的 README"（404/403 等）——调用方应把它
+        记成"已抓过、内容为空"，否则每轮都会重新试探同一批仓库。
+        """
+        url = f"{API_ROOT}/repos/{repo_id}/readme"
+        try:
+            return self._open(url, accept="application/vnd.github.raw").decode("utf-8", "replace")
+        except RuntimeError:
+            return None
 
     def crawl_segment(self, query: str, max_pages: int = 10, log=print) -> tuple[list[dict], int]:
         """抓一个分段：返回（裁剪后的记录, 接口报告总数）。

@@ -24,7 +24,7 @@ import { createApi, apiIndex, validNamePart } from "./api.mjs";
 import { renderPreviewSvg, sceneFromCore } from "./preview-svg.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const VERSION = "0.4.5";
+const VERSION = "0.4.6";
 /** 卡片默认去处（线上站点），可用环境变量 SITE_URL 或请求参数 ?link= 覆盖 */
 const SITE_URL = process.env.SITE_URL ?? "http://104.129.51.126/";
 
@@ -294,9 +294,11 @@ async function handleApi(req, res, method, pathname, url) {
   }
   if (pathname === "/api/health") {
     const cats = await api.categories();
+    // readme 字段让"README 索引堆了多少"一眼可见（indexed 篇 / diskKB 磁盘 / memoryBytes 检索时的内存）
+    const readme = await api.readmeStats().catch(() => null);
     sendJson(
       res,
-      { ok: true, version: VERSION, nodes: cats.total, generatedAt: cats.generatedAt, time: new Date().toISOString() },
+      { ok: true, version: VERSION, nodes: cats.total, generatedAt: cats.generatedAt, readme, time: new Date().toISOString() },
       200,
       { ...API_CACHE, ...CORS },
     );
@@ -304,6 +306,11 @@ async function handleApi(req, res, method, pathname, url) {
   }
   if (pathname === "/api/categories") {
     sendJson(res, await api.categories(), 200, { ...API_CACHE, ...CORS });
+    return;
+  }
+  if (pathname === "/api/search") {
+    const result = await api.searchIds(url.searchParams);
+    sendJson(res, result, 200, { ...API_CACHE, ...CORS });
     return;
   }
   if (pathname === "/api/repos") {
