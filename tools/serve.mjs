@@ -30,7 +30,7 @@ import { createApi, apiIndex, validNamePart } from "./api.mjs";
 import { renderPreviewSvg, sceneFromCore } from "./preview-svg.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const VERSION = "0.4.8";
+const VERSION = "0.4.9";
 /** 卡片默认去处（线上站点），可用环境变量 SITE_URL 或请求参数 ?link= 覆盖 */
 const SITE_URL = process.env.SITE_URL ?? "http://104.129.51.126/";
 

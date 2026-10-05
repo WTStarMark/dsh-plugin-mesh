@@ -893,11 +893,12 @@ class SegmentTest(unittest.TestCase):
     """分段扫描：细分层级、叶子、队列预算、累积索引。"""
 
     def test_seed_covers_every_tag_and_star_slice(self):
-        from dsh_mesh.segments import seed_segments
+        from dsh_mesh.segments import NAME_SOURCES, seed_segments
         from dsh_mesh.config import STAR_SLICES
 
         segments = seed_segments(["a", "b", "c"])
-        self.assertEqual(len(segments), 3 * len(STAR_SLICES))
+        # 白名单标签 + 名字收录源（name:dsh-）各自 × 星标区间
+        self.assertEqual(len(segments), (3 + len(NAME_SOURCES)) * len(STAR_SLICES))
         keys = {s["key"] for s in segments}
         self.assertEqual(len(keys), len(segments), "段 key 不应重复")
 
@@ -941,14 +942,17 @@ class SegmentTest(unittest.TestCase):
 
         state_path, repos_path = TMP / "segments.json", TMP / "repos.json"
         store = SegmentStore(state_path, repos_path)
-        self.assertEqual(store.ensure_seeded(["dsh"]), 10)
+        from dsh_mesh.segments import NAME_SOURCES as _NS
+        from dsh_mesh.config import STAR_SLICES as _SS
+
+        self.assertEqual(store.ensure_seeded(["dsh"]), (1 + len(_NS)) * len(_SS))
         self.assertEqual(store.ensure_seeded(["dsh"]), 0, "重复 seed 不应新增")
         self.assertEqual(store.merge([{"id": "a/1"}, {"id": "a/2"}, {"id": "a/1"}]), 2)
         store.save()
 
         reopened = SegmentStore(state_path, repos_path)
         self.assertEqual(len(reopened.repos), 2)
-        self.assertEqual(reopened.pending_summary()["total"], 10)
+        self.assertEqual(reopened.pending_summary()["total"], (1 + len(_NS)) * len(_SS))
 
     def test_unlimited_budget_takes_all_pending(self):
         from dsh_mesh.segments import SegmentStore
@@ -956,7 +960,14 @@ class SegmentTest(unittest.TestCase):
         store = SegmentStore(TMP / "s2.json", TMP / "r2.json")
         store.ensure_seeded(["dsh", "dsh-plugin"])
         quiet = lambda *a, **k: None
-        self.assertEqual(len(store.next_batch(0, 6.0, log=quiet)), 20, "budget=0 应取全部待抓段")
+        from dsh_mesh.segments import NAME_SOURCES as _NS2
+        from dsh_mesh.config import STAR_SLICES as _SS2
+
+        self.assertEqual(
+            len(store.next_batch(0, 6.0, log=quiet)),
+            (2 + len(_NS2)) * len(_SS2),
+            "budget=0 应取全部待抓段",
+        )
         self.assertLessEqual(len(store.next_batch(40, 6.0, log=quiet)), 4, "预算 40 次请求应限制段数")
 
     def test_split_when_over_limit_and_truncate_at_leaf(self):

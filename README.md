@@ -5,7 +5,7 @@
 [![在线访问](https://img.shields.io/badge/在线访问-104.129.51.126-2f7df6?style=flat-square)](http://104.129.51.126/)
 [![测试](https://img.shields.io/badge/tests-170%20JS%20%2B%2068%20Python-3fb8a8?style=flat-square)](#测试)
 [![依赖](https://img.shields.io/badge/dependencies-0-57b894?style=flat-square)](#技术选型)
-[![版本](https://img.shields.io/badge/version-v0.4.8-9b8cf0?style=flat-square)](#)
+[![版本](https://img.shields.io/badge/version-v0.4.9-9b8cf0?style=flat-square)](#)
 
 👉 **在线地址：<http://104.129.51.126/>**
 
@@ -22,7 +22,7 @@
 
 ## 这是什么
 
-自动捕获带以下标签的 GitHub 仓库：
+自动捕获两类 GitHub 仓库：**带以下标签的**，以及**名字里含 `dsh-` 的**（很多插件没打标签，名字却是 `dsh-xxx`）：
 
 `dsh` · `dsh-desktop` · `dsh-plugin` · `dsh-plugin-desktop` · `dsh-plugin-market` · `dsh-plugins`
 

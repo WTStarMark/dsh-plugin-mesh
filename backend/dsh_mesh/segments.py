@@ -34,11 +34,19 @@ def iso(dt: datetime | None = None) -> str:
     return (dt or utcnow()).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+# 名字收录源：不是 topic，而是"仓库名里带 dsh-/" 的仓库（很多插件根本没打 dsh 标签，
+# 但名字就是 dsh-xxx）。伪标签以 name: 开头，查询时换成 in:name。
+NAME_SOURCE_PREFIX = "name:"
+NAME_SOURCES = ["name:dsh-"]
+
+
 def segment_query(segment: dict) -> str:
     stars = segment["stars"]
     if not stars.startswith("stars:"):
         stars = "stars:" + stars  # 兼容两种存法：带前缀（config 里的原样）或不带
-    parts = ["topic:" + segment["topic"], stars]
+    topic = segment["topic"]
+    head = "dsh- in:name" if topic.startswith(NAME_SOURCE_PREFIX) else "topic:" + topic
+    parts = [head, stars]
     if segment.get("created"):
         parts.append("created:" + segment["created"])
     return " ".join(parts)
@@ -60,9 +68,9 @@ def segment_key(topic: str, stars: str, created: str | None = None) -> str:
 
 
 def seed_segments(tags: list[str]) -> list[dict]:
-    """初始段：每个标签 × 每个星标区间。"""
+    """初始段：每个标签 × 每个星标区间，外加"名字收录源"（名字含 dsh-）。"""
     out = []
-    for topic in tags:
+    for topic in list(tags) + [s for s in NAME_SOURCES if s not in tags]:
         for stars in STAR_SLICES:
             out.append({"key": segment_key(topic, stars), "topic": topic, "stars": stars, "created": None, "level": 0})
     return out

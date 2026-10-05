@@ -56,6 +56,10 @@ from .config import (
 ECOSYSTEM_JSON = ROOT / "tools" / "ecosystem.json"
 
 _NAME_RE = re.compile(r"(^|[^a-z])dsh([^a-z]|$)|dsh-|dsh_", re.I)
+# 名字收录：仓库名里出现 dsh- / dsh_（没有任何白名单 topic 也算）
+_NAME_DASH_RE = re.compile(r"dsh[-_]", re.I)
+# 由名字收录（而非 topic 命中）的仓库，用这个伪标签做 primaryTag，前端可如实展示来源
+NAME_TAG = "dsh-*（名字收录）"
 _DESC_RE = re.compile(r"dsh|deepseek[- ]?harness|cordis", re.I)
 _CORDIS_RE = re.compile(r"cordis", re.I)
 
@@ -289,8 +293,11 @@ def build_mesh(
             excluded_repos[str(repo.get("id") or repo.get("name") or "?")] = not_plugin
             continue
         matched = [t for t in WHITELIST_TAGS if t in repo["topics"]]
-        if not matched or not repo["id"]:
-            continue  # 精确命中：标签必须真的在它自己的 topics 里
+        # 收录判据：命中白名单 topic，【或】名字本身就带 dsh-（很多插件没打标签，
+        # 名字却是 dsh-xxx；这类仓库由名字收录源抓到，matchedTags 为空）
+        by_name = bool(_NAME_DASH_RE.search(str(repo.get("name") or "")))
+        if (not matched and not by_name) or not repo["id"]:
+            continue
         matched.sort(key=WHITELIST_TAGS.index)
         # 同一个仓库的稳定身份是 githubId（改名不变）；老记录没有它时退回 id。
         # 两条同名记录并存（改名前后各一条）时，采用"更新"的那条作展示身份。
@@ -304,7 +311,7 @@ def build_mesh(
                         prev[field] = repo[field]
             continue
         repo["matchedTags"] = matched
-        repo["primaryTag"] = matched[0]
+        repo["primaryTag"] = matched[0] if matched else NAME_TAG
         verdict = analyze_relevance(repo)
         rel = verdict["relevance"]
         repo["relevance"] = rel
