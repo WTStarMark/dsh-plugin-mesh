@@ -513,6 +513,12 @@ export function starThreshold(pct, maxStars) {
   return Math.round(maxStars * Math.pow(pct / 100, 3));
 }
 
+/** starThreshold 的逆：把绝对星标换回滑块分位（拖动与输入双向同步用） */
+export function starPercentile(stars, maxStars) {
+  if (!maxStars || stars <= 0) return 0;
+  return Math.max(0, Math.min(100, Math.round(100 * Math.cbrt(stars / maxStars))));
+}
+
 export function prepare(mesh) {
   mesh = stripNoiseOwners(mesh); // 噪声作者不展示（旧快照兜底，正常数据是空操作）
   const nodes = mesh.nodes ?? [];
@@ -585,6 +591,16 @@ export function sizedAvatar(url) {
   if (!url.startsWith("https://avatars.githubusercontent.com/")) return url;
   if (/[?&](s|size)=/.test(url)) return url;
   return url + (url.includes("?") ? "&" : "?") + "s=" + AVATAR_SIZE;
+}
+
+/** 每位作者在图上被收录的仓库数（作者仓库数区间筛选用） */
+export function countReposByOwner(nodes) {
+  const counts = new Map();
+  for (const n of nodes ?? []) {
+    if (!n.owner) continue;
+    counts.set(n.owner, (counts.get(n.owner) ?? 0) + 1);
+  }
+  return counts;
 }
 
 /** 数据签名：判断"拿到的这份数据是否换了"（节点数也要看，否则主干→整份的替换不会触发） */

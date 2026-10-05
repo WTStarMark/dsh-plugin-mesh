@@ -4,7 +4,7 @@
  * 状态变更路径永远是：改 state -> applyHighlight() -> 重绘 / 重渲染面板。
  * 过滤一律「淡化」而非「移除」，保证同一份数据在任意过滤下位置一致、可对比。
  */
-import { loadMeshBest, prepare, prepareCore, prepareCoreAsync, precomputedLayout, matches, formatStars, groupColor, starThreshold, ownerSiblings, stripNoiseOwners, isConfirmedNoise, EDGE_TYPE_BY_CODE, EDGE_STYLES, RAY_HIT_LIMIT, dataSignature } from "./mesh-data.js";
+import { countReposByOwner, starPercentile, loadMeshBest, prepare, prepareCore, prepareCoreAsync, precomputedLayout, matches, formatStars, groupColor, starThreshold, ownerSiblings, stripNoiseOwners, isConfirmedNoise, EDGE_TYPE_BY_CODE, EDGE_STYLES, RAY_HIT_LIMIT, dataSignature } from "./mesh-data.js";
 import { createDetailStore } from "./details.js";
 import { createStore } from "./cache.js";
 import { startStats, formatCount } from "./stats.js";
@@ -66,6 +66,8 @@ const state = {
   tags: new Set(),
   minStarsPct: 0,
   minStars: 0,
+  ownerRepoMin: 0, // 作者在该作者下的仓库数区间（下限）
+  ownerRepoMax: null, // 上限；null = 不限
   pushedDays: 0,
   language: "all",
   hideNoise: false,
@@ -293,6 +295,8 @@ function computeHighlight() {
         ...ownerSiblings(prepared, state.neighborFocus),
       ])
     : null;
+  // 每位作者在图上被收录的仓库数（区间筛选用；prepared 不变时复用）
+  const ownerRepoCounts = countReposByOwner(prepared.nodes);
   const set = new Set();
   // 搜索命中：单独记一份，不受其它筛选影响 —— 放射线指向的是"搜索命中的仓库"
   let searchSet = null;
@@ -305,6 +309,12 @@ function computeHighlight() {
     // 用"或"会失效——标签高度重叠（多数仓库同时挂 dsh 与 dsh-plugin），关掉任何一个都几乎筛不掉东西。
     if (!n.matchedTags.every((t) => state.tags.has(t))) continue;
     if (state.minStars > 0 && n.stars < state.minStars) continue;
+    // 作者仓库数区间：按"该作者在图上被收录的仓库数"筛（用来定位批量发布的作者）
+    if (state.ownerRepoMin > 0 || state.ownerRepoMax !== null) {
+      const owned = ownerRepoCounts.get(n.owner) ?? 0;
+      if (owned < state.ownerRepoMin) continue;
+      if (state.ownerRepoMax !== null && owned > state.ownerRepoMax) continue;
+    }
     if (state.pushedDays > 0) {
       const ts = n.pushedAt ? Date.parse(n.pushedAt) : 0;
       if (!ts || now - ts > state.pushedDays * 86400000) continue;
@@ -385,6 +395,19 @@ const actions = {
     if (state.tags.has(id)) state.tags.delete(id);
     else state.tags.add(id);
     apply();
+  },
+  setMinStars(value) {
+    // 直接输入绝对值：滑块回到"按数值"这一档，避免分位与绝对值互相打架
+    state.minStars = Math.max(0, Math.round(value) || 0);
+    state.minStarsPct = 0;
+    apply();
+  },
+  setOwnerRepos(min, max) {
+    // 作者仓库数区间：下限/上限都可拖可输入；上限为 null 表示不限
+    state.ownerRepoMin = Math.max(0, Math.round(min) || 0);
+    state.ownerRepoMax = max === null || max === undefined ? null : Math.max(state.ownerRepoMin, Math.round(max) || 0);
+    // 拖动过程中不重建左栏，否则正在拖的滑块会被换掉、拖拽中断
+    apply({ rail: false, inspector: false, edgeChips: false });
   },
   setMinStarsPct(pct) {
     state.minStarsPct = pct;

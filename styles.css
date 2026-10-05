@@ -400,3 +400,39 @@ input[type="range"]::-moz-range-thumb {
 /* 底栏的 API / 数据入口 */
 .api-link { color: var(--accent); text-decoration: none; font-size: 12px; padding: 1px 6px; border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); border-radius: 6px; }
 .api-link:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+
+/* ---------------- 作者仓库数区间（双滑块）+ 数值输入（v0.4.10） ---------------- */
+.dr-col { display: flex; flex-direction: column; gap: 5px; width: 100%; flex: 1 1 100%; min-width: 0; }
+.dual-range { position: relative; height: 26px; width: 100%; min-width: 160px; }
+.dr-track {
+  position: absolute; left: 0; right: 0; top: 50%; height: 6px; margin-top: -3px;
+  background: var(--bg-layer-2); border: 1px solid var(--border-l1); border-radius: 999px;
+}
+.dr-fill { position: absolute; top: 0; bottom: 0; background: var(--accent); border-radius: 999px; opacity: .85; }
+.dr-ends { display: flex; justify-content: space-between; color: var(--label-3); font-size: 10.5px; font-family: var(--font-code); margin-top: 2px; }
+.dr-note { font-family: var(--font-code); font-size: 11.5px; color: var(--label-2); }
+.dual-range input[type="range"] { height: 26px; background: transparent; -webkit-appearance: none; appearance: none; }
+.dual-range input[type="range"]::-webkit-slider-runnable-track { height: 26px; background: transparent; }
+.dual-range input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; width: 14px; height: 14px; margin-top: 6px; border-radius: 50%;
+  background: var(--bg-layer-1); border: 2px solid var(--accent); box-shadow: 0 1px 3px rgba(0,0,0,.25); cursor: pointer;
+}
+.dual-range input[type="range"]::-moz-range-track { height: 26px; background: transparent; }
+.dual-range input[type="range"]::-moz-range-thumb {
+  width: 12px; height: 12px; border-radius: 50%; background: var(--bg-layer-1); border: 2px solid var(--accent); cursor: pointer;
+}
+.dual-range input[type="range"] {
+  position: absolute; left: 0; top: 0; width: 100%; margin: 0; pointer-events: none; background: none;
+}
+.dual-range input[type="range"]::-webkit-slider-thumb { pointer-events: auto; }
+.dual-range input[type="range"]::-moz-range-thumb { pointer-events: auto; }
+.dual-range .dual-lo { z-index: 2; }
+.dual-range .dual-hi { z-index: 3; }
+.dual-nums { display: flex; align-items: center; gap: 6px; }
+.dual-nums .tilde { color: var(--label-3); }
+.num-in {
+  width: 74px; height: 26px; padding: 0 8px; border-radius: var(--r-xs, 4px);
+  border: 1px solid var(--border-l1); background: var(--bg-layer-1); color: var(--label-1);
+  font-family: var(--font-code); font-size: 12px;
+}
+.num-in:focus { outline: none; border-color: var(--accent); }
