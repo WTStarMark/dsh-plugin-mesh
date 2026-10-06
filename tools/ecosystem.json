@@ -1,5 +1,5 @@
 {
- "generatedAt": "2026-10-03T12:28:49.440Z",
+ "generatedAt": "2026-10-06T10:30:00.000Z",
  "mesh": "data/mesh.json",
  "bases": [
   {
@@ -768,54 +768,13 @@
    "id": "WTStarMark/dsh-myskin",
    "label": "皮肤框架",
    "tag": null,
-   "enabled": false,
-   "verified": [
-    {
-     "id": "realMisakaMikoto/dsh-skin-studio",
-     "signals": [
-      "README搜索:dshskin"
-     ],
-     "readme": ".dshskin",
-     "depend": true,
-     "stars": 3
-    },
-    {
-     "id": "LeemanCheung/dsh-skin-studio",
-     "signals": [
-      "README搜索:dshskin"
-     ],
-     "readme": ".dshskin",
-     "depend": true,
-     "stars": 2
-    },
-    {
-     "id": "mysn777/dsh-skin-kit",
-     "signals": [
-      "README搜索:dshskin"
-     ],
-     "readme": ".dshskin",
-     "depend": true,
-     "stars": 2
-    },
-    {
-     "id": "LeemanCheung/dsh-vibe-pack",
-     "signals": [
-      "README搜索:dshskin"
-     ],
-     "readme": ".dshskin",
-     "depend": true,
-     "stars": 1
-    },
-    {
-     "id": "hardcandydemoralisation573/dsh-xiaoyao-skins",
-     "signals": [
-      "README搜索:dshskin"
-     ],
-     "readme": ".dshskin",
-     "depend": true,
-     "stars": 0
-    }
-   ]
+   "enabled": true,
+   "verified": [],
+   "search": ".dshframework",
+   "signals": [
+    "扩展名:.dshframework"
+   ],
+   "signalNote": "不再使用 dshskin 判据；.dshframework 目前公开落点为 0，等该格式出现后由策展工具补子项"
   }
  ],
  "note": "生态共鸣是人工确认的生态关系（基座 → 长在它上面的插件），不参与自动分类规则；判据见 tools/curate-ecosystem.mjs 顶部注释。"

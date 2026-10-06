@@ -34,7 +34,7 @@ const KNOWN_NODE_FIELDS = new Set([
   "id", "name", "owner", "ownerType", "avatar", "stars", "forks", "pushedAt", "language",
   "archived", "fork", "matchedTags", "primaryTag", "relevance", "noise", "review", "verdict",
   "reason", "category", "categoryRaw", "categoryStrong", "categoryCurated", "categoryLabel", "categoryScore", "categoryHits",
-  "subcategory", "subcategoryLabel", "degree", "x", "y", "r", "githubId",
+  "subcategory", "subcategoryLabel", "degree", "x", "y", "r", "githubId", "renamedFrom",
 ]);
 
 const MAGIC_BYTES = 8;
@@ -113,6 +113,7 @@ export function encodeCore(core) {
   const langs = makeDict(nodes.map((x) => x.language ?? ""));
   const cats = makeDict(nodes.map((x) => x.category ?? "other"));
   const rawCats = makeDict(nodes.map((x) => x.categoryRaw ?? ""));
+  const renamed = makeDict(nodes.map((x) => x.renamedFrom ?? ""));
   const subs = makeDict(nodes.map((x) => x.subcategory ?? ""));
   const verdicts = makeDict(nodes.map((x) => x.verdict ?? ""));
   const reasons = makeDict(nodes.map((x) => x.reason ?? ""));
@@ -156,6 +157,7 @@ export function encodeCore(core) {
     hitsIdx: new Uint16Array(n),
     primaryTagIdx: new Uint8Array(n),
     catRawIdx: new Uint8Array(n),
+    renamedIdx: new Uint16Array(n),
     githubId: new Uint32Array(n),
     catLabelIdx: new Uint8Array(n),
     subLabelIdx: new Uint8Array(n),
@@ -185,6 +187,7 @@ export function encodeCore(core) {
     sec.langIdx[i] = langs.idx.get(node.language ?? "") ?? 0;
     sec.catIdx[i] = cats.idx.get(node.category ?? "other") ?? 0;
     sec.catRawIdx[i] = rawCats.idx.get(node.categoryRaw ?? "") ?? 0;
+    sec.renamedIdx[i] = renamed.idx.get(node.renamedFrom ?? "") ?? 0;
     sec.githubId[i] = Math.max(0, Math.min(4294967295, Math.round(node.githubId ?? 0)));
     sec.subIdx[i] = subs.idx.get(node.subcategory ?? "") ?? 0;
     sec.verdictIdx[i] = verdicts.idx.get(node.verdict ?? "") ?? 0;
@@ -254,6 +257,7 @@ export function encodeCore(core) {
       languages: langs.list,
       categories: cats.list,
       categoryRaws: rawCats.list,
+      renamedFroms: renamed.list,
       subcategories: subs.list,
       categoryLabels: catLabels.list,
       subcategoryLabels: subLabels.list,
@@ -353,6 +357,7 @@ export function decodeCore(buffer, options = {}) {
   const langIdx = arr("langIdx", Uint8Array);
   const catIdx = arr("catIdx", Uint8Array);
   const catRawIdx = arr("catRawIdx", Uint8Array);
+  const renamedIdx = arr("renamedIdx", Uint16Array);
   const githubIds = arr("githubId", Uint32Array);
   const subIdx = arr("subIdx", Uint8Array);
   const verdictIdx = arr("verdictIdx", Uint8Array);
@@ -422,6 +427,8 @@ export function decodeCore(buffer, options = {}) {
       r: sr[i] / rScale,
     };
     // 可选字段：源数据里【没有】这个键时，解出来也不能凭空多一个 null，否则键集合对不上
+    const wasNamed = (d.renamedFroms ?? [])[renamedIdx[i]];
+    if (wasNamed) nodes[i].renamedFrom = wasNamed;
     const rawCat = d.categoryRaws[catRawIdx[i]];
     if (rawCat) nodes[i].categoryRaw = rawCat;
     if (f & 32) nodes[i].categoryStrong = true;

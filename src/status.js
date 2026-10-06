@@ -53,7 +53,7 @@ function el(tag, className, text) {
  * @param {Function} [opts.fetcher] 拉 /api/status；缺省或抛错时降级为"无采集器状态"
  * @param {number} [opts.pollMs]    轮询间隔（毫秒）
  */
-export function createStatusWidget({ chip, panel, fetcher, pollMs = 15000, now = () => Date.now() }) {
+export function createStatusWidget({ chip, panel, fetcher, localCount, pollMs = 15000, now = () => Date.now() }) {
   let snapshot = null; // /api/status 的响应
   let skewMs = 0; // 服务器时间 - 本地时间，用来校正倒计时
   let open = false;
@@ -142,7 +142,15 @@ export function createStatusWidget({ chip, panel, fetcher, pollMs = 15000, now =
 
     panel.append(el("div", "sp-sep"));
     if (s.indexed) panel.append(row("累积索引", s.indexed + " 个仓库"));
-    if (mesh) panel.append(row("前端数据", mesh.nodes + " 个节点 · " + formatClock(mesh.generatedAt)));
+    if (mesh) panel.append(row("服务端数据", mesh.nodes + " 个节点 · " + formatClock(mesh.generatedAt)));
+    // 本页实际载入的数据量：和服务端不一致时说明"页面还停在旧快照，等待自动核验"
+    const local = typeof localCount === "function" ? localCount() : null;
+    if (local !== null && local !== undefined && mesh) {
+      panel.append(row("本页已载入", local + " 个仓库"));
+      if (local !== mesh.nodes) {
+        panel.append(el("div", "sp-note", "本页数据比服务端旧（每 5 分钟自动核验一次，也可刷新页面立即同步）。"));
+      }
+    }
     const readme = s.readme;
     if (readme && readme.target) {
       const done = readme.indexed ?? 0;

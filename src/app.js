@@ -45,6 +45,7 @@ const dom = {
 const statusWidget = createStatusWidget({
   chip: dom.statusChip,
   panel: dom.statusPanel,
+  localCount: () => (prepared ? prepared.nodes.length : 0),
   fetcher:
     typeof fetch === "function"
       ? () =>
