@@ -99,7 +99,7 @@ function readStringPool(bytes) {
 
 /* ---------------- 编码 ---------------- */
 
-export function encodeCore(core) {
+export function encodeCore(core, options = {}) {
   const nodes = core?.nodes ?? [];
   const edges = core?.edges ?? [];
   const arms = core?.arms ?? [];
@@ -165,10 +165,18 @@ export function encodeCore(core) {
     flags: new Uint8Array(n),
   };
 
+  // 未知字段的处理策略（v0.5.0 改）：
+  //   默认 —— 跳过该字段 + 收集名字 + 最后告警一次，绝不中断编码。
+  //   原因：抛错会让预计算在【写完 mesh-core.json、还没写 mesh-core.bin】时崩掉，
+  //   二进制契约从此不再刷新，而采集器又把退出码 1 当成"产物已更新"——契约被静默冻结。
+  //   strict: true（CI / 单测用）仍然直接抛错，保证字段不会在无人察觉的情况下丢掉。
+  const dropped = new Set();
   for (let i = 0; i < n; i++) {
     const node = nodes[i];
     for (const key of Object.keys(node)) {
-      if (!KNOWN_NODE_FIELDS.has(key)) throw new Error("mesh-core.bin 不认识的节点字段：" + key + "（节点 " + node.id + "）——请同步更新编解码器");
+      if (KNOWN_NODE_FIELDS.has(key)) continue;
+      if (options.strict) throw new Error("mesh-core.bin 不认识的节点字段：" + key + "（节点 " + node.id + "）");
+      dropped.add(key);
     }
     sec.x[i] = Math.round((node.x ?? 0) * coordScale);
     sec.y[i] = Math.round((node.y ?? 0) * coordScale);
@@ -246,8 +254,17 @@ export function encodeCore(core) {
   for (const key of Object.keys(sec)) push(key, sec[key]);
   sections.push({ name: "ids", bytes: ids });
 
+  if (dropped.size) {
+    // 告警要显眼：字段被跳过意味着图上少一块信息，必须有人去补编解码器
+    console.warn(
+      "[mesh-core-bin] 跳过 " + dropped.size + " 个未纳入契约的节点字段：" + [...dropped].join(", ") +
+        "（数据仍会生成，但这些字段不在二进制契约里；请同步更新 KNOWN_NODE_FIELDS 与编解码器）",
+    );
+  }
+
   const header = {
     v: CORE_BIN_VERSION,
+    droppedFields: [...dropped],
     meta: core?.meta ?? {},
     tags: core?.tags ?? {},
     hubs: core?.hubs ?? [],

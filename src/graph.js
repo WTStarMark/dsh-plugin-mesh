@@ -163,7 +163,7 @@ export function createGraphView(canvas, hooks = {}) {
 
   const isActive = (node) => !highlight || highlight.has(node.id);
 
-  /** 底图：极淡的距离环（表示离官方仓库多远），其余留白 */
+  /** 底图：极淡的距离环（表示离圆心多远：全景＝离官方仓库，以某仓库为中心时＝离它），其余留白 */
   function drawBackdrop() {
     const p = P();
     ctx.fillStyle = p.bg;
@@ -557,9 +557,10 @@ export function createGraphView(canvas, hooks = {}) {
     ctx.shadowBlur = 0;
   }
 
-  /** 圆心：官方仓库（柔和同心环 + 主色实心核） */
+  /** 圆心（全景=官方仓库；以某仓库为中心重建扇形图时=那个仓库）：柔和同心环 + 主色实心核 */
   function drawHub() {
-    if (!hasArms() || !layout.center || !(layout.center.index >= 0)) return; // center 契约：必须带 index
+    // 只看"有没有圆心"，不看"有没有扇区"：以孤点为中心时扇区为空，圆心照样要画出来
+    if (!layout || !layout.center || !(layout.center.index >= 0)) return; // center 契约：必须带 index
     const p = P();
     const i = layout.center.index;
     const [sx, sy] = toScreen(layout.x[i], layout.y[i]);
@@ -600,7 +601,7 @@ export function createGraphView(canvas, hooks = {}) {
     ctx.fillText(layout.nodes[i].id, sx, sy + r * 3.6 + 8);
     ctx.font = "11.5px " + FONT;
     ctx.fillStyle = hexA(p.text, 0.62);
-    ctx.fillText("官方仓库", sx, sy + r * 3.6 + 25);
+    ctx.fillText(layout.center.label ?? "官方仓库", sx, sy + r * 3.6 + 25);
     ctx.textAlign = "left";
   }
 
@@ -615,6 +616,7 @@ export function createGraphView(canvas, hooks = {}) {
     for (let i = 0; i < nodes.length; i++) {
       const node = nodes[i];
       if (!isActive(node)) continue;
+      if (layout.center && node.id === layout.center.id) continue; // 圆心注记由 drawHub 负责，避免同一个 id 叠两遍
       if (focusIds !== null && !focusIds.has(node.id)) continue;
       const important =
         node.id === selectedId ||
@@ -645,6 +647,9 @@ export function createGraphView(canvas, hooks = {}) {
       if (!edgeTypes.has(l.type)) continue;
       const a = layout.nodes[l.a];
       const b = layout.nodes[l.b];
+      // 连线与布局必须同源；万一对不上就跳过，别让 draw() 抛错——
+      // frame() 没有 try/catch，一次异常会让 running 永远停在 true，画布从此不再重绘。
+      if (!a || !b) continue;
       if (a.id === focus) set.add(b.id);
       else if (b.id === focus) set.add(a.id);
     }

@@ -139,11 +139,22 @@ test("公约协议：样本再少也不会被并进「其他」（keepIds）", (
 test("真实样本：归类率与分类精度都达标", () => {
   const copy = mesh.nodes.map((n) => ({ ...n }));
   const stats = applyCategories(copy, DEFAULT_OPTIONS);
-  const rate = stats.classified / stats.total;
+
+  // 口径（v0.5.0 修订）：归类率只在【有信号的仓库】上算 —— 至少一个主题标签，或一句像样的描述（≥10 字）。
+  // 只有名字命中 dsh 的空壳（既没描述也没 topic）本来就无从分类：把它们算进分母是在量数据稀疏度，
+  // 不是量分类器质量（实测这类有 5000+ 个，会把全量率从 90% 拖到 76%）。
+  // 后端 v0.5.0 起已不再收录它们（build.py 的 noSignalSkipped），这里把数量如实报出来，不悄悄忽略。
+  const hasSignal = (n) => (n.topics ?? []).length > 0 || String(n.description ?? "").trim().length >= 10;
+  const classifiable = copy.filter(hasSignal);
+  const noSignal = copy.length - classifiable.length;
+  const rate = classifiable.filter((n) => (n.category ?? "other") !== "other").length / classifiable.length;
 
   // 精度优先：新规则刻意收紧，宁可把模糊的留给「其他」，也不硬塞进扇区。
   // 所以这里的下限是 78%，真正的质量保证靠下面的精度断言。
-  assert.ok(rate >= 0.78, "归类率应不低于 78%，实际 " + (rate * 100).toFixed(1) + "%");
+  assert.ok(
+    rate >= 0.78,
+    "可分类仓库的归类率应不低于 78%，实际 " + (rate * 100).toFixed(1) + "%（分母 " + classifiable.length + " 个；另有 " + noSignal + " 个无信号空壳不计入）",
+  );
   assert.ok(
     stats.counts.length >= 8 && stats.counts.length <= DEFAULT_OPTIONS.maxSectors + 1,
     "扇区数应在 8~" + (DEFAULT_OPTIONS.maxSectors + 1) + " 之间（上限 + 其他），实际 " + stats.counts.length,

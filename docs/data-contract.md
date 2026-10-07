@@ -9,7 +9,7 @@
     "kind": "sample-seed | full-crawl",   // 前端据此显示"取样/全量"提示
     "note": "必须写明数据局限",
     "source": "GitHub REST Search API",
-    "sampleNodes": 593, "sampleEdges": 1006, "droppedEdges": 109,
+    "sampleNodes": 593, "sampleEdges": 1019, "droppedEdges": 104,
     "hubThreshold": 8, "degreeCap": 14, "reviewedAsNoise": 120,
     // 噪声黑名单（v0.4.2）：同一作者被收录 > 200 个仓库且每个仓库星标都 < 1 => 判为垃圾账号。
     // 这类节点与它们的边不会出现在 nodes / edges 里；下面几个字段只是如实记账。
@@ -18,6 +18,8 @@
     // 非 DSH 语境排除（v0.4.3）：挂着 dsh 标签但 DSH 是别的意思（深度哈希…），不进索引
     "excludedNotPlugin": { "owner/repo": "深度哈希类：这里的 DSH 是 Deep Supervised Hashing…" },
     "excludedNotPluginCount": 1,
+    // 无信号空壳不收录（v0.5.0）：只有名字命中 dsh、既没有描述也没有主题标签的（实测 5174 个）
+    "noSignalSkipped": 5174,
     // 生态共鸣（v0.4.3）：人工策展的边数，清单在 tools/ecosystem.json
     "resonanceEdges": 24, "ecosystemBases": ["omdsh-dev/DSH-better-sidebar"],
     "queries": [ { "id", "q", "page", "sort", "totalCount", "fetched", "rateRemaining" } ],
@@ -68,11 +70,19 @@
 | `weight` | number > 0 | 共现次数或权重，决定线宽与粗细 |
 | `via` | string[] | 产生这条边的中间实体（主题名或作者名），用于"为什么它们连着" |
 
+**方向语义（v0.5.0 修正）**：`resonance` 是**有向**边 —— `source` 必须是策展基座，`target` 是长在它上面的插件。
+其它三类是对等关系，方向没有意义，按字母序归一化以便去重：`add_edge(a, b, kind, via, directed=False)`。
+修正前 `add_edge` 对**所有**边一律按字母序归一化，插件 id 字母序排在基座前面时方向就被翻转（3.2 万节点的真实数据里 78 条边方向混乱）。
+前端画布用的是无向邻接、右栏用的是 `via`，所以肉眼看不出来 —— 错的是契约本身。回归测试见 `backend/tests/test_collector.py` 的 `InclusionAndDirectionTest`。
+
 ## 硬性不变式（`tests/data.test.mjs` 强制校验）
 
 1. `node.id` 唯一；`stars` 必须是有限数。
 2. 每条边的两端都必须存在于 `nodes` 中，且 `source !== target`。
 3. `matchedTags` 里的每个标签都必须真的出现在该节点的 `topics` 里（**精确命中**，不靠搜索接口的模糊结果）。
 4. 每个节点都必须有 `category` 与 `categoryLabel`；扇区计数之和 = 节点总数。
+4.5 **收录口径（v0.5.0）**：每个节点都必须"有信号" —— `topics.length > 0` 或 `description.trim().length >= 10`。
+   只有名字命中 dsh 的空壳不进 nodes（`meta.noSignalSkipped` 记账）。归类率也按这个分母量
+   （无信号仓库本来就无从分类，算进分母是量数据稀疏度，不是量分类器质量）。
 5. **功能分类不得退化为标签分组**：同一个 GitHub 标签必须横跨多个扇区（`tests/data.test.mjs` 强制校验）。
 5. `meta.kind === "sample-seed"` 时必须带 `note` 与 `queries`（取样数据必须自带局限说明）。

@@ -63,7 +63,11 @@ test("往返回收：每个节点每个字段都一致（只允许量化/归一/
   assert.equal(problems.size, 0, "不一致字段：" + [...problems.keys()].join(", "));
 });
 
-test("体积：二进制明显小于 JSON，主干分片再小一截", () => {
+test("体积：二进制明显小于 JSON，主干分片再小一截", (t) => {
+  if ((core.nodes ?? []).length <= 3000) {
+    t.skip("数据集不足 3000 节点：主干分片就等于整份，这项体积断言在限扫数据上没有意义");
+    return;
+  }
   const jsonBr = brotliCompressSync(jsonBytes).length;
   const binBr = brotliCompressSync(bin).length;
   const head = subsetCore(core, 3000);

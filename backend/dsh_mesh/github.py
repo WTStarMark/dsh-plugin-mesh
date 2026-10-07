@@ -44,8 +44,12 @@ class CrawlStats:
     retries: int = 0
     pages: int = 0
     items: int = 0
+    release_calls: int = 0
     truncated_slices: list[str] = field(default_factory=list)
     rate_limit_remaining: int | None = None
+    # 搜索与 core 是两个独立的桶（搜索 30/分钟、core 5000/小时）。
+    # rate_limit_remaining 是"最后那次请求"的，混着用会误判；core_remaining 只记非搜索请求。
+    core_remaining: int | None = None
     seconds: float = 0.0
 
     def as_dict(self) -> dict:
@@ -54,8 +58,10 @@ class CrawlStats:
             "retries": self.retries,
             "pages": self.pages,
             "items": self.items,
+            "releaseCalls": self.release_calls,
             "truncatedSlices": self.truncated_slices,
             "rateLimitRemaining": self.rate_limit_remaining,
+            "coreRemaining": self.core_remaining,
             "seconds": round(self.seconds, 1),
         }
 
@@ -102,6 +108,9 @@ class GitHubClient:
                 remaining = resp.headers.get("X-RateLimit-Remaining")
                 if remaining is not None:
                     self.stats.rate_limit_remaining = int(remaining)
+                    # 搜索走独立的桶（30/分钟），别把它的数字当成 core 的
+                    if "/search/" not in url:
+                        self.stats.core_remaining = int(remaining)
                 return body
         except urllib.error.HTTPError as err:
             # 有些环境下 HTTPError 没有可读的 body（fp 为空），读失败也不能把重试路径带崩
@@ -158,6 +167,26 @@ class GitHubClient:
             return self._open(url, accept="application/vnd.github.raw").decode("utf-8", "replace")
         except RuntimeError:
             return None
+
+    # ---------- 版本（releases）----------
+    def releases(self, repo_id: str, per_page: int = 5) -> list[dict] | None:
+        """取一个仓库最近几个 release —— 走 **core** 配额（1 个仓库 = 1 次请求）。
+
+        - 返回 []：这个仓库确实没有 release（404 是正常情况，不是错误）；
+        - 返回 None：这次没拿到（网络/限流），下次再说；
+        - 草稿（draft）在公开抓取里本来就看不到，由 slim_releases 再兜一层。
+        """
+        url = f"{API_ROOT}/repos/{repo_id}/releases?per_page={per_page}"
+        try:
+            payload = self._request(url)
+        except RuntimeError as err:
+            if "GitHub 返回 404" in str(err):
+                return []
+            if "GitHub 返回 403" in str(err) or "GitHub 返回 429" in str(err):
+                return None
+            raise
+        self.stats.release_calls += 1
+        return payload if isinstance(payload, list) else []
 
     def crawl_segment(self, query: str, max_pages: int = 10, log=print) -> tuple[list[dict], int]:
         """抓一个分段：返回（裁剪后的记录, 接口报告总数）。

@@ -249,7 +249,9 @@ export function createSectorLayout(options = {}) {
     angleStep,
     sectorWidth,
     startAngle: START_ANGLE,
-    center: { id: centerId, index: centerIndex },
+    // label 由调用方给（全景=官方仓库，以某仓库为中心=焦点仓库）：渲染层拿它做圆心注记，
+    // 否则任何圆心都会被画成"官方仓库"。
+    center: { id: centerId, index: centerIndex, label: options.centerLabel ?? null },
     get arms() {
       return arms;
     },

@@ -1,6 +1,6 @@
 {
  "meta": {
-  "generatedAt": "2026-10-03T12:38:14.081Z",
+  "generatedAt": "2026-10-07T13:02:58.466Z",
   "kind": "sample-seed",
   "note": "临时取样（每标签按星标取头部若干页），非全量采集；全量索引见后端设计。",
   "source": "GitHub REST Search API",
@@ -20,9 +20,7 @@
    "T-Auto/dsh-ecosystem-spec",
    "WTStarMark/dsh-myskin"
   ],
-  "ecosystemDisabled": [
-   "WTStarMark/dsh-myskin"
-  ],
+  "ecosystemDisabled": [],
   "topicEdgesDroppedByCap": 104,
   "categories": {
    "classified": 527,
@@ -40177,8 +40175,8 @@
    ]
   },
   {
-   "source": "anywhere-labs/dsh-desktop",
-   "target": "omdsh-dev/DSH-better-sidebar",
+   "source": "omdsh-dev/DSH-better-sidebar",
+   "target": "anywhere-labs/dsh-desktop",
    "type": "resonance",
    "weight": 1,
    "via": [
@@ -40186,8 +40184,8 @@
    ]
   },
   {
-   "source": "myYangyunfan/dsh_desktop",
-   "target": "omdsh-dev/DSH-better-sidebar",
+   "source": "omdsh-dev/DSH-better-sidebar",
+   "target": "myYangyunfan/dsh_desktop",
    "type": "resonance",
    "weight": 1,
    "via": [
@@ -40204,8 +40202,8 @@
    ]
   },
   {
-   "source": "elysia395/dsh-wallpaper-engine",
-   "target": "omdsh-dev/DSH-better-sidebar",
+   "source": "omdsh-dev/DSH-better-sidebar",
+   "target": "elysia395/dsh-wallpaper-engine",
    "type": "resonance",
    "weight": 1,
    "via": [
@@ -40213,8 +40211,8 @@
    ]
   },
   {
-   "source": "ChenRuoT/dsh-sidebar-qa",
-   "target": "omdsh-dev/DSH-better-sidebar",
+   "source": "omdsh-dev/DSH-better-sidebar",
+   "target": "ChenRuoT/dsh-sidebar-qa",
    "type": "resonance",
    "weight": 1,
    "via": [
@@ -40222,8 +40220,8 @@
    ]
   },
   {
-   "source": "WEP-56/DSH-Launcher",
-   "target": "omdsh-dev/DSH-better-sidebar",
+   "source": "omdsh-dev/DSH-better-sidebar",
+   "target": "WEP-56/DSH-Launcher",
    "type": "resonance",
    "weight": 1,
    "via": [
@@ -40231,8 +40229,8 @@
    ]
   },
   {
-   "source": "LiPu-jpg/Openwrite",
-   "target": "ccch1mneyyy/dsh-TUI",
+   "source": "ccch1mneyyy/dsh-TUI",
+   "target": "LiPu-jpg/Openwrite",
    "type": "resonance",
    "weight": 1,
    "via": [

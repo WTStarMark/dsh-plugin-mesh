@@ -70,6 +70,149 @@ def write_snapshot(mesh: dict, directory: Path, keep: int = KEEP_SNAPSHOTS, forc
     return path, diff
 
 
+STAR_HISTORY_KEEP = 8  # 星标历史只留最近 8 个"天点"：算 7 天增量够用，再留一天余量
+
+
+def load_star_history(path: Path) -> dict:
+    """读星标历史环。文件不存在/损坏都当空环 —— 绝不因为一个历史文件中断采集。"""
+    empty = {"updatedAt": None, "unit": "stars/day", "points": []}
+    if not path.exists():
+        return empty
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return empty
+    if not isinstance(data, dict) or not isinstance(data.get("points"), list):
+        return empty
+    points = [p for p in data["points"] if isinstance(p, dict) and p.get("at") and isinstance(p.get("stars"), dict)]
+    points.sort(key=lambda p: str(p["at"]))
+    return {"updatedAt": data.get("updatedAt"), "unit": data.get("unit") or "stars/day", "points": points}
+
+
+def update_star_history(mesh: dict, path: Path, keep: int = STAR_HISTORY_KEEP, now: str | None = None) -> dict:
+    """把本轮星标记成"每天一个点"的历史环（前端「周 star 热榜」的唯一真源）。
+
+    为什么单独存：历史快照只保留 KEEP_SNAPSHOTS 份（约两小时），攒不出"周"窗口；
+    而周增量只需要一个"7 天前的星标基线"，所以按天存、只留最近 keep 个点最省。
+
+    - 同一天重复跑：覆盖当天的点（一天只留最后一次观测）
+    - 只留最近 keep 个点（= keep 天），文件大小约 keep × 全量仓库数
+    """
+    at = (mesh.get("meta") or {}).get("generatedAt") or now or utcnow()
+    day = str(at)[:10]
+    previous = load_star_history(path)
+    stars = {n["id"]: n.get("stars", 0) for n in mesh.get("nodes", []) if n.get("id")}
+    points = [p for p in previous["points"] if str(p.get("at"))[:10] != day]
+    points.append({"at": at, "day": day, "count": len(stars), "stars": stars})
+    points.sort(key=lambda p: str(p["at"]))
+    payload = {
+        "updatedAt": now or utcnow(),
+        "unit": "stars/day",
+        "keepDays": keep,
+        "note": "每天一个点（同一天重复跑会覆盖当天），供前端算「周 star 热榜」的真实星标增量；只保留最近 keepDays 天。",
+        "points": points[-keep:],
+    }
+    _write_json(path, payload)
+    return payload
+
+
+
+UPDATE_LOG_KEEP = 8  # 更新日志按天保留 8 天（算 7 天窗口够用）
+UPDATE_LOG_SEEN_DAYS = 14  # seen 表只跟最近 14 天内有推送的仓库：不活跃的不必记
+
+
+def load_update_log(path: Path) -> dict:
+    """读更新日志。文件不存在/损坏都当空表 —— 绝不因为一个日志文件中断采集或接口。"""
+    empty = {"updatedAt": None, "keepDays": UPDATE_LOG_KEEP, "seen": {}, "days": {}, "sampledDays": []}
+    if not path.exists():
+        return empty
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return empty
+    if not isinstance(data, dict):
+        return empty
+    seen = data.get("seen") if isinstance(data.get("seen"), dict) else {}
+    days = data.get("days") if isinstance(data.get("days"), dict) else {}
+    sampled = data.get("sampledDays") if isinstance(data.get("sampledDays"), list) else []
+    clean_days = {}
+    for day, counts in days.items():
+        if isinstance(counts, dict):
+            clean_days[str(day)] = {str(k): int(v) for k, v in counts.items() if isinstance(v, (int, float)) and v > 0}
+    return {
+        "updatedAt": data.get("updatedAt"),
+        "keepDays": int(data.get("keepDays") or UPDATE_LOG_KEEP),
+        "seen": {str(k): str(v) for k, v in seen.items() if v},
+        "days": clean_days,
+        # 没有这一项的老文件按"有计数的那些天"兜底：至少能标出确实观测过的日子
+        "sampledDays": sorted({str(d) for d in sampled if d} | set(clean_days)),
+    }
+
+
+def _day_shift(day: str, delta: int) -> str:
+    from datetime import date, timedelta
+
+    try:
+        base = date.fromisoformat(day)
+    except ValueError:
+        return day
+    return (base + timedelta(days=delta)).isoformat()
+
+
+def update_update_log(mesh: dict, path: Path, *, keep: int = UPDATE_LOG_KEEP, now: str | None = None) -> dict:
+    """每轮采样一次「这个仓库又推了新东西吗」，按天累计次数（前端「周更新热榜」的排序依据）。
+
+    为什么需要它：GitHub 只给一个 pushedAt（最后一次推送），"一周更新了几次"盘上原本无从得知。
+    采集器每小时看一次，只要 pushedAt 比上次观测前进了，就记一次推进 —— 这是**观测到的下界**，
+    同一次推送最多记一次（采样间隔内的多次推送会合并成一次），界面上也照这个口径写清楚。
+
+    - 首次见到某个仓库不计数（那是"它本来就有推送"，不是"我们又看到它更新了"）
+    - 只跟最近 UPDATE_LOG_SEEN_DAYS 天内有推送的仓库：文件不会随仓库总数无限增长
+    - days 只留最近 keep 天
+    """
+    at = (mesh.get("meta") or {}).get("generatedAt") or now or utcnow()
+    day = str(at)[:10]
+    payload = load_update_log(path)
+    seen = dict(payload["seen"])
+    days = {k: dict(v) for k, v in payload["days"].items()}
+    sampled = set(payload.get("sampledDays") or []) | {day}  # 本轮观测过 = 这一天在观测
+
+    floor = _day_shift(day, -UPDATE_LOG_SEEN_DAYS)
+    counted = 0
+    for node in mesh.get("nodes", []):
+        nid = node.get("id")
+        pushed = node.get("pushedAt")
+        if not nid or not pushed:
+            continue
+        pushed = str(pushed)
+        if pushed[:10] < floor:
+            seen.pop(nid, None)  # 太久没动：不再跟踪，也不必计数
+            continue
+        before = seen.get(nid)
+        if before is not None and pushed > before:
+            days.setdefault(day, {})
+            days[day][nid] = int(days[day].get(nid, 0)) + 1
+            counted += 1
+        seen[nid] = pushed
+
+    keep_floor = _day_shift(day, -(keep - 1))  # 含当天在内共 keep 天
+    days = {d: c for d, c in days.items() if d >= keep_floor and c}
+    sampled = {d for d in sampled if d >= keep_floor}
+    out = {
+        "updatedAt": now or utcnow(),
+        "unit": "pushes/day",
+        "keepDays": keep,
+        "note": "每轮采样一次：pushedAt 比上次观测前进了就记一次推进（同一次推送最多记一次，首次见到不记）。前端「周更新热榜」的次数 = 1（本窗口内确有推送）+ 这里的推进次数。",
+        "lastRound": {"at": at, "counted": counted},
+        "seen": dict(sorted(seen.items())),
+        "days": dict(sorted(days.items())),
+        # 逐日趋势图要区分「当天 0 次」与「当天没观测」：这里记的是观测到的日子
+        "sampledDays": sorted(sampled),
+    }
+    _write_json(path, out)
+    return out
+
+
 def latest_snapshot(directory: Path) -> dict | None:
     if not directory.exists():
         return None

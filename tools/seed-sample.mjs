@@ -117,8 +117,10 @@ function buildMesh(rawRepos, queryMeta) {
 
   // ---- 边：主题共现（只连稀有主题）+ 同作者 ----
   const edgeMap = new Map();
-  const addEdge = (a, b, type, via) => {
-    const [s, t] = a < b ? [a, b] : [b, a];
+  // directed：resonance 是"基座 → 插件"的有向关系，方向必须保留（插件字母序在前也不能翻）；
+  // topic / owner 是对等关系，按字母序归一化以便去重。与 backend/dsh_mesh/build.py 同一口径。
+  const addEdge = (a, b, type, via, directed = false) => {
+    const [s, t] = directed || a < b ? [a, b] : [b, a];
     const key = type + ":" + s + "|" + t;
     let e = edgeMap.get(key);
     if (!e) {
@@ -185,7 +187,7 @@ function buildMesh(rawRepos, queryMeta) {
     if (!nodeIds.has(base.id)) continue;
     for (const child of base.verified ?? []) {
       if (!child.id || child.id === base.id || !nodeIds.has(child.id)) continue;
-      addEdge(base.id, child.id, "resonance", base.label ?? "生态共鸣");
+      addEdge(base.id, child.id, "resonance", base.label ?? "生态共鸣", true);
       resonanceEdges++;
     }
   }

@@ -276,6 +276,12 @@ def build_mesh(
     nodes: list[dict] = []
     seen: dict[str, dict] = {}
     skipped_blacklisted = 0
+    # 无信号仓库计数：只有名字命中 dsh、却既没有描述也没有主题标签。
+    # 它们是 v0.4.9「名字收录」带来的长尾（实测 5174 个）：分类器无从下手（谈不上归错类），
+    # 画进图里则是纯噪点 —— 会把「其他」扇区从 2370 撑到 7510，连带把布局重叠顶到 9%。
+    # 不收录，且只计数不逐个记录（excludedNotPlugin 是给"非 DSH 语境"这类需要复核的用的）。
+    no_signal_desc_chars = 10  # 与 non_plugin_reason 里"没有描述"的判据保持一致
+    skipped_no_signal = 0
     excluded_repos: dict[str, str] = {}
 
     aliases = load_aliases()
@@ -286,6 +292,10 @@ def build_mesh(
             repo = dict(repo, id=fixed, name=fixed.split("/")[-1], htmlUrl="https://github.com/" + fixed)
         if owner_of(repo) in blacklist:
             skipped_blacklisted += 1
+            continue
+        # 只有名字、没有任何信号的空壳：抓到了也归不了类，画进图里只是噪点
+        if not repo["topics"] and len(str(repo.get("description") or "").strip()) < no_signal_desc_chars:
+            skipped_no_signal += 1
             continue
         # 非 DSH 语境（例如 DSH 指 Deep Supervised Hashing）直接不进索引
         not_plugin = non_plugin_reason(repo)
@@ -339,8 +349,12 @@ def build_mesh(
     # ---------- 连线 ----------
     edge_map: dict[tuple, dict] = {}
 
-    def add_edge(a: str, b: str, kind: str, via: str) -> None:
-        src, dst = (a, b) if a < b else (b, a)
+    def add_edge(a: str, b: str, kind: str, via: str, directed: bool = False) -> None:
+        # 方向：topic / owner / fork 是对等关系，方向没有意义，按字母序归一化以便去重；
+        # resonance 是"基座 → 插件"的**有向**关系，必须保留调用方给的方向 ——
+        # 否则插件 id 恰好字母序在基座前面时会被翻转（v0.4.0 起的老毛病，
+        # 在 3.2 万节点的真实数据上才暴露：78 条边里方向混乱）。
+        src, dst = (a, b) if (directed or a < b) else (b, a)
         key = (kind, src, dst)
         edge = edge_map.get(key)
         if edge is None:
@@ -396,7 +410,7 @@ def build_mesh(
         for child in info["children"]:
             if child["id"] == base_id or child["id"] not in node_ids:
                 continue
-            add_edge(base_id, child["id"], "resonance", info["label"] or "生态共鸣")
+            add_edge(base_id, child["id"], "resonance", info["label"] or "生态共鸣", directed=True)
             resonance_edges += 1
 
     # 度数裁剪：只裁"主题共现"；同作者是硬关系，必须保留
@@ -455,6 +469,8 @@ def build_mesh(
             "ecosystemDisabled": sorted(k for k, v in ecosystem.items() if not v["enabled"]),
             "excludedNotPlugin": dict(sorted(excluded_repos.items())),
             "excludedNotPluginCount": len(excluded_repos),
+            # 只有名字、没有描述也没有主题标签的空壳：不收录（它们既无法分类，画出来也只是噪点）
+            "noSignalSkipped": skipped_no_signal,
             "noiseBlacklist": dict(sorted(blacklist.items())),
             "noiseBlacklistSize": len(blacklist),
             "noiseNodesRemoved": noise_removed,

@@ -166,16 +166,39 @@ test("renderInspector：选中时展示仓库详情与邻居", () => {
   assert.ok(links.every((h) => typeof h === "string" && h.length > 0), "所有链接都要有 href");
 });
 
-test("renderInspector：点击邻居会回调 selectRepo", () => {
+test("renderInspector：点击「关联」里的仓库会回调 openRelated（选中并居中）", () => {
   calls.length = 0;
   const target = prepared.nodes.find((n) => (prepared.adjacency.get(n.id)?.length ?? 0) > 0);
   const state = { ...baseState(), selectedId: target.id };
   const root = new FakeNode("aside");
   panels.renderInspector(root, prepared, state, actions);
   const neigh = root.all.find((n) => n.className === "neigh");
+  const rowId = neigh.all.find((n) => n.className === "nm").textContent;
   neigh.listeners.click[0]();
-  assert.equal(calls[0][0], "selectRepo");
+  assert.equal(calls[0][0], "openRelated", "关联行点击应走 openRelated（选中并自动居中），实际：" + calls[0][0]);
+  assert.equal(calls[0][1], rowId, "回调的应是这一行展示的仓库");
   assert.ok(prepared.byId.has(calls[0][1]));
+});
+
+test("renderRail：以某仓库为中心时给出「返回全景」横幅", () => {
+  calls.length = 0;
+  const centerId = prepared.nodes.find((n) => n.id !== "deepseek-ai/deepseek-harness").id;
+  const root = new FakeNode("aside");
+  panels.renderRail(root, prepared, baseState(), actions, { centerId, arms: [], hubId: "deepseek-ai/deepseek-harness" });
+  const banner = root.children[0];
+  assert.equal(banner?.className, "focus-banner", "横幅应排在左栏最前，实际：" + banner?.className);
+  const text = banner.all.map((n) => n.textContent ?? "").join(" ");
+  assert.ok(text.includes(centerId), "横幅应点名当前圆心，实际：" + text);
+  const back = banner.all.find((n) => String(n.textContent ?? "").includes("返回全景"));
+  assert.ok(back, "横幅里应有「返回全景」按钮");
+  back.listeners.click[0]();
+  assert.equal(calls[0][0], "exitCenter");
+});
+
+test("renderRail：不在中心视图时不该出现返回横幅", () => {
+  const root = new FakeNode("aside");
+  panels.renderRail(root, prepared, baseState(), actions, { arms: [], hubId: "deepseek-ai/deepseek-harness" });
+  assert.equal(root.children.filter((n) => n.className === "focus-banner").length, 0);
 });
 
 test("renderTooltip：定位落在画布内且显示节点信息", () => {

@@ -53,7 +53,12 @@ test("临时关闭的基座（enabled: false）不建共鸣边，但基座身份
     assert.deepEqual(mesh.meta.ecosystemDisabled ?? [], [], "没有关闭的基座时 meta.ecosystemDisabled 应为空");
     for (const base of eco.bases) {
       // 只看"有已核验子项"的基座：启用但暂时没有子项的基座（等新格式公开）不该硬要求有边
-      if ((base.verified ?? []).length === 0) continue;
+      const verified = base.verified ?? [];
+      if (verified.length === 0) continue;
+      // 限扫数据集（例如只抓了几千项）里，基座和它的子节点可能都还没抓到 —— 建边要求【两端都在图内】，
+      // 少了任何一端就不是"没画边"而是"数据里没有"，别把数据缺失误报成功能坏了
+      const inGraph = (id) => mesh.nodes.some((n) => n.id === id);
+      if (!inGraph(base.id) || !verified.some((v) => inGraph(v.id))) continue;
       const edges = (mesh.edges ?? []).filter((e) => e.type === "resonance" && (e.source === base.id || e.target === base.id));
       assert.ok(edges.length > 0, base.id + " 已启用且有子项，应画出共鸣边");
     }
@@ -89,7 +94,7 @@ test("数据落地：mesh.json 的共鸣边 = 清单（启用的基座）∩ 图
   }
 });
 
-test("预计算契约：共鸣边的类型码可编码可解码", () => {
+test("预计算契约：共鸣边的类型码可编码可解码", (t) => {
   assert.equal(EDGE_TYPE_BY_CODE[4], "resonance", "类型码 4 必须留给 resonance（新增只能往后追加）");
   assert.equal(EDGE_TYPE_BY_CODE[0], "owner");
   const code = EDGE_TYPE_BY_CODE.indexOf("resonance");
@@ -98,7 +103,15 @@ test("预计算契约：共鸣边的类型码可编码可解码", () => {
   const prepared = prepareCore(core);
   assert.equal(prepared.links.filter((l) => l.type === "resonance").length, encoded);
   // 邻接表里也要有，右栏「关联」才列得出来
-  const base = eco.bases.find((b) => core.nodes.some((n) => n.id === b.id));
+  const base = eco.bases.find(
+    (b) =>
+      core.nodes.some((n) => n.id === b.id) &&
+      (mesh.edges ?? []).some((e) => e.type === "resonance" && (e.source === b.id || e.target === b.id)),
+  );
+  if (!base) {
+    t.skip("当前数据里没有「基座与子节点都在图内」的共鸣边（限扫数据集），跳过邻接表这一项");
+    return;
+  }
   const list = prepared.adjacency.get(base.id) ?? [];
   assert.ok(list.some((x) => x.type === "resonance"), base.id + " 的邻接表里应有生态共鸣");
 });

@@ -3,9 +3,9 @@
 **把带 `dsh` 系列 GitHub 标签的仓库，画成一张可交互的生态网络图。**
 
 [![在线访问](https://img.shields.io/badge/在线访问-104.129.51.126-2f7df6?style=flat-square)](http://104.129.51.126/)
-[![测试](https://img.shields.io/badge/tests-170%20JS%20%2B%2068%20Python-3fb8a8?style=flat-square)](#测试)
+[![测试](https://img.shields.io/badge/tests-196%20JS%20%2B%2090%20Python-3fb8a8?style=flat-square)](#测试)
 [![依赖](https://img.shields.io/badge/dependencies-0-57b894?style=flat-square)](#技术选型)
-[![版本](https://img.shields.io/badge/version-v0.4.10-9b8cf0?style=flat-square)](#)
+[![版本](https://img.shields.io/badge/version-v0.5.0-9b8cf0?style=flat-square)](#)
 
 👉 **在线地址：<http://104.129.51.126/>**
 
@@ -32,6 +32,7 @@
 - **21 个功能扇区**：智能体技能、模型接入、桌面客户端、界面面板、皮肤美化、插件市场、会话交互、记忆上下文、语音提醒、工具命令、开发调试、Web 前端、用量额度、安全权限、远程访问、集成桥接、文件管理、阅读文档、桌宠娱乐、**协议基座**、其他
 - **细枝分类**：每个扇区下再分 3~8 个细枝（共 79 条规则），单扇区放大时铺成二级扇区
 - **单扇区放大**：点任一扇区，该扇区铺满整圆，圆内按细枝重新分扇区
+- **双击聚焦**：双击任一仓库，以它为中心**重建一张扇形图**（圆心＝它，扇区＝它的关联按当前划分依据分出的分类）；`Esc` / 左栏「← 返回全景」退回全图
 
 > 这不是 DSH 插件，不依赖 DSH 运行时；它是一个独立的静态前端 + Python 采集后端。
 
@@ -41,6 +42,9 @@
 |---|---|
 | 扇区布局 | 按功能分区、同心散布；位置由可播种 PRNG 决定，**同一 seed 逐点可复现** |
 | 单扇区放大 | 点扇区 → 大扇区当整圆、细枝当扇区；`Esc` 或「← 返回全局」退回 |
+| 双击聚焦 | 双击画布上任意仓库 → 以它为中心**重建一张扇形图**：圆心＝它，扇区＝它的关联仓库（直接关联 + 同作者兄弟，与右栏「关联」同一口径）按当前划分依据分出的分类；`Esc`、左栏横幅「← 返回全景」、或「重置筛选」都能退回全图。双击官方仓库＝直接回全景（它本来就是全景的圆心） |
+| 生态榜单 | 顶栏「左栏」「右栏」两个按钮**正中间**的奖杯（仅图标）：点开弹窗两个榜 —— **周更新热榜**（近 7 天有推送的仓库，**按【更新次数 → 最近推送 → 星标】排序**：次数 = 1（窗口内确有推送）+ 采集器每轮采样到的推送推进次数；次数相同时，1 小时前推过的排在 2 小时前推过的前面）与 **周 star 热榜**（星标历史增量）。**每行还带最新版本号胶囊**（采集器按仓库抓的 releases，悬停该行可看全部版本与发布日期、是否预发布），两者都排除归档与复刻，**每行带一支近 7 日趋势柱**（更新榜 = 每日观测到的更新次数，star 榜 = 每日 star 增量；每行按自己的峰值归一，看的是这一周的起伏形状；没观测到的天画虚线底座，绝不伪装成 0）。只有两个观测点、跨了多天时，画一根**跨 N 天累计宽条**（覆盖它实际跨过的槽位）——真实观测值，但**绝不平摊到某一天**；历史/采样没攒够时，榜单头部直接写出真实窗口、次数上限与"有几天真的有观测"，不做任何换算；点任意一行 = 选中它并把镜头移过去 |
+| 关联居中 | 右栏「关联」里点一个仓库 → 选中它，并把镜头移到它身上（自动居中显示，保留全景上下文）；若它不在当前画面里（例如正处在别的仓库的扇形图中），则改为以它为中心另建一张扇形图 —— 否则镜头移过去只会看到空白 |
 | 侧栏顺序 | 左栏：总览 → 功能扇区 → 筛选 → 划分依据 → 捕获标签 → 高频标签。右栏未选中：图例 → 操作提示 → 待复核清单；选中后：仓库档案 → 命中标签 → 仓库主题 → 关联 → 图例 → 操作提示 |
 | 状态圆环 | 顶栏圆环 = 下一次扫描的倒计时（读 `/api/status` 的 `nextRunAt`，本地每秒走格；正在采集时环会转）。点开浮窗看后端进度：阶段、分段、请求与配额、README 索引、上一轮耗时；拿不到状态就显示"无采集器状态" |
 | 三类连线 | 点选仓库就画出它的**同作者**（完整关系：不论几个同作者仓库都能互相指向）、**主题共现**（琥珀虚线）与**生态共鸣**（紫罗兰实线）；度数上限只裁主题边，owner 边豁免 |
@@ -56,6 +60,7 @@
 | 手机端 | ≤900px 画布全屏、侧栏变底部抽屉且**左右互斥**、双指缩放、安全区适配 |
 | 访问统计 | 同端口最小 API：访问数 / 同时在线；拿不到接口时整栏隐藏 |
 | 缓存 | Brotli（q9，带压缩结果缓存）+ ETag/304 + IndexedDB 秒开 + 后台校验；契约回访走 304，不再重下整份 |
+| 契约守门 | 编解码器遇到未纳入契约的节点字段：默认【跳过 + 告警 + 记进 header.droppedFields】，不再中断编码；strict 模式下仍直接抛错（CI/单测用）。采集器把预计算的非零退出码、或二进制契约未随本轮刷新，都判为失败（不再记成"退出阶段崩溃不影响结果"）
 | 二进制契约 | 首屏优先拉 `data/mesh-core.bin` 的**主干分片**（按星标前 3000 个，约 110KB）立刻出图，整份（约 610KB）在后台补上；JSON 契约保留作兜底。格式见 `src/mesh-core-bin.js`：分类/标签/判定/理由字典化 + 坐标半径定点化 + id 串池，未知字段直接报错 |
 | 头像尺寸 | 头像 URL 统一补 `s=64`：GitHub 默认给 460×460 原图（实测单张最大 282KB），加参数后单张 1~8KB |
 | 双主题 | 清爽（蓝白）、粉黛；明暗各一套，画布文字深色白字 / 浅色黑字 |
@@ -68,10 +73,13 @@
 
 ```bash
 git clone <repo> && cd dsh-plugin-mesh
+python3 backend/collect.py --from-raw    # 用仓库里的样本离线复算一份前端契约（零网络、不吃配额）
 npm run serve:lan                        # http://<你的局域网IP>:8788/
-npm test                                 # 163 项前端测试
-python3 backend/tests/test_collector.py  # 64 项后端测试
+npm test                                 # 196 项前端测试
+python3 backend/tests/test_collector.py  # 90 项后端测试
 ```
+
+> **数据为什么不在仓库里**：采集器的每小时产物（`data/mesh.json` / `mesh-core.*` / `last-crawl.json` / `cache/` / `snapshots/` / `details/`）体积大且每小时都变，提交一次就把仓库撑胖，所以全部 gitignore —— 部署机上由采集器自己生成。克隆下来先跑上面那条 `--from-raw`（用随代码走的 `data/sample-*.json` 夹具）就有一份可看可测的数据。
 
 **采集数据**（需要 GitHub 令牌，见下）：
 
@@ -127,17 +135,23 @@ GitHub 搜索 API
         └─ 结果并入【累积索引】data/cache/repos.json，跨轮次累加，最终覆盖全部仓库
    └─ 构建（build.py）
         ├─ 噪声黑名单判定：作者收录 > 200 个仓库且每个仓库星标 < 1 => 剔除并长期拉黑
+        ├─ 无信号空壳不收录：只有名字命中 dsh、却既没有描述也没有主题标签的（v0.5.0 起）
         ├─ 功能分类（classify.py，与前端规则逐条对齐）
-        ├─ 同作者 / 主题 连线
+        ├─ 同作者 / 主题 连线 + 生态共鸣连线（基座 → 插件，**有向**，见 tools/ecosystem.json）
         └─ 产出 data/mesh.json（前端契约）+ data/snapshots/<时间戳>.json + data/last-crawl.json
 ```
 
 **几条硬规矩**：
 
+- **收录口径（v0.5.0 修订）**：只收"有信号"的仓库 —— 至少一个白名单 topic，**或**一句像样的描述（≥10 字）。只有名字里带 dsh、既没描述也没 topic 的空壳（实测 5174 个）不收录：分类器无从下手（谈不上归错类），画进图里也只是噪点（会把「其他」扇区从 2370 撑到 7510，把布局重叠顶到 9%）。剔除数量记在 `meta.noSignalSkipped`，如实报账，不偷偷丢
+- **共鸣边是有向的**：`基座 → 插件`。其它边（主题共现 / 同作者 / fork）是对等关系，方向无意义、按字母序归一化以便去重 —— 两类边用同一个 `add_edge`，方向语义不能混
 - **缩水保护**：某轮构建出的索引不足现有规模的 80% 时，拒绝覆盖前端数据与快照
 - **截断记账**：连一天都超过 1000 条的段，如实记进 `segments.json` 的 truncated 列表，不假装全量
 - **无变化不写快照**：索引与上一份完全一致时跳过写盘
-- **只留 2 份快照**：`KEEP_SNAPSHOTS = 2`
+- **只留 2 份快照**：`KEEP_SNAPSHOTS = 2` —— 所以"周"窗口攒不出来，星标历史另存一份按天的环（见下）
+- **星标历史环**：`data/cache/star-history.json`，每天一个点（`id → stars`，同一天重复跑会覆盖），只留最近 8 天。前端「周 star 热榜」= 最近的点与"约 7 天前"那个点的星标之差：**真实观测值，不是估算**；历史不足 7 天时接口如实返回实际窗口天数，界面上也照实写，绝不把 42 小时说成"一周"
+- **版本（releases）**：搜索接口不返回 releases，只能按仓库单独取（1 个仓库 = 1 次 **core** 配额请求）。采集器每轮按 `--releases-budget`（默认 300）抓一批，优先级是"近 7 天推过 > 星标高 > 其他"，跳过归档与刚抓过的（3 天内不重抓）；只留每仓库最近 5 个版本的 tag/名称/发布日期/是否预发布，落 `data/cache/releases.json`（约 560B/仓库）。实测主配额**按认证身份**算一个桶（同账号多令牌共享），所以这层只能靠"限量 + 排优先级"，不是靠堆令牌
+- **更新日志**：`data/cache/update-log.json`，每轮采样一次"pushedAt 比上次观测前进了吗"，按天累计次数（只跟最近 14 天内有推送的仓库，日期留最近 8 天）。GitHub 只给最后一次推送时间，"一周更新了几次"只能这样观测 —— 所以它是**下界**（同一次推送最多记一次），界面上照这个口径写清楚；没有采样日志时退化为"用盘上一次更早的观测比对"（次数上限 2）并在口径行标黄
 - **落盘顺序**：先写仓库数据、后写队列状态，且都用临时文件 + 原子替换（否则进程被杀会让队列「记着抓完了、数据却没了」）
 - **噪声黑名单长期生效**：判定结果写进 `data/noise-blacklist.json`，之后每轮直接跳过（人工删掉条目即可解除）；
   阈值在 `backend/dsh_mesh/config.py` 的 `NOISE_OWNER_MIN_REPOS` / `NOISE_OWNER_MAX_STARS`，前端 `src/mesh-data.js` 里有一份同样的兜底判定
@@ -163,7 +177,7 @@ GitHub 搜索 API
 | 三档判定 | 相关性不再只有一个 review 布尔：analyze_relevance 给出 related / noise / manual + 一句话原因（JS 在 tools/relevance.mjs，Python 在 build.py，两份逐条一致） |
 | re.ASCII | Python 的 `\b` 默认是 Unicode 语义（中文算 word char），必须加 `re.ASCII` 才与 JS 一致 |
 
-**精度效果**（本地 2625 个仓库就地重分类，节点数不变）：
+**精度效果**（取一份 2625 个仓库的样本就地重分类，节点数不变）：
 
 | 指标 | 改进前 | 改进后（v0.4.3 数据） |
 |---|---|---|
@@ -189,8 +203,8 @@ GitHub 搜索 API
 ## 测试
 
 ```bash
-npm test                                  # 163 项：布局 / 连线 / 分类（协议基座·桌宠·非插件排除）/ 细枝 / 相关性判定 / 生态共鸣 / 面板 / 主题 / 噪声黑名单 / 服务加固 / 冒烟
-python3 backend/tests/test_collector.py   # 64 项：分类 / 分段扫描 / 快照 / 调度 / 采集顺序 / 噪声黑名单 / 三档判定 / 预计算容错
+npm test                                  # 196 项：布局 / 连线 / 分类（协议基座·桌宠·非插件排除）/ 细枝 / 相关性判定 / 生态共鸣 / 面板 / 双击聚焦与关联居中 / 榜单（更新次数·口径与降级·版本胶囊）/ 主题 / 噪声黑名单 / 服务加固 / 冒烟
+python3 backend/tests/test_collector.py   # 90 项：分类 / 分段扫描 / 快照 / 调度 / 采集顺序 / 噪声黑名单 / 三档判定 / 预计算容错 / 星标历史环 / 更新日志 / 版本采集 / **收录口径与共鸣边方向**
 python3 backend/verify_parity.py          # 跨语言一致性（JS 管线 vs Python 采集器）
 ```
 
@@ -215,21 +229,24 @@ src/
   panels.js         左栏 / 右栏 / 悬浮提示
   mesh-data.js      数据层 + 预览图配色
   palettes.js       清爽 / 粉黛 × 明暗，共 4 套主题
-  links.js  rng.js  avatars.js  cache.js  stats.js
+  ranking.js        奖杯弹窗：周更新热榜 / 周 star 热榜（含版本胶囊、趋势柱）
+  links.js  rng.js  avatars.js  cache.js  stats.js  mesh-core-bin.js
 tools/
   serve.mjs         加固版静态服务（白名单 + 统计 API）
+  api.mjs           只读查询 API + 卡片 SVG（与前端同端口）
+  precompute-layout.mjs  预计算：坐标 + 二进制契约（mesh-core.bin / .head.bin）
   categories.mjs    分类规则表（与 Python 逐条对齐）
   reclassify.mjs    就地重分类（不重新采集）
   snapshot-svg.mjs  README 预览图离线副本（--png 可生成核对图）
   preview-svg.mjs   预览渲染核心：站点 /preview.svg 与离线副本共用
   seed-sample.mjs  preview-ascii.mjs
 backend/
-  collect.py        采集入口（--once / --loop / --budget / --from-store / --from-raw）
-  dsh_mesh/         github / segments / classify / build / snapshot / config
+  collect.py        采集入口（--once / --loop / --budget / --releases-budget / --from-store / --from-raw）
+  dsh_mesh/         github / segments / classify / build / snapshot / releases / readmes / config
   verify_parity.py  跨语言一致性校验
   check_token.py    令牌自检（只打印配额数字）
-  tests/            64 项测试（前端 163 项在根目录 tests/）
-docs/               data-contract.md 与预览图
+  tests/            90 项测试（前端 196 项在根目录 tests/）
+docs/               data-contract.md / frontend-design.md 与预览图
 ```
 
 ## 技术选型
@@ -240,10 +257,10 @@ docs/               data-contract.md 与预览图
 
 ## 使用：查询 API（与前端同端口）
 
-线上 demo：`http://104.129.51.126` · 本地开发：`http://127.0.0.1:8788`
+线上 demo：`http://104.129.51.126`
 
-> **版本要求**：API 与卡片是 **v0.4.1** 起提供的功能。上面的线上地址要等部署 v0.4.1 之后才生效；
-> 想在部署前先试，把 `BASE` 换成本机预览地址（如 `http://127.0.0.1:8788`）即可，命令一字不用改。
+> **版本要求**：API 与卡片是 **v0.4.1** 起提供的功能（线上地址若还停在更早的版本，部署后即生效）；
+> 想在部署前先试，把 `BASE` 换成你自己的服务地址即可，命令一字不用改。
 
 API 与前端**共用同一个端口**：不需要另外开服务、不需要任何密钥、不占用额外端口。
 零依赖（Python 标准库 + Node 标准库）、**只读**、允许跨域（`Access-Control-Allow-Origin: *`），
@@ -259,6 +276,7 @@ API 与前端**共用同一个端口**：不需要另外开服务、不需要任
 | GET | `/api/repos` | 检索仓库（过滤 / 排序 / 翻页），`q` 同时匹配 **README 正文** |
 | GET | `/api/search?q=&limit=` | 紧凑检索：只回命中 id 与计数（含 README 命中），供前端搜索框高亮用 |
 | GET | `/api/status` | 采集进度状态：`nextRunAt`（下一轮开始）、阶段、分段与 README 进度、请求与配额；不缓存 |
+| GET | `/api/ranking?days=7&limit=20&fields=all` | 榜单：周更新热榜（每行带 `updates` 次数与 `updatesSource` 观测来源；每行还带 `releases` 版本列表）+ 周 star 热榜（带 `window.days` 真实窗口、`matched` 两端可比数）。响应含 `dataAgeHours`（数据新旧），算不出来时 `available:false` 并说明原因 |
 | GET | `/api/repos/:owner/:name` | 单个仓库详情 + 同作者 / 主题共现连线 |
 | GET | `/api/card/:owner/:name.svg` | 可分享的 SVG 卡片（见下一节） |
 | GET | `/preview.svg`（同 `/api/preview.svg`） | README 预览图：按当前数据实时渲染的生态图（`?theme=dark|light&size=&sample=`），ETag + 5 分钟缓存 |
@@ -288,7 +306,20 @@ curl -s "$BASE/api/repos/WTStarMark/dsh-myskin"
 
 # 5. 生态总览：扇区 + 细枝分布
 curl -s "$BASE/api/categories"
+
+# 6. 榜单（周更新热榜 + 周 star 热榜）：前端奖杯弹窗用的就是这一个接口
+curl -s "$BASE/api/ranking?limit=10" | jq '.boards.updated.items[] | {id, updates, pushedAt, releases: [.releases[].tag]}'
+# 每行字段：updates 次数 / updatesSource 观测来源 / pushedAt / stars / series（近 7 日趋势）/ releases（版本）/ spans（跨天累计）
+# 口径（窗口、排序链、数据新旧）在响应里都有：windowDays · seriesDays · dataAgeHours · history
 ```
+
+### 限流（所有 `/api` 共用）
+
+- **令牌桶，按 IP**：默认 **90 令牌/分钟**、每秒回填 1.5 个；可用 `RATE_LIMIT_MAX` / `RATE_LIMIT_REFILL` 调。
+- **按接口权重扣**：`/api/ranking` 记 **5** 个（它要读 mesh + 快照环 + 更新日志 + 版本缓存再算榜单）、卡片 SVG 记 4 个、`/api/repos`·`/api/categories` 记 2 个、其余 1 个 —— 重接口先被限住。
+- **每个响应都带**：`X-RateLimit-Limit` / `X-RateLimit-Remaining` / `X-RateLimit-Reset` / `X-RateLimit-Cost`；超限返回 **429** + `Retry-After`（秒）。
+- **取数不必高频**：响应本身带 5 分钟公共缓存、数据每小时才更新一次；请按 `Retry-After` 退避，不要在 429 上重试打转。
+- 默认**只信 socket 地址**：`X-Forwarded-For` 客户端可伪造，挂了反向代理再设 `TRUST_PROXY=1`（并自行清洗该头）。
 
 ### 检索参数（`/api/repos`）
 
@@ -405,8 +436,6 @@ http://104.129.51.126/api/card/WTStarMark/dsh-myskin.svg?theme=light&link=https:
 ```bash
 SITE_URL=https://your-site.example pm2 restart dsh-plugin-mesh --update-env
 ```
-
-> 本机开发预览：`http://192.168.22.250:8788/api/card/WTStarMark/dsh-myskin.svg`（卡片与前端同端口）
 
 ## 许可
 

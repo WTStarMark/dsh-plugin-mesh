@@ -138,6 +138,162 @@ test("检索：过滤、排序、分页都真的生效（从数据自身推导�
   assert.ok(capped.count <= MAX_LIMIT);
 });
 
+test("榜单：周更新榜按更新次数排序，star 榜给真实增量与真实窗口（不写死数字）", async () => {
+  const out = await api.ranking(new URLSearchParams("limit=5"));
+  assert.equal(out.windowDays, 7, "默认窗口 7 天");
+  assert.ok(out.generatedAt, "应带数据快照时间");
+  assert.equal(typeof out.dataAgeHours, "number", "应如实报告数据新旧");
+  assert.ok(out.now && out.history, "应报告服务器时间与星标历史点");
+
+  // 周更新热榜：窗口内、按【更新次数】排序、次数相同才比最近推送，排除归档与复刻
+  const updated = out.boards.updated;
+  assert.ok(updated.items.length > 0, "应有最近推送过的仓库");
+  const counts = updated.items.map((n) => n.updates);
+  assert.deepEqual(counts, [...counts].sort((a, b) => b - a), "周更新热榜必须按更新次数排序（这是它的关键指标）");
+  assert.ok(counts.every((u) => Number.isInteger(u) && u >= 1), "窗口内确实推送过的仓库至少算 1 次，实际 " + counts.join(","));
+  assert.ok(counts[0] <= (updated.maxUpdates ?? 1), "榜首次数应与 maxUpdates 一致");
+  const times = updated.items.map((n) => Date.parse(n.pushedAt));
+  for (let i = 1; i < updated.items.length; i++) {
+    if (counts[i] === counts[i - 1]) assert.ok(times[i] <= times[i - 1], "次数相同时应按最近推送降序");
+  }
+  assert.ok(
+    ["update-log", "epoch-pair", "current-only"].includes(updated.updatesSource),
+    "必须说明次数是怎么观测来的，实际 " + updated.updatesSource,
+  );
+  assert.ok((updated.note ?? "").length > 0, "必须写明采样口径");
+  const since = Date.parse(out.now) - out.windowDays * 86400000;
+  assert.ok(times.every((t) => t >= since), "每条都要落在窗口内");
+  assert.ok(updated.total >= updated.items.length, "总数不小于一页");
+  assert.ok(updated.items.every((n) => n.id && n.name && typeof n.stars === "number"), "行字段要齐");
+
+  // 周 star 热榜：有历史就给真增量 + 真窗口；没有就如实说明，绝不编数字
+  const stars = out.boards.stars;
+  if (stars.available) {
+    assert.ok(stars.window && stars.window.days > 0, "必须给出真实窗口");
+    assert.ok(stars.window.days <= 8, "窗口不该超过 8 天，实际 " + stars.window.days);
+    assert.equal(stars.window.target, 7, "窗口目标应写出来");
+    assert.ok(stars.items.length > 0, "应有涨星的仓库");
+    const deltas = stars.items.map((n) => n.delta);
+    assert.deepEqual(deltas, [...deltas].sort((a, b) => b - a), "必须按增量降序");
+    assert.ok(deltas.every((d) => d > 0), "榜上只能有正增长");
+    assert.ok(deltas[0] <= stars.items[0].starsAfter, "增量不可能超过它当前的星标数（下限是 0 星）");
+    for (const item of stars.items) {
+      assert.equal(item.starsAfter - item.starsBefore, item.delta, "增量必须等于两端观测之差");
+      assert.ok(item.starsAfter >= item.starsBefore);
+    }
+    assert.ok(stars.matched > 0, "应报告两端可比的仓库数");
+  } else {
+    assert.equal(stars.items.length, 0, "算不出增量就不该给任何行");
+    assert.ok((stars.note ?? "").length > 0, "必须说明为什么算不出来");
+  }
+
+  // 逐日趋势柱：横轴近 7 天，每行 7 个槽位；槽位只能是 null（没观测）或非负数
+  assert.equal(out.seriesDays.length, 7, "趋势柱横轴应为近 7 天");
+  assert.deepEqual(out.seriesDays, [...out.seriesDays].sort(), "横轴必须按时间升序");
+  assert.match(out.seriesDays[6], /^\d{4}-\d{2}-\d{2}$/, "横轴是日期");
+
+  for (const item of updated.items) {
+    assert.equal(item.series.length, 7, "每行都要有 7 个槽位：" + item.id);
+    assert.ok(item.series.every((v) => v === null || (Number.isFinite(v) && v >= 0)), "槽位只能是 null 或非负数");
+  }
+  if (updated.updatesSource !== "update-log") {
+    assert.equal(updated.seriesDays, 0, "没有按天采样时应报告 0 天");
+    assert.ok(updated.items.every((it) => it.series.every((v) => v === null)), "没有按天采样时绝不许编柱子");
+  }
+  if (stars.available) {
+    assert.equal(stars.items[0].series.length, 7, "star 榜每行也要有 7 个槽位");
+    assert.ok(Array.isArray(stars.items[0].spans), "每行都要带跨天累计段（可以是空数组）");
+    if (stars.spanCount > 0) {
+      const row = stars.items.find((it) => it.spans.length > 0);
+      assert.ok(row, "报告有跨天段时，至少一行要带得上");
+      const seg = row.spans[0];
+      assert.ok(seg.toIdx > seg.fromIdx, "跨天段必须覆盖多于一个槽位");
+      assert.ok(seg.days > 1 && seg.value > 0, "跨天段要有跨度天数与正增量，实际 " + JSON.stringify(seg));
+      assert.match(seg.from, /^\d{4}-\d{2}-\d{2}$/);
+      assert.match(seg.to, /^\d{4}-\d{2}-\d{2}$/);
+      assert.ok(seg.toIdx <= out.seriesDays.length - 1, "跨天段不能超出横轴");
+    }
+  }
+
+  const capped = await api.ranking(new URLSearchParams("limit=9999"));
+  assert.ok(capped.limit <= 50, "榜单 limit 应被夹住，实际 " + capped.limit);
+});
+
+test("榜单行带版本列表：读采集器抓的 data/cache/releases.json", async () => {
+  const hoursAgo = (h) => new Date(Date.now() - h * 3600000).toISOString();
+  const tmp = await mkdtemp(join(tmpdir(), "mesh-rel-"));
+  try {
+    await mkdir(join(tmp, "data", "cache"), { recursive: true });
+    await writeFile(
+      join(tmp, "data", "mesh.json"),
+      JSON.stringify({
+        meta: { generatedAt: hoursAgo(1) },
+        tags: [], clusters: [], hubs: [], edges: [],
+        nodes: [{ id: "a/one", name: "one", owner: "a", stars: 5, pushedAt: hoursAgo(2), archived: false, fork: false, matchedTags: ["dsh"], topics: [] }],
+      }),
+    );
+    await writeFile(
+      join(tmp, "data", "cache", "releases.json"),
+      JSON.stringify({
+        updatedAt: hoursAgo(0.2),
+        keep: 5,
+        repos: { "a/one": { at: hoursAgo(0.2), releases: [{ tag: "v1.2.3", name: "1.2.3", at: "2026-10-05", pre: false }, { tag: "v1.2.4-rc.1", name: "rc", at: "2026-10-06", pre: true }] } },
+      }),
+    );
+    const local = createApi({ root: tmp });
+    const out = await local.ranking(new URLSearchParams("limit=5"));
+    assert.equal(out.releases.cached, 1, "要报告版本缓存规模");
+    const row = out.boards.updated.items[0];
+    assert.equal(row.releases.length, 2, "行里要带版本列表");
+    assert.equal(row.releases[0].tag, "v1.2.3");
+    assert.equal(row.releases[1].pre, true, "预发布标记要透传");
+    assert.ok(Array.isArray(out.boards.stars.items?.[0]?.releases ?? []), "没有版本数据时给空数组，不是 undefined");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("周更新热榜排序：次数相同时，越近推送的排越前（次数 → 最近推送 → 星标）", async () => {
+  // 用相对时间造夹具，别写死日期（否则过一周就掉出 7 天窗口，测试变成定时炸弹）
+  const hoursAgo = (h) => new Date(Date.now() - h * 3600000).toISOString();
+  const node = (id, stars, pushedAt) => ({ id, name: id.split("/")[1], owner: id.split("/")[0], stars, pushedAt, archived: false, fork: false, matchedTags: ["dsh"], topics: [] });
+  const t1 = hoursAgo(1); // 同一时刻推的两个仓库：用来验证"同时刻再比星标"
+  const tmp = await mkdtemp(join(tmpdir(), "mesh-rank-"));
+  try {
+    await mkdir(join(tmp, "data"), { recursive: true });
+    await writeFile(
+      join(tmp, "data", "mesh.json"),
+      JSON.stringify({
+        meta: { generatedAt: hoursAgo(1), indexedNodes: 5 },
+        tags: [],
+        clusters: [],
+        hubs: [],
+        edges: [],
+        nodes: [
+          node("a/two-hours", 1, hoursAgo(2)),
+          node("a/one-hour", 5, t1),
+          node("a/three-hours", 999, hoursAgo(3)), // 星标最高，但推送最旧
+          node("a/same-time-hi", 500, t1), // 与 a/one-hour 同一时刻 → 比星标
+          node("a/stale", 10, hoursAgo(24 * 20)),
+        ],
+      }),
+    );
+    const local = createApi({ root: tmp });
+    const out = await local.ranking(new URLSearchParams("limit=10"));
+    assert.deepEqual(
+      out.boards.updated.items.map((n) => n.id),
+      ["a/same-time-hi", "a/one-hour", "a/two-hours", "a/three-hours"],
+      "次数都是 1：先按最近推送降序（1 小时前的排在 2 小时前的前面），同一时刻再比星标；星标再高也不能插到更近的前面",
+    );
+    assert.equal(out.boards.updated.total, 4, "20 天前推送的不该进 7 天窗口");
+    assert.ok(out.boards.updated.items.every((n) => n.updates === 1), "没有按天日志时次数按 1 计");
+    assert.equal(out.boards.updated.seriesDays, 0, "没有按天日志时不该报告有逐日数据");
+    assert.ok(out.boards.updated.items.every((n) => n.series.every((v) => v === null)), "没有按天日志时序列必须是 null");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("单仓库详情：连线两端都指向它，计数与列表一致", async () => {
   const found = await api.search(new URLSearchParams("limit=1&sort=stars"));
   const id = found.items[0].id;
@@ -151,7 +307,7 @@ test("单仓库详情：连线两端都指向它，计数与列表一致", async
   assert.ok(one.links.every((l) => l.id !== id), "不应出现自环");
 });
 
-test("v0.4.2 单仓库详情：同作者连线是完整关系（不受数据层星形拓扑省略影响）", async () => {
+test("v0.4.2 单仓库详情：同作者连线是完整关系（不受数据层星形拓扑省略影响）", async (t) => {
   const mesh = JSON.parse(await readFile(resolve(ROOT, "data/mesh.json"), "utf8"));
   const byOwner = new Map();
   for (const n of mesh.nodes ?? []) {
@@ -160,7 +316,10 @@ test("v0.4.2 单仓库详情：同作者连线是完整关系（不受数据层�
   }
   // 成员超过 8 的作者：数据层只写星形拓扑，正是"有的连得全、有的只连一个"的那批
   const [owner, list] = [...byOwner.entries()].filter(([, g]) => g.length > 8).sort((a, b) => b[1].length - a[1].length)[0] ?? [];
-  assert.ok(owner, "样本里应有成员超过 8 的作者");
+  if (!owner) {
+    t.skip("当前数据里没有成员 > 8 的作者（限扫数据集），跳过这项");
+    return;
+  }
 
   const target = list[0];
   const one = await api.one(owner, target.name);
@@ -262,10 +421,10 @@ test("颜色与名称校验：稳定、可预期", () => {
 });
 
 test("API 自描述：端点清单完整", () => {
-  const index = apiIndex("0.4.10");
-  assert.equal(index.version, "0.4.10");
+  const index = apiIndex("0.5.0");
+  assert.equal(index.version, "0.5.0");
   const paths = index.endpoints.map((e) => e.path).join(" ");
-  for (const need of ["/api/health", "/api/categories", "/api/repos", "/api/card", "/card/"]) {
+  for (const need of ["/api/health", "/api/categories", "/api/repos", "/api/ranking", "/api/card", "/card/"]) {
     assert.ok(paths.includes(need), "清单应包含 " + need);
   }
 });
@@ -314,6 +473,16 @@ test("HTTP：端点可用、类型正确、带 CORS 与缓存头", async () => {
   const cats = await fetch(base + "/api/categories");
   assert.equal(cats.status, 200);
   assert.ok((await cats.json()).sectors.length > 0);
+
+  const rankingRes = await fetch(base + "/api/ranking?limit=3");
+  assert.equal(rankingRes.status, 200, "榜单接口应可用");
+  const ranking = await rankingRes.json();
+  assert.ok(ranking.boards?.updated?.items?.length > 0, "HTTP 也要能拿到周更新榜");
+  assert.ok(ranking.boards.updated.items[0].updates >= 1, "HTTP 返回的行也要带更新次数");
+  assert.ok(typeof ranking.boards.updated.updatesSource === "string", "要带次数来源");
+  assert.ok(ranking.boards?.stars, "HTTP 也要能拿到 star 榜");
+  assert.equal(rankingRes.headers.get("access-control-allow-origin"), "*");
+  assert.match(rankingRes.headers.get("cache-control") ?? "", /max-age=300/);
 
   const list = await fetch(base + "/api/repos?limit=2");
   assert.equal(list.status, 200);

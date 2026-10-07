@@ -37,13 +37,21 @@ from dsh_mesh.config import (
     SAMPLE_RAW,
     SEGMENT_STATE,
     SNAPSHOT_DIR,
+    RELEASES_CACHE,
+    STAR_HISTORY,
+    UPDATE_LOG,
     README_CACHE,
     WHITELIST_TAGS,
 )
 from dsh_mesh.readmes import ReadmeIndex, fetch_batch as fetch_readmes
+from dsh_mesh import releases as rel
 from dsh_mesh.status import STATUS_FILE, next_run_at, write_status
 from dsh_mesh.segments import SegmentStore, segment_query
 from dsh_mesh.github import GitHubClient, load_token
+
+
+RELEASES_BUDGET = 300  # 每轮默认抓 300 个仓库的 releases（core 配额 5000/小时，留足余量）
+RELEASES_INTERVAL = 0.12  # 每次请求之间歇一下，别撞二级限流
 
 
 def tag_totals_from(state: dict) -> dict[str, int]:
@@ -215,6 +223,25 @@ def _core_looks_fresh(started: float, expected_nodes: int | None = None) -> bool
     return data.get("meta", {}).get("layout") == "precomputed"
 
 
+def _bin_looks_fresh(started: float, data_dir: Path | None = None) -> bool:
+    """二进制契约（mesh-core.bin / head.bin）是否也随本轮刷新了。
+
+    只看 mtime：内容正确性由编解码器的单测与往返比对保证（Python 侧不重复实现一遍格式解析）。
+    data_dir 可显式传入（测试用），默认取配置里的数据目录。
+    """
+    from dsh_mesh.config import MESH_JSON
+
+    base = Path(data_dir) if data_dir is not None else MESH_JSON.parent
+    for name in ("mesh-core.bin", "mesh-core.head.bin"):
+        path = base / name
+        try:
+            if not path.exists() or path.stat().st_mtime < started - 1:
+                return False
+        except OSError:
+            return False
+    return True
+
+
 def run_precompute(log, expected_nodes: int | None = None) -> None:
     """调 Node 工具预计算布局并给载荷瘦身（mesh-core.json + 详情分片）。
 
@@ -255,10 +282,13 @@ def run_precompute(log, expected_nodes: int | None = None) -> None:
         if result.returncode == 0:
             lines = [line for line in result.stdout.strip().splitlines() if line.strip()]
             return True, (lines[-1].strip() if lines else "")
-        # 崩在退出阶段也不影响产物：core 完整重写过（能解析、节点数对得上）就算成功
-        if _core_looks_fresh(started, expected_nodes):
-            return True, "产物已更新（子进程退出码 " + str(result.returncode) + "，退出阶段崩溃不影响结果）"
-        return False, result.stderr.strip()[:160] or ("退出码 " + str(result.returncode))
+        # 非零退出：core 可能已经写好了，但【二进制契约常常就停在崩溃点之前】——
+        # 事故复盘：mesh-core.json 一直更新，mesh-core.bin 被冻结了 40 小时，
+        # 而这里把退出码 1 记成"退出阶段崩溃不影响结果"，于是没人发现。
+        # 所以非零退出必须同时确认二进制契约也刷新了，才认成功。
+        if _core_looks_fresh(started, expected_nodes) and _bin_looks_fresh(started):
+            return True, "产物已更新（子进程退出码 " + str(result.returncode) + "，二进制契约已同步刷新）"
+        return False, (result.stderr.strip()[:160] or ("退出码 " + str(result.returncode))) + " / 二进制契约未刷新（mesh-core.bin 比本轮旧）"
 
     # 重试一次：core 冻结在上一小时就等于前端地图不再更新
     for index in (1, 2):
@@ -283,6 +313,58 @@ def load_from_store(args, log):
     raws = list(store.repos.values())
     log("离线重建：读入累积索引 " + str(len(raws)) + " 条记录（零网络请求）")
     return raws, tag_totals_from(store.state), None, {"mode": "store-rebuild", "token": "-"}
+
+
+def fetch_releases(args, mesh: dict, log) -> dict:
+    """按预算抓 releases（走 core 配额），并写回 data/cache/releases.json。
+
+    为什么单独一轮一步：搜索接口不返回 releases，只能一个仓库一次请求；
+    配额实测是"按认证身份一个桶"（同账号多令牌共享），所以这里只能限量 + 排优先级：
+    先抓"近 7 天推过 / 星标高 / 从没抓过或过期"的仓库（见 releases.pick_candidates）。
+
+    离线模式（--from-raw / --from-store）与 dry-run 一律跳过 —— 测试因此完全不碰网络。
+    """
+    budget = int(getattr(args, "releases_budget", 0) or 0)
+    if budget <= 0 or args.dry_run or args.from_raw or getattr(args, "from_store", False):
+        return {"enabled": False, "budget": budget}
+    payload = rel.load_releases(RELEASES_CACHE)
+    picked = rel.pick_candidates(payload, mesh.get("nodes") or [], limit=budget)
+    if not picked:
+        log("版本：本轮没有需要刷新的仓库（缓存里已有 " + str(len(payload.get("repos") or {})) + " 个）")
+        return {"enabled": True, "budget": budget, "picked": 0, "fetched": 0, "failed": 0, **rel.stats(payload)}
+    client = GitHubClient(token=load_token(), sleep=time.sleep)
+    fetched = failed = 0
+    for repo_id in picked:
+        if client.stats.core_remaining is not None and client.stats.core_remaining < rel.CORE_FLOOR:
+            log("版本：core 配额只剩 " + str(client.stats.core_remaining) + "，本轮提前收手（下一轮接着抓）")
+            break
+        try:
+            items = client.releases(repo_id)
+        except RuntimeError as err:
+            failed += 1
+            log("版本：" + repo_id + " 抓取失败：" + str(err)[:80])
+            continue
+        if items is None:
+            failed += 1
+            continue
+        rel.put(payload, repo_id, rel.slim_releases(items))
+        fetched += 1
+        time.sleep(RELEASES_INTERVAL)
+    size = rel.save_releases(payload, RELEASES_CACHE)
+    info = rel.stats(payload)
+    log(
+        "版本：本轮抓 " + str(fetched) + " 个仓库（失败 " + str(failed) + "）· 缓存 "
+        + str(info["repos"]) + " 个仓库 / " + str(info["versions"]) + " 个版本 · " + str(size // 1024) + "KB"
+    )
+    return {
+        "enabled": True,
+        "budget": budget,
+        "picked": len(picked),
+        "fetched": fetched,
+        "failed": failed,
+        "coreRemaining": client.stats.core_remaining,
+        **info,
+    }
 
 
 def run_once(args, log) -> dict:
@@ -390,6 +472,22 @@ def run_once(args, log) -> dict:
     summary["snapshotSkipped"] = path is None
     summary["diff"] = diff
 
+    # 星标历史环：按天记一个点（快照只留 KEEP_SNAPSHOTS 份，攒不出"周"窗口）。
+    # 前端「周 star 热榜」= 最近这个点与"约 7 天前"那个点的星标之差，真实观测值，不是估算。
+    history = snap.update_star_history(mesh, STAR_HISTORY)
+    summary["starHistory"] = {
+        "points": len(history["points"]),
+        "latest": history["points"][-1]["at"] if history["points"] else None,
+    }
+
+    # 更新日志：每轮采样"pushedAt 比上次前进了吗"，按天累计次数。
+    # 前端「周更新热榜」按它排序 —— GitHub 只给最后一次推送时间，"一周更新几次"只能这样观测。
+    update_log = snap.update_update_log(mesh, UPDATE_LOG)
+    summary["updateLog"] = {"days": len(update_log["days"]), "counted": update_log["lastRound"]["counted"]}
+
+    # 版本（releases）：搜索接口不返回，只能按仓库单独取（1 个仓库 = 1 次 core 配额）。
+    summary["releases"] = fetch_releases(args, mesh, log)
+
     limit_for_frontend(mesh, args.frontend_limit)
     mesh["meta"]["note"] = (
         f"每小时自动更新一次的快照（{utcnow()}）。"
@@ -443,6 +541,12 @@ def main(argv=None) -> int:
     parser.add_argument("--readme-budget", type=int, default=150, help="每轮抓多少个仓库的 README（供搜索 README 内容；0 = 完全关闭）")
     parser.add_argument("--readme-max-chars", type=int, default=2000, help="每个仓库保留的 README 摘要字符数（越大越全、索引越大）")
     parser.add_argument("--readme-min-stars", type=int, default=1, help="只索引星标 ≥ N 的仓库（默认 1：跳过 0 星长尾，索引约减半；设 0 = 全量）")
+    parser.add_argument(
+        "--releases-budget",
+        type=int,
+        default=RELEASES_BUDGET,
+        help="每轮最多抓多少个仓库的 releases（1 个仓库 = 1 次 core 配额；0 = 关闭）",
+    )
     parser.add_argument("--from-raw", action="store_true", help="用 data/sample-raw.json 离线复算，不发网络请求")
     parser.add_argument("--from-store", action="store_true", help="用累积索引 data/cache/repos.json 离线重建前端契约（改规则后立刻重算，不联网）")
     parser.add_argument("--dry-run", action="store_true", help="只算不写")

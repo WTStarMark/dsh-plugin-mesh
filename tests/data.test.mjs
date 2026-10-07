@@ -15,6 +15,9 @@ test("契约：meta / tags / clusters / nodes / edges 齐备", () => {
   assert.ok(Array.isArray(mesh.edges), "edges 必须是数组");
 });
 
+/** 名字收录源（v0.4.9）给这类仓库写的标记：它们没有捕获标签，只有名字里的 dsh- */
+const NAME_CAPTURED_TAG = "dsh-*（名字收录）";
+
 test("节点 id 唯一且必填字段完整", () => {
   const seen = new Set();
   for (const n of mesh.nodes) {
@@ -24,7 +27,13 @@ test("节点 id 唯一且必填字段完整", () => {
     assert.equal(typeof n.stars, "number");
     assert.ok(Number.isFinite(n.stars), "stars 非有限数: " + n.id);
     assert.ok(Array.isArray(n.topics), "topics 必须是数组: " + n.id);
-    assert.ok(Array.isArray(n.matchedTags) && n.matchedTags.length > 0, "matchedTags 不能为空: " + n.id);
+    // 名字收录源抓到的仓库（名字含 dsh-）本来就不挂捕获标签，primaryTag 会写成「dsh-*（名字收录）」。
+    // 契约：要么有命中标签，要么明确标出它是名字收录的。
+    const nameCaptured = n.primaryTag === NAME_CAPTURED_TAG;
+    assert.ok(
+      Array.isArray(n.matchedTags) && (n.matchedTags.length > 0 || nameCaptured),
+      "matchedTags 不能为空（名字收录的仓库应以 primaryTag 标明）: " + n.id + " primaryTag=" + JSON.stringify(n.primaryTag),
+    );
     assert.ok(typeof n.primaryTag === "string" && n.primaryTag.length > 0, "primaryTag 缺失: " + n.id);
   }
 });

@@ -167,6 +167,19 @@ export function renderRail(root, prepared, state, actions, view = {}) {
       ])
     : null;
 
+  // 以某个仓库为中心重建的扇形图：必须有明确的出口，否则用户只能靠 Esc 猜怎么回去
+  const centerBanner = view.centerId
+    ? el("div", { class: "focus-banner" }, [
+        el("div", {
+          class: "fb-text",
+          text: (view.arms ?? []).length
+            ? "以 " + view.centerId + " 为中心的扇形图（只画它的关联）"
+            : view.centerId + " 是孤点：没有已收录的关联仓库，画面里只有它自己",
+        }),
+        el("button", { class: "key", text: "← 返回全景", on: { click: () => actions.exitCenter() } }),
+      ])
+    : null;
+
   const groupRows = groups.map((g) =>
     el(
       "div",
@@ -220,7 +233,9 @@ export function renderRail(root, prepared, state, actions, view = {}) {
       ),
       el("div", {
         class: "note",
-        text: "圆心固定为官方仓库 " + hubId + "。每个分类对应一束柔和的光，方向之间等角分布；扇区内离散随机散布，星标越多整体越靠近圆心。",
+        text: view.centerId
+          ? "当前圆心是 " + view.centerId + "（双击某个仓库而来）：画面里只有它的关联仓库，扇区按上面的依据划分。Esc 或左栏横幅「← 返回全景」可回到以 " + hubId + " 为圆心的全景。"
+          : "圆心固定为官方仓库 " + hubId + "。每个分类对应一束柔和的光，方向之间等角分布；扇区内离散随机散布，星标越多整体越靠近圆心。双击任意仓库＝以它为中心另建一张扇形图。",
       }),
     ]);
   const tagsSec = sec("捕获标签", [
@@ -312,14 +327,18 @@ export function renderRail(root, prepared, state, actions, view = {}) {
       ]),
       el("div", { class: "note", text: "筛选只做淡化、不移除节点：布局位置保持不变，便于前后对照。" }),
     ]);
-  const sectorsSec = sec(view.focusCategory ? "细枝分类" : "功能扇区", [
-      view.focusCategory ? subRows : groupRows,
-      el("div", {
-        class: "note",
-        text: view.focusCategory
-          ? "已放大到「" + (view.focusLabel ?? view.focusCategory) + "」：整个圆都是它，扇区是它的细枝分类。点细枝可高亮，Esc 或上方按钮返回全局。"
-          : "共 " + groups.length + " 个扇区，每个约 " + (groups.length ? (360 / groups.length).toFixed(1) : "0") + "°。点击可放大该扇区（圆内再按细枝分类铺开）。",
-      }),
+  const sectorTitle = view.focusCategory ? "细枝分类" : view.centerId ? "本图扇区" : "功能扇区";
+  const armCount = (view.arms ?? []).length;
+  const sectorsNote = view.centerId
+    ? armCount
+      ? "以 " + view.centerId + " 为圆心：这里列的是它的关联仓库分出来的 " + armCount + " 个扇区（每个约 " + (360 / armCount).toFixed(1) + "°）。点扇区只做高亮；想换圆心就在画布上双击另一个球。"
+      : "以 " + view.centerId + " 为圆心：它没有任何已收录的关联仓库（孤点），没有扇区可铺。Esc 或上方「← 返回全景」回去。"
+    : view.focusCategory
+      ? "已放大到「" + (view.focusLabel ?? view.focusCategory) + "」：整个圆都是它，扇区是它的细枝分类。点细枝可高亮，Esc 或上方按钮返回全局。"
+      : "共 " + groups.length + " 个扇区，每个约 " + (groups.length ? (360 / groups.length).toFixed(1) : "0") + "°。点击可放大该扇区（圆内再按细枝分类铺开）。";
+  const sectorsSec = sec(sectorTitle, [
+      view.focusCategory || view.centerId ? subRows : groupRows,
+      el("div", { class: "note", text: sectorsNote }),
     ]);
   const hubsSec = hubs.length
     ? sec("高频共享标签", [
@@ -330,7 +349,7 @@ export function renderRail(root, prepared, state, actions, view = {}) {
 
   // 左栏顺序（v0.4.3 用户指定）：总览 → 功能扇区 → 筛选 → 其余照常
   // （其余 = 扇区划分依据 / 捕获标签 / 高频共享标签，保持它们原本的相对顺序）
-  root.replaceChildren(...[focusBanner, overviewSec, sectorsSec, filterSec, basisSec, tagsSec, hubsSec].filter(Boolean));
+  root.replaceChildren(...[focusBanner, centerBanner, overviewSec, sectorsSec, filterSec, basisSec, tagsSec, hubsSec].filter(Boolean));
 }
 
 export function renderInspector(root, prepared, state, actions, view = {}) {
@@ -363,7 +382,7 @@ export function renderInspector(root, prepared, state, actions, view = {}) {
   const hintsSec = sec("操作提示", [
       el("div", {
         class: "note",
-        text: "· 滚轮缩放，按住拖拽平移，单击选中仓库，双击聚焦其关联仓库\n· 左侧筛选只淡化、不移除节点，位置保持不变\n· 琥珀色虚线圆环表示疑似噪声，等待人工复核\n· 扇区标签沿中轴朝外，通常越靠近圆心星标越高",
+        text: "· 滚轮缩放，按住拖拽平移，单击选中仓库，双击以该仓库为中心重建一张扇形图\n· 右栏「关联」里点一个仓库：选中它并把镜头移过去（自动居中显示）\n· 左侧筛选只淡化、不移除节点，位置保持不变\n· 琥珀色虚线圆环表示疑似噪声，等待人工复核\n· 扇区标签沿中轴朝外，通常越靠近圆心星标越高",
     }),
   ]);
 
@@ -461,7 +480,11 @@ export function renderInspector(root, prepared, state, actions, view = {}) {
         el("div", { class: "note", text: (EDGE_STYLES[type]?.label ?? type) + " · " + list.length + " 个" }),
         ...list.slice(0, 14).map((nb) => {
           const other = prepared.byId.get(nb.id);
-          return el("div", { class: "neigh", on: { click: () => actions.selectRepo(nb.id) } }, [
+          return el("div", {
+            class: "neigh",
+            title: "点击：选中它并把镜头移到它身上（自动居中显示）；若它不在当前画面里，则改为以它为中心另建一张扇形图",
+            on: { click: () => actions.openRelated(nb.id) },
+          }, [
             el("span", { class: "dot", style: { background: colorOfTag(other?.primaryTag) } }),
             el("span", { class: "nm", text: nb.id }),
             el("span", {

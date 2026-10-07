@@ -13,6 +13,7 @@ import { PALETTES, themeOf, DEFAULT_PALETTE, DEFAULT_MODE } from "./palettes.js"
 import { buildLinks, countByType } from "./links.js";
 import { createGraphView } from "./graph.js";
 import { createStatusWidget } from "./status.js";
+import { createRankingBoard } from "./ranking.js";
 
 
 const dom = {
@@ -36,6 +37,11 @@ const dom = {
   canvas: document.getElementById("graph"),
   statusChip: document.getElementById("status"),
   statusPanel: document.getElementById("status-panel"),
+  trophy: document.getElementById("trophy"),
+  ranking: document.getElementById("ranking"),
+  rankingTabs: document.getElementById("ranking-tabs"),
+  rankingBody: document.getElementById("ranking-body"),
+  rankingClose: document.getElementById("ranking-close"),
 };
 
 /**
@@ -51,6 +57,24 @@ const statusWidget = createStatusWidget({
       ? () =>
           fetch("/api/status").then((res) => (res.ok ? res.json() : null))
       : null,
+});
+
+/**
+ * 榜单弹窗：画布顶端那枚奖杯（正好夹在左栏与右栏之间）。
+ * 两个榜单都由 GET /api/ranking 算好：周更新热榜（最近推送）、周 star 热榜（星标历史增量）。
+ * 点某一行 = 选中它并把镜头移过去（与右栏「关联」同一套动作）。
+ */
+const rankingBoard = createRankingBoard({
+  button: dom.trophy,
+  modal: dom.ranking,
+  tabs: dom.rankingTabs,
+  body: dom.rankingBody,
+  close: dom.rankingClose,
+  fetcher:
+    typeof fetch === "function"
+      ? () => fetch("/api/ranking?limit=20").then((res) => (res.ok ? res.json() : null))
+      : null,
+  onPick: (id) => actions.openRelated(id),
 });
 
 /** 圆心：官方仓库 */
@@ -75,6 +99,7 @@ const state = {
   archived: "all",
   clusterFocus: null,
   focusCategory: null, // 单扇区放大：非空时只铺该分类，扇区变成它的细枝分类
+  centerId: null, // 以某个仓库为中心重建扇形图（null = 以官方仓库为圆心）
   query: "",
   searchHits: null, // 搜索命中集合：画布据此从圆心画放射线
   readmeHits: null, // README 正文命中（服务端返回，只给 id）：与本地命中合并后一起高亮/画线
@@ -154,7 +179,7 @@ const LAYOUT_CACHE_MAX = 6;
 export const internalStats = { layoutBuilds: 0, layoutHits: 0 };
 
 function layoutCacheKey() {
-  return [state.seed, state.groupBy, state.focusCategory ?? "-"].join("|");
+  return [state.seed, state.groupBy, state.focusCategory ?? "-", state.centerId ?? "-"].join("|");
 }
 
 function clearLayoutCache() {
@@ -177,6 +202,22 @@ function buildLayout() {
 
 function buildLayoutUncached() {
   const focus = state.focusCategory;
+  // 以某个仓库为中心重建扇形图（双击球 / 从「关联」跳到布局外的仓库）：
+  // 节点 = 它 + 它的关联（直接关联 + 同作者兄弟，口径与右栏「关联」一致），
+  // 扇区 = 这些关联按当前"划分依据"分出来的分类。
+  const center = state.centerId;
+  if (!focus && center && center !== HUB_ID) {
+    const keep = new Set([center, ...(prepared.adjacency.get(center) ?? []).map((n) => n.id), ...ownerSiblings(prepared, center)]);
+    const members = prepared.nodes.filter((n) => keep.has(n.id));
+    return createSectorLayout({
+      nodes: members,
+      centerId: center,
+      groupOf: groupKeyOf,
+      labelOf: labelOfGroup,
+      centerLabel: "焦点仓库",
+      seed: state.seed,
+    });
+  }
   // 全局视图且没有点过"重排"→ 直接用预计算坐标（这是加载慢/卡顿的主因，直接归零）
   if (!focus && precomputed && !state.localLayout) return precomputed;
   if (focus) {
@@ -224,9 +265,12 @@ function viewInfo() {
       : countByType(links, "resonance"),
   };
   const arms = (layout?.arms ?? []).map((arm) => ({ id: arm.id, label: arm.label, count: arm.count }));
+  // 只有布局里真的有这个圆心时才算"正处在以它为中心的扇形图"（避免状态与实际画面脱节）
+  const centerId = state.centerId && layout?.index?.has(state.centerId) ? state.centerId : null;
   return {
     groupBy: state.groupBy,
     hubId: HUB_ID,
+    centerId,
     groups: computeGroups(),
     armOf,
     arms,
@@ -280,6 +324,7 @@ function resetView() {
   state.hideNoise = false;
   state.archived = "all";
   state.clusterFocus = null;
+  state.centerId = null; // 重置筛选＝回到以官方仓库为圆心的全景
   state.query = "";
   state.neighborFocus = null;
   state.selectedId = null;
@@ -365,7 +410,20 @@ function updateStatus(highlight) {
   const hit = highlight ? highlight.size : prepared.nodes.length;
   const arms = layout && Array.isArray(layout.arms) ? layout.arms.length : 0;
   const by = state.groupBy === "language" ? "语言" : "功能分类";
-  const head = "圆心：" + HUB_ID + " · 共 " + arms + " 个扇区，每个 " + (arms ? (360 / arms).toFixed(1) : "0") + "°，按" + by + "划分";
+  const byLine = "按" + by + "划分";
+  const title = "滚轮缩放 · 拖拽平移 · 单击选中 · 双击以该仓库为中心重建扇形图";
+  // 以某个仓库为中心时，画面里只剩它的关联：这时报"命中 1.7 万"会让人以为筛选坏了，
+  // 所以单独一段文案，说明这张图有多大、怎么回去。
+  if (state.centerId && layout && layout.index && layout.index.has(state.centerId)) {
+    const related = Math.max(0, (layout.size ?? 0) - 1);
+    const body = related === 0
+      ? "它是孤点：没有任何已收录的关联仓库"
+      : "它的关联 " + related + " 个仓库，分 " + arms + " 个扇区" + (arms ? "（每个 " + (360 / arms).toFixed(1) + "°）" : "") + "，" + byLine;
+    dom.hint.textContent = "圆心：" + state.centerId + " · " + body + " · 双击别的仓库可再聚焦，Esc 或左栏「← 返回全景」回到全图";
+    dom.hint.title = title + " · 当前是以 " + state.centerId + " 为中心重建的扇形图：画面里只有它的关联仓库";
+    return;
+  }
+  const head = "圆心：" + HUB_ID + " · 共 " + arms + " 个扇区，每个 " + (arms ? (360 / arms).toFixed(1) : "0") + "°，" + byLine;
   // 搜索时把命中数与放射线情况讲清楚：命中太多就不画线（见 RAY_HIT_LIMIT），否则用户会以为坏了
   let rays = "";
   if (state.query && state.searchHits) {
@@ -377,7 +435,8 @@ function updateStatus(highlight) {
   }
   dom.hint.textContent = head + " · 当前命中 " + hit + " / " + prepared.nodes.length + " 个仓库" + rays;
   dom.hint.title =
-    "滚轮缩放 · 拖拽平移 · 单击选中 · 双击聚焦其关联仓库" +
+    title +
+    " · 右栏「关联」里点一个仓库会自动把它居中" +
     (state.query ? " · 搜索命中超过 " + RAY_HIT_LIMIT + " 个时不画放射线（只高亮），避免浏览器卡顿" : "") +
     (state.neighborFocus ? " · 当前「只看关联仓库」：点画布空白处或按 Esc 即可退出" : "");
 }
@@ -395,6 +454,35 @@ const actions = {
   toggleTag(id) {
     if (state.tags.has(id)) state.tags.delete(id);
     else state.tags.add(id);
+    apply();
+  },
+  /** 右栏「关联」里点一个仓库：选中它，并把镜头移到它身上（自动居中显示） */
+  openRelated(id) {
+    if (!id || !prepared?.byId?.get(id)) return;
+    actions.selectRepo(id);
+    // 目标已经画在当前这张图里 → 只移动镜头，保留全景上下文；
+    // 目标不在（例如正处在别的仓库的扇形图中）→ 只居中会看到一片空白，
+    // 这时改为以它为中心重建扇形图，保证它一定落在画面正中央。
+    if (layout?.index?.has(id)) actions.centerOn(id);
+    else actions.centerRepo(id);
+  },
+  /** 双击球：以它为中心重建一张扇形图（圆心 = 它，扇区 = 它的关联按当前划分依据分出的分类） */
+  centerRepo(id) {
+    if (!id || !prepared?.byId?.get(id)) return;
+    // 双击官方仓库＝回到以官方仓库为圆心的全景：它自己就是全景的圆心，没有"以它为中心"的小图可建
+    state.centerId = id === HUB_ID ? null : id;
+    state.selectedId = id;
+    state.focusCategory = null;
+    state.clusterFocus = null;
+    state.neighborFocus = null;
+    rebuildLayout();
+    apply();
+  },
+  /** 退出"以某仓库为中心"的扇形图，回到以官方仓库为圆心的全景（选中项保留） */
+  exitCenter() {
+    if (!state.centerId) return;
+    state.centerId = null;
+    rebuildLayout();
     apply();
   },
   setMinStars(value) {
@@ -437,6 +525,7 @@ const actions = {
     // 放大后默认显示该分类下的【全部】节点：clusterFocus 保持为空，
     // 只有再点某个细枝（focusArm）才收窄到单支。
     state.clusterFocus = null;
+    state.centerId = null; // 放大某个分类＝离开"以某仓库为中心"的扇形图
     // 只在「按功能分类」时放大：选中的分类铺满整圆，细枝成为新扇区
     state.focusCategory = id && state.groupBy === "category" ? id : null;
     layout = buildLayout();
@@ -672,13 +761,22 @@ function bindChrome() {
     if (!typing && ev.key === "[") { state.hideRail = !state.hideRail; applyPanels(); return; }
     if (!typing && ev.key === "]") { state.hideDossier = !state.hideDossier; applyPanels(); return; }
     if (ev.key === "Escape") {
+      // 榜单弹窗在最上层：先关它，再轮到状态浮窗与放大退回
+      if (rankingBoard.isOpen()) {
+        rankingBoard.setOpen(false);
+        return;
+      }
       if (statusWidget.isOpen()) {
         statusWidget.setOpen(false);
         return;
       }
-      // 有放大就先退回全局，其次才清选中
+      // 退出顺序：先退出单扇区放大，再退出"以某仓库为中心"的扇形图，最后才是清选中
       if (state.focusCategory) {
         actions.focusGroup(null);
+        return;
+      }
+      if (state.centerId) {
+        actions.exitCenter(); // 选中项保留：右栏档案还在，方便顺着看回去
         return;
       }
       state.selectedId = null;
@@ -801,8 +899,8 @@ function viewHooks() {
       panels?.renderTooltip(dom.tooltip, hoverNode, pos, dom.stage.getBoundingClientRect());
     },
     onFocus: (id) => {
-      actions.focusNeighbors(id);
-      actions.selectRepo(id);
+      // 双击球：以该仓库为中心重建扇形图（「只看关联仓库」仍可从右栏按钮进入）
+      actions.centerRepo(id);
     },
     onViewChange: ({ k }) => {
       if (dom.telemetry) dom.telemetry.textContent = "缩放 " + k.toFixed(2);

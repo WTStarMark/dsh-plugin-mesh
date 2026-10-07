@@ -30,7 +30,7 @@ import { createApi, apiIndex, validNamePart } from "./api.mjs";
 import { renderPreviewSvg, sceneFromCore } from "./preview-svg.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const VERSION = "0.4.10";
+const VERSION = "0.5.0";
 /** 卡片默认去处（线上站点），可用环境变量 SITE_URL 或请求参数 ?link= 覆盖 */
 const SITE_URL = process.env.SITE_URL ?? "http://104.129.51.126/";
 
@@ -103,7 +103,28 @@ function hostAllowed(header) {
 const STATS_FILE = process.env.STATS_FILE ?? join(ROOT, "data", "stats.json");
 const ONLINE_WINDOW_MS = 45_000; // 45 秒内有心跳算在线
 const MAX_SEEN = 20000; // 见过的人最多记这么多，防止文件无限膨胀
-const RATE_LIMIT = { windowMs: 60_000, max: 60, hits: new Map() };
+// ---------- 限流：令牌桶（按 IP，带成本权重与标准头部）----------
+// 旧实现是固定窗口 + "超 5000 IP 就清空整表"：前者在窗口边界会放行双倍流量，
+// 后者等于给刷 IP 的人一个"重置所有人额度"的开关。换成令牌桶，并且：
+//   · 成本权重：/api/ranking 要读 mesh + 快照环 + 更新日志 + 版本缓存再算榜单，
+//     比 /api/health 贵一个量级 —— 按权重扣令牌，重接口先被限住；
+//   · 标准头部：每个 /api 响应都带 X-RateLimit-*，429 另给 Retry-After（秒）；
+//   · 内存护栏：只清理闲置 / 最旧的桶，绝不清空整表。
+// 环境变量可调（测试用得上）：RATE_LIMIT_MAX（桶容量，默认 90）、RATE_LIMIT_REFILL（每秒回填，默认 1.5）
+const RATE = {
+  capacity: Math.max(1, Number(process.env.RATE_LIMIT_MAX ?? 90) || 90),
+  refillPerSec: Math.max(0.01, Number(process.env.RATE_LIMIT_REFILL ?? 1.5) || 1.5),
+  maxBuckets: 20000,
+  buckets: new Map(),
+};
+
+/** 各接口的令牌成本：贵的多扣，免得一个爬虫把榜单接口当免费 CDN */
+function apiCost(pathname) {
+  if (pathname === "/api/ranking") return 5; // 最贵：多份缓存 + 排序 + 版本缓存
+  if (pathname.startsWith("/api/card/")) return 4; // 卡片 SVG：现渲染
+  if (pathname === "/api/repos" || pathname === "/api/categories") return 2;
+  return 1;
+}
 
 function loadStats() {
   try {
@@ -150,20 +171,50 @@ function pruneSeen(now) {
 }
 
 function clientIp(req) {
+  // 默认只信 socket 地址：X-Forwarded-For 客户端可以随便伪造，除非明确挂了反向代理（TRUST_PROXY=1）
+  if (process.env.TRUST_PROXY === "1") {
+    const xff = String(req.headers["x-forwarded-for"] ?? "").split(",")[0].trim();
+    if (xff) return xff;
+  }
   return String(req.socket.remoteAddress ?? "?");
 }
 
-function rateLimited(req) {
+/** 内存护栏：先丢"已回满且闲置一分钟"的桶；仍超上限就丢最旧的一批（绝不清空整表） */
+function sweepBuckets(now) {
+  for (const [ip, b] of RATE.buckets) {
+    if (b.tokens >= RATE.capacity - 1e-6 && now - b.at > 60_000) RATE.buckets.delete(ip);
+  }
+  if (RATE.buckets.size <= RATE.maxBuckets) return;
+  const oldest = [...RATE.buckets.entries()]
+    .sort((a, b) => a[1].at - b[1].at)
+    .slice(0, RATE.buckets.size - RATE.maxBuckets);
+  for (const [ip] of oldest) RATE.buckets.delete(ip);
+}
+
+/** 取令牌：返回 { ok, headers }，成本按接口权重扣。 */
+function takeToken(req, pathname) {
   const now = Date.now();
   const ip = clientIp(req);
-  const entry = RATE_LIMIT.hits.get(ip);
-  if (!entry || now > entry.resetAt) {
-    RATE_LIMIT.hits.set(ip, { count: 1, resetAt: now + RATE_LIMIT.windowMs });
-    if (RATE_LIMIT.hits.size > 5000) RATE_LIMIT.hits.clear();
-    return false;
+  let bucket = RATE.buckets.get(ip);
+  if (!bucket) {
+    bucket = { tokens: RATE.capacity, at: now };
+    RATE.buckets.set(ip, bucket);
   }
-  entry.count += 1;
-  return entry.count > RATE_LIMIT.max;
+  bucket.tokens = Math.min(RATE.capacity, bucket.tokens + ((now - bucket.at) / 1000) * RATE.refillPerSec);
+  bucket.at = now;
+  const cost = apiCost(pathname);
+  const ok = bucket.tokens >= cost;
+  if (ok) bucket.tokens -= cost;
+  if (RATE.buckets.size > RATE.maxBuckets) sweepBuckets(now);
+  const secondsToFull = Math.ceil((RATE.capacity - bucket.tokens) / RATE.refillPerSec);
+  const headers = {
+    "x-ratelimit-limit": String(RATE.capacity),
+    "x-ratelimit-remaining": String(Math.max(0, Math.floor(bucket.tokens))),
+    "x-ratelimit-reset": String(Math.ceil(now / 1000) + secondsToFull),
+    "x-ratelimit-cost": String(cost),
+  };
+  if (!ok) headers["retry-after"] = String(Math.max(1, Math.ceil(cost / RATE.refillPerSec)));
+  return { ok, headers };
 }
 
 /**
@@ -293,9 +344,24 @@ function readBody(req, limit = 1024) {
 }
 
 async function handleApi(req, res, method, pathname, url) {
-  if (rateLimited(req)) {
-    sendJson(res, { error: "请求过于频繁" }, 429);
-    return;
+  // 预检（OPTIONS）不扣令牌：它只是浏览器问一句能不能跨域
+  if (method !== "OPTIONS") {
+    const gate = takeToken(req, pathname);
+    for (const [key, value] of Object.entries(gate.headers)) res.setHeader(key, value);
+    if (!gate.ok) {
+      sendJson(
+        res,
+        {
+          error: "请求过于频繁",
+          retryAfter: Number(gate.headers["retry-after"]),
+          cost: Number(gate.headers["x-ratelimit-cost"]),
+          hint: "重接口（/api/ranking 记 5 个令牌）请按 Retry-After 退避；数据本身 5 分钟缓存，不必高频拉",
+        },
+        429,
+        CORS,
+      );
+      return;
+    }
   }
   if (method === "OPTIONS") {
     res.writeHead(204, { ...CORS, ...SECURITY_HEADERS });
@@ -334,6 +400,11 @@ async function handleApi(req, res, method, pathname, url) {
   }
   if (pathname === "/api/categories") {
     sendJson(res, await api.categories(), 200, { ...API_CACHE, ...CORS });
+    return;
+  }
+  if (pathname === "/api/ranking") {
+    // 榜单：周更新热榜 + 周 star 热榜。数据变了才变，跟着其它数据接口走 5 分钟公共缓存
+    sendJson(res, await api.ranking(url.searchParams), 200, { ...API_CACHE, ...CORS });
     return;
   }
   if (pathname === "/api/search") {
@@ -585,7 +656,10 @@ server.listen(PORT, HOST, () => {
   const actual = server.address().port;
   console.log("dsh-plugin-mesh 前端原型: http://" + HOST + ":" + actual + "/");
   console.log("白名单路径: /  /index.html  /styles.css  /src/*.js  /data/mesh.json");
-  console.log("接口: GET /api · /api/health · /api/categories · /api/repos · /api/repos/:owner/:name");
+  console.log("接口: GET /api · /api/health · /api/categories · /api/repos · /api/repos/:owner/:name · /api/ranking");
+  console.log(
+    "限流: " + RATE.capacity + " 令牌/分钟/IP（回填 " + RATE.refillPerSec + "/秒；/api/ranking 记 " + apiCost("/api/ranking") + " 个，卡片记 " + apiCost("/api/card/x/y.svg") + " 个）",
+  );
   console.log("      GET /api/card/:owner/:name.svg（卡片）· /card/:owner/:name（分享页）");
   console.log("      GET /api/stats · POST /api/ping（访问数 / 同时在线）");
   if (process.env.ALLOW_HOSTS) console.log("额外放行的 Host: " + process.env.ALLOW_HOSTS);

@@ -436,3 +436,108 @@ input[type="range"]::-moz-range-thumb {
   font-family: var(--font-code); font-size: 12px;
 }
 .num-in:focus { outline: none; border-color: var(--accent); }
+
+/* ---------------- 榜单：顶栏那枚奖杯（正好夹在「左栏」「右栏」之间）+ 弹窗 ---------------- */
+.trophy-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 30px; padding: 0; border-radius: var(--r-sm);
+  border: 1px solid var(--border-l1); background: var(--bg-layer-1); color: var(--label-2);
+  transition: background .12s, color .12s, border-color .12s;
+}
+.trophy-btn:hover { background: var(--hover); color: var(--label-1); }
+.trophy-btn[aria-expanded="true"] { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-soft); }
+.trophy-btn i { display: inline-flex; }
+.trophy-btn svg { width: 16px; height: 16px; display: block; }
+
+/* 弹窗：遮罩 + 卡片，居中；手机端几乎占满 */
+.modal { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; padding: 24px; }
+.modal[hidden] { display: none; }
+.modal-mask { position: absolute; inset: 0; background: rgba(10, 22, 40, .45); backdrop-filter: blur(3px); }
+.modal-card {
+  position: relative; display: flex; flex-direction: column;
+  width: min(620px, 100%); max-height: min(78vh, 660px);
+  background: var(--bg-layer-1); border: 1px solid var(--border-l2); border-radius: var(--r-lg);
+  box-shadow: 0 24px 64px rgba(12, 30, 60, .3); overflow: hidden;
+  animation: modal-in .16s ease-out;
+}
+@keyframes modal-in { from { opacity: 0; transform: translateY(6px) scale(.995); } to { opacity: 1; transform: none; } }
+.modal-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 14px; border-bottom: 1px solid var(--border-l1); background: var(--sidebar);
+}
+.modal-head h3 { margin: 0; font-size: 14px; font-weight: 600; flex: none; letter-spacing: .2px; }
+.modal-seg { flex: 1 1 auto; max-width: 300px; margin-left: auto; }
+/* 列表上下都不放文字：口径与数据新旧挂在悬停提示里（见 src/ranking.js 的 boardCaption/footCaption） */
+.modal-body { overflow-y: auto; padding: 10px; flex: 1 1 auto; min-height: 0; overscroll-behavior: contain; }
+
+/* 榜单行：名次徽章 + 头像 + 仓库 + 指标；左边一条按指标长度铺的底光 */
+.rank-row {
+  /* 列宽必须固定（除"仓库名"那一列）：只要有一列 auto，每行就会被自己的内容挤出不同宽度，
+     趋势图随之左右参差。固定列宽 = 所有趋势图严格落在同一竖线上。 */
+  position: relative; display: grid; grid-template-columns: 30px 34px minmax(0, 1fr) 68px 108px;
+  align-items: center; gap: 10px; padding: 8px 10px; border-radius: var(--r-sm); cursor: pointer;
+}
+.rank-row + .rank-row { margin-top: 2px; }
+.rank-row:hover { background: var(--hover); }
+.rank-row > * { position: relative; }
+.rank-row .rk {
+  width: 24px; height: 24px; display: grid; place-items: center; border-radius: 8px;
+  font-family: var(--font-code); font-size: 11.5px; color: var(--label-3); background: var(--bg-layer-2);
+}
+.rank-row.top1 .rk { background: linear-gradient(135deg, #f7c948, #e09b00); color: #4a3200; font-weight: 700; }
+.rank-row.top2 .rk { background: linear-gradient(135deg, #d9e0ea, #a8b5c6); color: #2b3644; font-weight: 700; }
+.rank-row.top3 .rk { background: linear-gradient(135deg, #e8bd8e, #c98a4b); color: #42280e; font-weight: 700; }
+.rank-row .av {
+  width: 30px; height: 30px; border-radius: 9px; background: var(--bg-layer-2);
+  object-fit: cover; display: block; border: 1px solid var(--border-l1);
+}
+.rank-row .who { min-width: 0; }
+.rank-row .who .line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+/* 最新版本号：小胶囊，预发布用告警色区分 */
+.rank-row .ver {
+  flex: none; font-family: var(--font-code); font-size: 10.5px; color: var(--label-2);
+  background: var(--bg-layer-2); border: 1px solid var(--border-l1); border-radius: 999px; padding: 0 6px;
+}
+.rank-row .ver.pre { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 35%, transparent); }
+.rank-row .who b { display: block; font-size: 12.5px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rank-row .who span { display: block; max-width: 100%; color: var(--label-3); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px; }
+/* 近 7 日趋势柱：三种状态分得开，且全榜同一把尺子（柱高 = 值 / 全榜峰值 × 18px）
+   实心 = 有观测（峰值柱更深）· 浅底座 = 当天 0 次 · 虚线底座 = 当天没观测 */
+.spark {
+  position: relative; display: flex; align-items: flex-end; gap: 2px; width: 64px; height: 26px; flex: none;
+  padding-top: 2px; border-bottom: 1px solid var(--border-l1); /* 统一基线：所有行的柱子坐同一条线 */
+}
+/* 跨 N 天的累计：一根压底的宽条，覆盖它实际跨过的那几个槽位（不是某一根日柱） */
+.spark-span {
+  position: absolute; bottom: 0; height: 6px; border-radius: 3px;
+  background: var(--accent); opacity: .28; pointer-events: auto;
+}
+.spark:hover .spark-span { opacity: .5; }
+.spark-bar { flex: 1 1 0; min-width: 0; height: 3px; border-radius: 2px 2px 0 0; background: var(--accent); opacity: .6; }
+.spark-bar.peak { opacity: 1; }
+.spark-bar.zero { background: var(--border-l2); opacity: 1; }
+.spark-bar.none { background: transparent; border-bottom: 2px dashed var(--border-l2); opacity: 1; }
+.spark-empty { opacity: .4; }
+.rank-row:hover .spark-bar { opacity: 1; }
+.rank-row:hover .spark-bar.zero, .rank-row:hover .spark-bar.none { opacity: 1; }
+
+.rank-row .metric { text-align: right; white-space: nowrap; min-width: 0; overflow: hidden; }
+.rank-row .metric b, .rank-row .metric span { overflow: hidden; text-overflow: ellipsis; }
+.rank-row .metric b { display: block; font-family: var(--font-code); font-size: 14px; font-weight: 600; color: var(--accent); }
+.rank-row .metric span { display: block; color: var(--label-3); font-size: 10.5px; margin-top: 1px; }
+.rank-row.top1 .metric b, .rank-row.top2 .metric b, .rank-row.top3 .metric b { font-size: 15px; }
+.rank-row .tag-up {
+  display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 999px; font-size: 10.5px;
+  color: var(--accent); background: var(--accent-soft); vertical-align: 1px;
+}
+.rank-empty { padding: 30px 12px; text-align: center; color: var(--label-3); font-size: 12.5px; line-height: 1.7; }
+
+/* 手机端：弹窗几乎占满屏 */
+@media (max-width: 900px) {
+  .modal { padding: 12px; }
+  .modal-card { width: 100%; max-height: 86vh; }
+  .modal-head { flex-wrap: wrap; }
+  .modal-seg { max-width: none; }
+  .rank-row { grid-template-columns: 26px 30px minmax(0, 1fr) 58px 96px; gap: 8px; padding: 7px 8px; }
+  .spark { width: 54px; height: 24px; }
+}

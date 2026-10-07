@@ -59,7 +59,7 @@ after(() => {
 const status = async (path, options = {}) => (await fetch(base + path, options)).status;
 
 test("前端真正需要的资源可访问", async () => {
-  for (const path of ["/", "/index.html", "/styles.css", "/src/app.js", "/src/cache.js", "/data/mesh.json"]) {
+  for (const path of ["/", "/index.html", "/styles.css", "/src/app.js", "/src/cache.js", "/src/ranking.js", "/data/mesh.json"]) {
     assert.equal(await status(path), 200, path + " 应可访问");
   }
 });

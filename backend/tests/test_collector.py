@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import shutil
 import sys
+import time
 import unittest
 import urllib.error
 from pathlib import Path
@@ -18,7 +19,9 @@ BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND))
 
 from dsh_mesh import snapshot as snap  # noqa: E402
+from dsh_mesh import releases as rel  # noqa: E402
 from dsh_mesh.build import build_mesh, limit_for_frontend, relevance_score  # noqa: E402
+from dsh_mesh import build as build_mod  # noqa: E402
 from dsh_mesh.classify import apply_categories, classify_node  # noqa: E402
 from dsh_mesh.config import HUB_ID, SAMPLE_MESH, SAMPLE_RAW, WHITELIST_TAGS  # noqa: E402
 from dsh_mesh.github import GitHubClient, load_token  # noqa: E402
@@ -222,6 +225,31 @@ def fake_repo(owner: str, name: str, stars: int = 0, topics=("dsh", "dsh-plugin"
     }
 
 
+class PrecomputeGuardTest(unittest.TestCase):
+    """预计算产物守门（v0.5.0）：二进制契约没刷新就不算成功。"""
+
+    def test_bin_looks_fresh_requires_both_files_and_fresh_mtime(self):
+        import os
+        import tempfile
+        import time
+
+        import collect
+
+        with tempfile.TemporaryDirectory() as tmp:
+            from pathlib import Path as _Path
+
+            d = _Path(tmp)
+            started = time.time()
+            self.assertFalse(collect._bin_looks_fresh(started, d), "两个文件都不存在时应判未刷新")
+            (d / "mesh-core.bin").write_bytes(b"x")
+            self.assertFalse(collect._bin_looks_fresh(started, d), "只刷新一个也不算")
+            (d / "mesh-core.head.bin").write_bytes(b"x")
+            self.assertTrue(collect._bin_looks_fresh(started, d), "两个都刷新了才算")
+            old = started - 3600
+            os.utime(d / "mesh-core.bin", (old, old))
+            self.assertFalse(collect._bin_looks_fresh(started, d), "契约比本轮旧 = 未刷新（就是被冻结的情形）")
+
+
 class NoiseBlacklistTest(unittest.TestCase):
     """噪声黑名单：>300 个仓库且 0 星占比 >98%（主判据），或 >200 个仓库且全是 0 星（老判据）=> 剔除。"""
 
@@ -408,10 +436,29 @@ class PrecomputeRetryTest(unittest.TestCase):
         logs: list[str] = []
         with mock.patch("collect.subprocess.run", side_effect=lambda *a, **k: (calls.append(1), Result())[1]), mock.patch(
             "collect._core_looks_fresh", return_value=True
-        ), mock.patch("collect.time.sleep"):
+        ), mock.patch("collect._bin_looks_fresh", return_value=True), mock.patch("collect.time.sleep"):
             collect.run_precompute(logs.append)
         self.assertEqual(len(calls), 1, "产物已更新就不必重试")
         self.assertTrue(any("预计算完成" in line and "产物已更新" in line for line in logs), str(logs))
+
+    def test_core_written_but_bin_stale_is_not_success(self):
+        """事故回归：core 写好了、二进制契约没刷新 —— 必须判失败并重试（这就是被冻结 40 小时的情形）。"""
+        import collect
+
+        calls = []
+
+        class Result:
+            returncode = 1
+            stdout = "  节点 31958 · 连线 34505 · 扇区 21"
+            stderr = "Error: mesh-core.bin 不认识的节点字段：renamedFrom"
+
+        logs: list[str] = []
+        with mock.patch("collect.subprocess.run", side_effect=lambda *a, **k: (calls.append(1), Result())[1]), mock.patch(
+            "collect._core_looks_fresh", return_value=True
+        ), mock.patch("collect._bin_looks_fresh", return_value=False), mock.patch("collect.time.sleep"):
+            collect.run_precompute(logs.append)
+        self.assertEqual(len(calls), 2, "契约没刷新必须重试一次")
+        self.assertTrue(any("二进制契约未刷新" in line or "预计算失败" in line for line in logs), str(logs))
 
     def test_half_written_core_is_not_success(self):
         """写到一半崩掉会留下半截 JSON —— 这种"产物"绝不能算成功。"""
@@ -445,6 +492,8 @@ class RunOnceOrderTest(unittest.TestCase):
             collect, "SNAPSHOT_DIR", TMP / "snapshots"
         ), mock.patch.object(collect, "LAST_CRAWL", TMP / "last-crawl.json"), mock.patch.object(
             collect, "STATUS_FILE", TMP / "status.json"
+        ), mock.patch.object(collect, "STAR_HISTORY", TMP / "star-history.json"), mock.patch.object(
+            collect, "UPDATE_LOG", TMP / "update-log.json"
         ):
             code = collect.main(["--from-raw", "--frontend-limit", "100", "--quiet"])
         self.assertEqual(code, 0)
@@ -465,6 +514,22 @@ class RunOnceOrderTest(unittest.TestCase):
         last = json.loads((TMP / "last-crawl.json").read_text(encoding="utf-8"))
         self.assertEqual(last["indexedNodes"], 593)
         self.assertEqual(last["frontendNodes"], 100)
+        self.assertEqual(last["starHistory"]["points"], 1, "summary 里要报告历史点数")
+
+        # 星标历史也必须落在临时目录：跑测试绝不能往真实的 data/cache 里写"今天"的点，
+        # 否则榜单会拿一次测试用的样本当"当前星标"（曾经真的污染过一次）。
+        history = snap.load_star_history(TMP / "star-history.json")
+        self.assertEqual(len(history["points"]), 1)
+        self.assertEqual(history["points"][0]["count"], 593, "历史点记录完整索引（不是被裁剪的 100）")
+
+        # 更新日志同理：不能污染真实 data/cache（首次观测不计数，所以 days 是空的）
+        self.assertTrue((TMP / "update-log.json").exists(), "更新日志也必须落在临时目录")
+        log = snap.load_update_log(TMP / "update-log.json")
+        self.assertEqual(log["days"], {}, "首次观测只记 seen，不计数")
+        # seen 只跟"最近 14 天内有推送"的仓库，样本里这类只占一部分
+        self.assertGreater(len(log["seen"]), 0, "应记录到样本里近期推送过的仓库")
+        self.assertLessEqual(len(log["seen"]), 593)
+        self.assertEqual(last["updateLog"]["days"], 0)
 
 
 class SnapshotTest(unittest.TestCase):
@@ -1102,5 +1167,232 @@ class ClassifyAmbiguityTest(unittest.TestCase):
             self.assertNotIn(wrong, result["hits"], wrong + " 不该被命中")
 
 
+
+
+class StarHistoryTest(unittest.TestCase):
+    """星标历史环：前端「周 star 热榜」的唯一真源（每天一个点，同一天覆盖）。"""
+
+    def setUp(self):
+        shutil.rmtree(TMP, ignore_errors=True)
+        TMP.mkdir(parents=True, exist_ok=True)
+        self.path = TMP / "star-history.json"
+
+    def tearDown(self):
+        shutil.rmtree(TMP, ignore_errors=True)
+
+    @staticmethod
+    def _mesh(at: str, stars: dict) -> dict:
+        return {"meta": {"generatedAt": at}, "nodes": [{"id": k, "stars": v} for k, v in stars.items()]}
+
+    def test_missing_or_broken_file_is_an_empty_ring(self):
+        self.assertEqual(snap.load_star_history(self.path)["points"], [])
+        self.path.write_text("{ 这不是 json", encoding="utf-8")
+        self.assertEqual(snap.load_star_history(self.path)["points"], [])
+        self.path.write_text('{"points": "坏了"}', encoding="utf-8")
+        self.assertEqual(snap.load_star_history(self.path)["points"], [])
+
+    def test_same_day_is_overwritten_not_appended(self):
+        snap.update_star_history(self._mesh("2026-10-01T01:00:00Z", {"a": 1}), self.path)
+        payload = snap.update_star_history(self._mesh("2026-10-01T22:00:00Z", {"a": 9, "b": 2}), self.path)
+        self.assertEqual(len(payload["points"]), 1, "同一天只留一个点")
+        self.assertEqual(payload["points"][0]["at"], "2026-10-01T22:00:00Z", "留当天的最后一次观测")
+        self.assertEqual(payload["points"][0]["stars"], {"a": 9, "b": 2})
+
+    def test_keeps_only_recent_days_and_sorts_ascending(self):
+        for day in range(1, 13):
+            snap.update_star_history(self._mesh(f"2026-09-{day:02d}T10:00:00Z", {"a": day}), self.path, keep=5)
+        payload = snap.load_star_history(self.path)
+        self.assertEqual(len(payload["points"]), 5, "只留最近 keep 天")
+        ats = [p["at"] for p in payload["points"]]
+        self.assertEqual(ats, sorted(ats), "点必须按时间升序")
+        self.assertEqual(ats[-1], "2026-09-12T10:00:00Z")
+        self.assertEqual(ats[0], "2026-09-08T10:00:00Z")
+
+    def test_written_payload_is_self_describing(self):
+        payload = snap.update_star_history(self._mesh("2026-10-03T11:00:25Z", {"x/y": 42}), self.path)
+        self.assertEqual(payload["unit"], "stars/day")
+        self.assertEqual(payload["keepDays"], snap.STAR_HISTORY_KEEP)
+        self.assertIn("周 star 热榜", payload["note"])
+        on_disk = json.loads(self.path.read_text(encoding="utf-8"))
+        self.assertEqual(on_disk["points"][0]["count"], 1)
+        self.assertEqual(on_disk["points"][0]["day"], "2026-10-03")
+
+
+class UpdateLogTest(unittest.TestCase):
+    """更新日志：前端「周更新热榜」按它排序（次数 = 1 + 采样到的推进次数）。"""
+
+    def setUp(self):
+        shutil.rmtree(TMP, ignore_errors=True)
+        TMP.mkdir(parents=True, exist_ok=True)
+        self.path = TMP / "update-log.json"
+
+    def tearDown(self):
+        shutil.rmtree(TMP, ignore_errors=True)
+
+    @staticmethod
+    def _mesh(at: str, pushes: dict) -> dict:
+        return {"meta": {"generatedAt": at}, "nodes": [{"id": k, "pushedAt": v} for k, v in pushes.items()]}
+
+    def test_missing_or_broken_file_is_an_empty_log(self):
+        self.assertEqual(snap.load_update_log(self.path)["days"], {})
+        self.path.write_text("这不是 json", encoding="utf-8")
+        self.assertEqual(snap.load_update_log(self.path)["seen"], {})
+        self.path.write_text('{"days": 5}', encoding="utf-8")
+        self.assertEqual(snap.load_update_log(self.path)["days"], {})
+
+    def test_first_sight_does_not_count_but_is_remembered(self):
+        payload = snap.update_update_log(self._mesh("2026-10-06T10:00:00Z", {"a/x": "2026-10-06T09:00:00Z"}), self.path)
+        self.assertEqual(payload["days"], {}, "首次见到只记 seen：那是它本来就有的推送，不是我们又看到一次更新")
+        self.assertEqual(payload["seen"]["a/x"], "2026-10-06T09:00:00Z")
+        self.assertEqual(payload["lastRound"]["counted"], 0)
+
+    def test_only_advances_count_and_they_accumulate_per_day(self):
+        snap.update_update_log(self._mesh("2026-10-06T10:00:00Z", {"a/x": "2026-10-06T09:00:00Z"}), self.path)
+        same = snap.update_update_log(self._mesh("2026-10-06T11:00:00Z", {"a/x": "2026-10-06T09:00:00Z"}), self.path)
+        self.assertEqual(same["days"], {}, "pushedAt 没前进就不计数")
+        one = snap.update_update_log(self._mesh("2026-10-06T12:00:00Z", {"a/x": "2026-10-06T11:30:00Z"}), self.path)
+        self.assertEqual(one["days"]["2026-10-06"]["a/x"], 1)
+        self.assertEqual(one["lastRound"]["counted"], 1)
+        two = snap.update_update_log(self._mesh("2026-10-06T13:00:00Z", {"a/x": "2026-10-06T12:30:00Z"}), self.path)
+        self.assertEqual(two["days"]["2026-10-06"]["a/x"], 2, "同一天要累计")
+        self.assertEqual(two["seen"]["a/x"], "2026-10-06T12:30:00Z")
+
+    def test_prunes_old_days(self):
+        for i in range(1, 12):
+            snap.update_update_log(
+                self._mesh(f"2026-09-{i:02d}T10:00:00Z", {"a/x": f"2026-09-{i:02d}T09:00:00Z"}), self.path, keep=3
+            )
+        payload = snap.load_update_log(self.path)
+        self.assertEqual(sorted(payload["days"]), ["2026-09-09", "2026-09-10", "2026-09-11"], "只留最近 keep 天")
+
+    def test_stale_repos_are_dropped_from_seen(self):
+        snap.update_update_log(self._mesh("2026-10-06T10:00:00Z", {"old/a": "2026-09-01T00:00:00Z"}), self.path)
+        self.assertEqual(snap.load_update_log(self.path)["seen"], {}, "太久没推送的仓库不再跟踪，文件不会无限长")
+
+    def test_sampled_days_record_observation_without_counts(self):
+        """没推进也要记下"这一天观测过"：界面靠它区分「0 次」和「没数据」。"""
+        payload = snap.update_update_log(self._mesh("2026-10-06T10:00:00Z", {"a/x": "2026-10-06T09:00:00Z"}), self.path)
+        self.assertEqual(payload["days"], {})
+        self.assertEqual(payload["sampledDays"], ["2026-10-06"])
+        snap.update_update_log(self._mesh("2026-10-06T11:00:00Z", {"a/x": "2026-10-06T09:00:00Z"}), self.path)
+        self.assertEqual(snap.load_update_log(self.path)["sampledDays"], ["2026-10-06"], "同一天只记一次")
+
+    def test_sampled_days_are_pruned_with_days(self):
+        for i in range(1, 12):
+            snap.update_update_log(self._mesh(f"2026-09-{i:02d}T10:00:00Z", {"a/x": f"2026-09-{i:02d}T09:00:00Z"}), self.path, keep=3)
+        payload = snap.load_update_log(self.path)
+        self.assertEqual(payload["sampledDays"], ["2026-09-09", "2026-09-10", "2026-09-11"])
+
+    def test_payload_is_self_describing(self):
+        payload = snap.update_update_log(self._mesh("2026-10-06T10:00:00Z", {"a/x": "2026-10-06T09:00:00Z"}), self.path)
+        self.assertEqual(payload["unit"], "pushes/day")
+        self.assertIn("周更新热榜", payload["note"])
+        on_disk = json.loads(self.path.read_text(encoding="utf-8"))
+        self.assertEqual(on_disk["keepDays"], snap.UPDATE_LOG_KEEP)
+
+
+class ReleasesTest(unittest.TestCase):
+    """版本采集策略：限量 + 排优先级（配额按认证身份算一个桶，堆令牌不扩容）。"""
+
+    def setUp(self):
+        shutil.rmtree(TMP, ignore_errors=True)
+        TMP.mkdir(parents=True, exist_ok=True)
+        self.path = TMP / "releases.json"
+
+    def tearDown(self):
+        shutil.rmtree(TMP, ignore_errors=True)
+
+    @staticmethod
+    def _iso(days_ago: float) -> str:
+        return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(time.time() - days_ago * 86400))
+
+    def test_slim_keeps_four_fields_and_drops_drafts(self):
+        payload = [
+            {"tag_name": "v1.2.0", "name": "1.2.0", "published_at": "2026-10-01T00:00:00Z", "prerelease": False, "draft": False, "body": "x" * 5000, "assets": [1, 2]},
+            {"tag_name": "v1.3.0-rc.1", "name": "rc", "published_at": "2026-10-02T00:00:00Z", "prerelease": True, "draft": False},
+            {"tag_name": "draft", "name": "草稿", "published_at": "2026-10-03T00:00:00Z", "draft": True},
+        ]
+        out = rel.slim_releases(payload)
+        self.assertEqual([r["tag"] for r in out], ["v1.2.0", "v1.3.0-rc.1"], "草稿必须丢掉")
+        self.assertEqual(out[0], {"tag": "v1.2.0", "name": "1.2.0", "at": "2026-10-01", "pre": False})
+        self.assertTrue(out[1]["pre"])
+        self.assertLess(len(json.dumps(out, ensure_ascii=False)), 400, "精简后要小到能塞进几 MB 的缓存")
+
+    def test_load_save_roundtrip_is_atomic_and_tolerates_garbage(self):
+        self.assertEqual(rel.load_releases(self.path)["repos"], {})
+        self.path.write_text("不是 json", encoding="utf-8")
+        self.assertEqual(rel.load_releases(self.path)["repos"], {})
+        payload = rel.merge(rel.load_releases(self.path), "a/b", [{"tag": "v1", "name": "", "at": "2026-10-01", "pre": False}])
+        rel.save_releases(payload, self.path)
+        self.assertEqual(rel.load_releases(self.path)["repos"]["a/b"]["releases"][0]["tag"], "v1")
+        self.assertFalse(self.path.with_name(self.path.name + ".tmp").exists(), "临时文件必须被 replace 掉")
+
+    def test_candidates_prioritize_recent_push_then_stars(self):
+        now = time.time()
+        nodes = [
+            {"id": "recent/low", "stars": 1, "pushedAt": self._iso(1), "archived": False},
+            {"id": "recent/high", "stars": 900, "pushedAt": self._iso(2), "archived": False},
+            {"id": "stale/high", "stars": 5000, "pushedAt": self._iso(40), "archived": False},
+            {"id": "gone/archived", "stars": 9000, "pushedAt": self._iso(1), "archived": True},
+        ]
+        picked = rel.pick_candidates({"repos": {}}, nodes, limit=10, now_ts=now)
+        self.assertEqual(picked, ["recent/high", "recent/low", "stale/high"], "近 7 天推过的优先、其中星标高的更前；归档跳过")
+
+    def test_candidates_skip_fresh_entries_and_respect_limit(self):
+        now = time.time()
+        payload = {"repos": {"a/fresh": {"at": self._iso(0.5), "releases": []}}}
+        nodes = [
+            {"id": "a/fresh", "stars": 9999, "pushedAt": self._iso(1), "archived": False},
+            {"id": "a/old", "stars": 10, "pushedAt": self._iso(1), "archived": False},
+        ]
+        self.assertEqual(rel.pick_candidates(payload, nodes, limit=10, now_ts=now), ["a/old"], "刚抓过的不该重复抓")
+        payload2 = {"repos": {"a/old": {"at": self._iso(9), "releases": []}, "a/fresh": {"at": self._iso(0.5), "releases": []}}}
+        picked2 = rel.pick_candidates(payload2, nodes, limit=10, now_ts=now)
+        self.assertIn("a/old", picked2, "抓过 9 天了要重抓")
+        self.assertNotIn("a/fresh", picked2, "才抓过半天的不该重抓")
+        self.assertEqual(len(rel.pick_candidates({"repos": {}}, nodes * 5, limit=3, now_ts=now)), 3, "预算就是上限")
+
+    def test_put_and_stats(self):
+        payload = rel.load_releases(self.path)
+        rel.put(payload, "a/b", [{"tag": "v1", "name": "", "at": "2026-10-01", "pre": False}])
+        rel.put(payload, "a/c", [])
+        self.assertEqual(rel.stats(payload), {"repos": 2, "withReleases": 1, "versions": 1})
+
+
+class InclusionAndDirectionTest(unittest.TestCase):
+    """v0.5.0 两条回归防线：无信号空壳不收录、共鸣边保留"基座 → 插件"方向。"""
+
+    def test_name_only_stub_is_not_indexed_and_is_counted(self):
+        stub = fake_repo("alice", "dsh-stub", stars=3, topics=())
+        stub["description"] = ""  # 只有名字命中 dsh：既没有描述也没有主题标签
+        real = fake_repo("bob", "dsh-skin", stars=10)
+        mesh = build_mesh([stub, real], {})
+        ids = [n["id"] for n in mesh["nodes"]]
+        self.assertNotIn("alice/dsh-stub", ids, "只有名字、没有描述也没有主题的空壳不该进索引")
+        self.assertIn("bob/dsh-skin", ids, "有信号的照旧收录")
+        self.assertEqual(mesh["meta"]["noSignalSkipped"], 1, "剔除数量要如实记账")
+
+    def test_resonance_edge_keeps_direction_even_when_plugin_sorts_first(self):
+        eco_path = TMP / "ecosystem-direction.json"
+        TMP.mkdir(parents=True, exist_ok=True)
+        eco_path.write_text(
+            json.dumps({"bases": [{"id": "zzz/base", "label": "测试基座", "enabled": True, "verified": [{"id": "aaa/plugin"}]}]}),
+            encoding="utf-8",
+        )
+        base = fake_repo("zzz", "base", stars=100)
+        plugin = fake_repo("aaa", "plugin", stars=5)
+        with mock.patch.object(build_mod, "ECOSYSTEM_JSON", eco_path):
+            mesh = build_mesh([base, plugin], {})
+        reso = [(e["source"], e["target"]) for e in mesh["edges"] if e["type"] == "resonance"]
+        self.assertEqual(reso, [("zzz/base", "aaa/plugin")], "共鸣边必须保持 基座 → 插件（插件字母序在前也不能翻转）")
+
+    def test_undirected_edges_are_still_canonicalized(self):
+        raws = [fake_repo("alice", "b-repo", stars=1), fake_repo("alice", "a-repo", stars=2)]
+        mesh = build_mesh(raws, {})
+        owner = [(e["source"], e["target"]) for e in mesh["edges"] if e["type"] == "owner"]
+        self.assertEqual(owner, [("alice/a-repo", "alice/b-repo")], "对等关系仍按字母序归一化（去重靠它）")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
