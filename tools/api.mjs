@@ -470,7 +470,7 @@ export function createApi({ root }) {
 
     const note =
       source === "update-log"
-        ? "次数 = 1（本窗口内确有推送）+ 采集器采样到的额外推进次数（每轮一次，同一次推送最多记一次；已观测 " + sampledSet.size + " 天）"
+        ? "次数 = 采样到 pushedAt 前进的轮次数（每轮最多记一次，同一轮里的多次推送会合并 —— 所以是**下界**；窗口内确有推送但一次都没采样到时记 1）。已观测 " + sampledSet.size + " 天"
         : source === "epoch-pair"
           ? "还没有按轮的采样日志：只能用盘上一次更早的观测比对，次数上限是 2；采集器跑起来后会变成真实频率"
           : "只看得到最后一次推送时间，次数一律按 1 计；采集器跑起来后按轮采样";
@@ -531,12 +531,20 @@ export function createApi({ root }) {
 
     /* 榜一：周更新热榜（排除归档与复刻：档案馆与镜像刷推送不算"生态在动"）
      * 排序关键不是"最后一次推送有多新"，而是【一周更新了几次】：
-     *   updates = 1（窗口内确有推送，GitHub 事实）+ 采样到的额外推进次数
+     *   updates = 采样到 pushedAt 前进的轮次数（下界）；没采样到也确有推送时保底 1
      * 次数相同时才比最近推送时间、再比星标。 */
     const since = now - windowDays * 86400000;
     const windowStartDay = new Date(since).toISOString().slice(0, 10);
     const updateStats = await loadUpdateStats(windowStartDay, nodes);
-    const updatesOf = (n) => 1 + (updateStats.advances.get(n.id) ?? 0);
+    /* 次数 = 采样到的推进次数（每轮最多记一次，是**下界**）；一次都没采样到、但窗口内确有推送时保底 1。
+     * 为什么不是 "1 + 采样"：采样到的推进里已经包含"把 pushedAt 推到窗口内的那次推送"，
+     * 再加 1 就是同一次推送算两遍 —— 线上实测前 50 行全部多算 1，趋势柱加总永远比总数少 1。 */
+    const updatesOf = (n) => {
+      const advances = updateStats.advances.get(n.id) ?? 0;
+      if (updateStats.source === "update-log") return Math.max(1, advances);
+      // 退化口径：两个观测点比对（上限 2）/ 只见最后一次推送（恒为 1），文案里已写明
+      return 1 + advances;
+    };
     const seriesOfUpdates = (id) =>
       updateStats.source === "update-log"
         ? seriesDays.map((d) => (updateStats.sampledSet.has(d) ? updateStats.perDay.get(d)?.get(id) ?? 0 : null))

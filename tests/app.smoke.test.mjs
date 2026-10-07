@@ -211,7 +211,7 @@ globalThis.fetch = async (url) => {
           updated: {
             label: "周更新热榜", metric: "updates", windowDays: 7, total: 3408, count: pushed.length,
             maxUpdates: 3, updatesSource: "update-log", updatesObservations: 5, updatesSampledDays: 5,
-            note: "次数 = 1（本窗口内确有推送）+ 采样到的额外推进次数（每轮一次；已采样 5 天）",
+            note: "次数 = 采样到 pushedAt 前进的轮次数（每轮最多记一次，是下界；窗口内确有推送但没采样到时记 1）。已观测 5 天",
             items: pushed.map((n, i) => ({ id: n.id, name: n.name, owner: n.owner, avatar: null, stars: n.stars, pushedAt: n.pushedAt, categoryLabel: n.categoryLabel, updates: 3 - i })),
           },
           stars: {

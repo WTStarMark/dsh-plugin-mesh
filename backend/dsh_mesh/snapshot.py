@@ -202,7 +202,7 @@ def update_update_log(mesh: dict, path: Path, *, keep: int = UPDATE_LOG_KEEP, no
         "updatedAt": now or utcnow(),
         "unit": "pushes/day",
         "keepDays": keep,
-        "note": "每轮采样一次：pushedAt 比上次观测前进了就记一次推进（同一次推送最多记一次，首次见到不记）。前端「周更新热榜」的次数 = 1（本窗口内确有推送）+ 这里的推进次数。",
+        "note": "每轮采样一次：pushedAt 比上次观测前进了就记一次推进（同一次推送最多记一次，首次见到不记）。前端「周更新热榜」的次数 = 这个推进次数（每轮最多记一次，是下界），窗口内确有推送但没采样到时保底记 1。",
         "lastRound": {"at": at, "counted": counted},
         "seen": dict(sorted(seen.items())),
         "days": dict(sorted(days.items())),

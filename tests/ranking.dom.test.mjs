@@ -48,11 +48,11 @@ const payload = {
   history: { points: [{ at: "2026-10-01T17:00:42Z", repos: 2625, source: "snapshot" }], latestAt: "2026-10-01T17:00:42Z" },
   boards: {
     updated: {
-      label: "周更新热榜", metric: "updates", windowDays: 7, total: 3392, count: 2, maxUpdates: 5,
+      label: "周更新热榜", metric: "updates", windowDays: 7, total: 3392, count: 2, maxUpdates: 8,
       updatesSource: "update-log", updatesObservations: 4, updatesSampledDays: 4, seriesKind: "updates", seriesDays: 4,
-      note: "次数 = 1（本窗口内确有推送）+ 采样到的额外推进次数（每轮一次；已采样 4 天）",
+      note: "次数 = 采样到 pushedAt 前进的轮次数（每轮最多记一次，是下界；窗口内确有推送但没采样到时记 1）。已观测 4 天",
       items: [
-        { id: "acme/one", name: "one", owner: "acme", avatar: null, stars: 12, pushedAt: new Date(Date.now() - 3.2 * 86400000).toISOString(), categoryLabel: "其他", updates: 5, series: [null, 2, null, 1, 0, null, 5], releases: [{ tag: "v1.66.9", name: "1.66.9", at: "2026-10-05", pre: false }, { tag: "v1.66.8", name: "1.66.8", at: "2026-10-01", pre: false }] },
+        { id: "acme/one", name: "one", owner: "acme", avatar: null, stars: 12, pushedAt: new Date(Date.now() - 3.2 * 86400000).toISOString(), categoryLabel: "其他", updates: 8, observedAdvances: 8, series: [null, 2, null, 1, 0, null, 5], releases: [{ tag: "v1.66.9", name: "1.66.9", at: "2026-10-05", pre: false }, { tag: "v1.66.8", name: "1.66.8", at: "2026-10-01", pre: false }] },
         { id: "acme/two", name: "two", owner: "acme", avatar: null, stars: 3, pushedAt: new Date(Date.now() - 4.2 * 86400000).toISOString(), categoryLabel: "Web 前端", updates: 2, series: [null, null, 1, null, null, null, 1], releases: [{ tag: "v2.0.0-rc.1", name: "rc", at: "2026-10-06", pre: true }] },
       ],
     },
@@ -133,7 +133,7 @@ test("点奖杯：拉数据、渲染两个榜单；榜单上下不放文字，�
   assert.match(ui.body.title, /已排除归档与复刻/);
   assert.match(ui.t1.title, /窗口 7 天/, "标签页也要能悬停看到本榜口径：" + ui.t1.title);
   assert.equal(ui.body.children.filter((n) => !n.className?.startsWith("rank-row")).length, 0, "列表里除了行不该有别的段落");
-  assert.match(text, /5 次/, "主指标应显示更新次数：" + text);
+  assert.match(text, /8 次/, "主指标应显示更新次数（= 逐日柱加总，同一次推送不重复计）：" + text);
   assert.match(text, /3 天前/, "次行应显示最近推送时间：" + text);
   // 近 7 日趋势柱：7 个槽位，实心 / 浅底座（0）/ 虚线（没观测）三种状态分得开
   const spark = list[0].find((n) => n.className === "spark");

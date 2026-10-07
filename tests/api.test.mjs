@@ -161,6 +161,22 @@ test("榜单：周更新榜按更新次数排序，star 榜给真实增量与真
     "必须说明次数是怎么观测来的，实际 " + updated.updatesSource,
   );
   assert.ok((updated.note ?? "").length > 0, "必须写明采样口径");
+
+  // 口径自洽：次数 = 采样到的推进次数（1 是下限，不是加数），且等于逐日趋势柱的加总
+  if (updated.updatesSource === "update-log") {
+    // 有采样推进的行：次数 = 采样次数（1 是下限不是加数），且等于逐日柱加总
+    for (const n of updated.items.filter((x) => (x.observedAdvances ?? 0) > 0)) {
+      assert.equal(n.updates, n.observedAdvances, "次数应等于采样到的推进次数（不能再 +1）：" + n.id);
+      const bars = (n.series ?? []).filter((v) => typeof v === "number").reduce((s, v) => s + v, 0);
+      assert.equal(bars, n.observedAdvances, "逐日趋势柱的加总必须等于采样次数（同一次推送不能算两遍）：" + n.id);
+    }
+    // 一次推进都没采样到的行（例：刚建索引时"首见不计数"）：按下限记 1
+    for (const n of updated.items.filter((x) => (x.observedAdvances ?? 0) === 0)) {
+      assert.equal(n.updates, 1, "没采样到推进时按下限记 1：" + n.id);
+      const bars = (n.series ?? []).filter((v) => typeof v === "number").reduce((s, v) => s + v, 0);
+      assert.equal(bars, 0, "没有推进就不该有柱子：" + n.id);
+    }
+  }
   const since = Date.parse(out.now) - out.windowDays * 86400000;
   assert.ok(times.every((t) => t >= since), "每条都要落在窗口内");
   assert.ok(updated.total >= updated.items.length, "总数不小于一页");
