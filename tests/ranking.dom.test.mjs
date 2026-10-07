@@ -115,7 +115,7 @@ test("formatStars / timeAgo：站点口径的紧凑格式", () => {
   assert.equal(timeAgo("坏了"), "—");
 });
 
-test("点奖杯：拉数据、渲染两个榜单；榜单上下不放文字，口径挂在悬停提示", async () => {
+test("点奖杯：拉数据、渲染两个榜单（榜单上下不放文字，也不挂悬停解释）", async () => {
   const ui = mount();
   assert.equal(ui.modal.hidden, true, "默认关闭");
   ui.button.fire("click");
@@ -126,14 +126,12 @@ test("点奖杯：拉数据、渲染两个榜单；榜单上下不放文字，�
   const list = rows(ui.body);
   assert.equal(list.length, 2, "周更新榜应有两行");
   const text = ui.body.all.map((n) => n.textContent ?? "").join(" ");
-  // 榜单上下不放文字：口径挂在悬停提示（列表 + 标签页）里，需要时悬停可见
-  assert.doesNotMatch(text, /窗口 7 天/, "列表上不该再有口径文字：" + text);
-  assert.match(ui.body.title, /窗口 7 天/, "口径应挂在列表的悬停提示上：" + ui.body.title);
-  assert.match(ui.body.title, /按【更新次数】→ 最近推送 → 星标排序/, "排序口径要写清（次数相同时最近推送优先）：" + ui.body.title);
-  assert.match(ui.body.title, /已排除归档与复刻/);
-  assert.match(ui.t1.title, /窗口 7 天/, "标签页也要能悬停看到本榜口径：" + ui.t1.title);
+  // 前端不展示口径解释：列表上下没有文字，列表与标签页也不挂悬停解释（口径只在接口字段里）
+  assert.doesNotMatch(text, /窗口 7 天/, "列表上不该有口径文字：" + text);
+  assert.ok(!ui.body.title, "列表不该挂悬停解释：" + ui.body.title);
+  assert.ok(!ui.t1.title && !ui.t2.title, "标签页不该挂悬停解释：" + ui.t1.title + " / " + ui.t2.title);
   assert.equal(ui.body.children.filter((n) => !n.className?.startsWith("rank-row")).length, 0, "列表里除了行不该有别的段落");
-  assert.match(text, /8 次/, "主指标应显示更新次数（= 逐日柱加总，同一次推送不重复计）：" + text);
+  assert.match(text, /≥8 次/, "主指标应显示更新轮次，并标明这是采样下界（≥）：" + text);
   assert.match(text, /3 天前/, "次行应显示最近推送时间：" + text);
   // 近 7 日趋势柱：7 个槽位，实心 / 浅底座（0）/ 虚线（没观测）三种状态分得开
   const spark = list[0].find((n) => n.className === "spark");
@@ -151,11 +149,10 @@ test("点奖杯：拉数据、渲染两个榜单；榜单上下不放文字，�
   const second = rows(ui.body)[1];
   const secondBars = second.find((n) => n.className === "spark").children;
   assert.equal(secondBars[2].style.height, "18px", "另一行的峰值（1 次）也铺满 —— 各行按自己的峰值归一，互不影响");
-  assert.match(bars[1].title, /2026-10-01：2 次更新/, "柱子上要有当天明细：" + bars[1].title);
-  assert.match(bars[0].title, /没有观测数据/, "虚线的说明要写清是没观测：" + bars[0].title);
-  assert.match(spark.title, /近 7 日更新次数/);
-  assert.match(spark.title, /按本行峰值归一/, "要把比例尺口径写在提示里：" + spark.title);
-  assert.match(ui.body.title, /趋势柱：近 7 天里只有 4 天有观测数据/, "悬停提示要说明有几天真的有观测：" + ui.body.title);
+  // 悬停只留数据（日期 + 数值），不写解释；没观测的天用破折号
+  assert.match(bars[1].title, /2026-10-01：2 次$/, "柱子悬停只给「日期：数值」：" + bars[1].title);
+  assert.match(bars[0].title, /2026-09-30：—$/, "没观测的天用破折号，不写解释：" + bars[0].title);
+  assert.ok(!spark.title, "趋势柱本身不该挂解释：" + spark.title);
 
   // 版本：最新一个做成胶囊，预发布用 pre 修饰；全量版本在行悬停里
   const ver = list[0].find((n) => n.className === "ver");
@@ -169,21 +166,38 @@ test("点奖杯：拉数据、渲染两个榜单；榜单上下不放文字，�
   assert.match(text, /acme/, "应渲染作者");
   assert.match(text, /其他/, "应渲染所属扇区");
   assert.match(list[0].title, /^acme\/one/, "行上应有完整 id 的悬浮说明，实际：" + list[0].title);
-  assert.match(ui.body.title, /数据快照 2026-10-03 1[89]:00/, "悬停提示要写明数据快照时间，实际：" + ui.body.title);
-  assert.match(ui.body.title, /75 小时前/, "数据陈旧必须写明，实际：" + ui.body.title);
+
 });
 
-test("切到 star 榜：显示真实增量与【实际窗口】，历史不足要显眼", async () => {
+test("周更新热榜按发版判定时：显示 N 个版本（真实计数，不加 ≥）", async () => {
+  const data = JSON.parse(JSON.stringify(payload));
+  data.boards.updated.metric = "releases";
+  data.boards.updated.seriesKind = "releases";
+  data.boards.updated.maxUpdates = 3;
+  data.boards.updated.items = [
+    { ...data.boards.updated.items[0], updates: 3, latestReleaseAt: "2026-10-05", series: [null, null, null, null, null, 0, 3] },
+  ];
+  const ui = mount({ data });
+  ui.button.fire("click");
+  await settle();
+  const text = ui.body.all.map((n) => n.textContent ?? "").join(" ");
+  assert.match(text, /3 个版本/, "按发版判定时显示本周版本数：" + text);
+  assert.doesNotMatch(text, /≥/, "真实计数不加下界符号：" + text);
+  const bars = rows(ui.body)[0].find((n) => n.className === "spark").children;
+  assert.match(bars[6].title, /2026-10-06：3 个版本$/, "逐日柱按发布日期算：" + bars[6].title);
+});
+
+test("切到 star 榜：显示真实增量与窗口天数（不堆解释文字）", async () => {
   const ui = mount();
   ui.button.fire("click");
   await settle();
   ui.t2.fire("click");
   const text = ui.body.all.map((n) => n.textContent ?? "").join(" ");
   assert.match(text, /\+960/, "应显示增量：" + text);
-  assert.doesNotMatch(text, /实际窗口/, "列表里不该再有窗口文字：" + text);
-  assert.match(ui.body.title, /实际窗口 1\.75 天/, "必须写出真实窗口，不能假装是 7 天：" + ui.body.title);
-  assert.match(ui.body.title, /还没攒够 7 天/, "历史不足要说明：" + ui.body.title);
-  assert.match(ui.t2.title, /实际窗口 1\.75 天/, "star 标签页也要能悬停看到本榜口径");
+  assert.doesNotMatch(text, /实际窗口/, "列表里不该有窗口文字：" + text);
+  assert.ok(!ui.body.title && !ui.t2.title, "star 榜也不挂悬停解释：" + ui.body.title);
+  // 窗口只有 1.75 天时不能让人误读成"一周"，所以把窗口作为数据放在次行
+  assert.match(text, /1\.75 天/, "次行要带真实窗口天数（数据，不是解释）：" + text);
   assert.equal(ui.t2.attrs["aria-selected"], "true");
   assert.equal(ui.t1.attrs["aria-selected"], "false");
 
@@ -193,9 +207,7 @@ test("切到 star 榜：显示真实增量与【实际窗口】，历史不足�
   assert.ok(span, "跨天累计应画成宽条：" + row.all.map((n) => n.className).join(","));
   assert.match(span.style.left, /^14\.28/, "宽条左端对齐 10-01 那个槽位：" + span.style.left);
   assert.match(span.style.width, /^85\.71/, "宽条覆盖 10-01 → 10-06 共 6 个槽位：" + span.style.width);
-  assert.match(span.title, /2026-10-01 → 2026-10-06 累计 \+960 ★/, "悬停要写清跨了哪几天：" + span.title);
-  assert.match(span.title, /跨 4\.92 天，期间没有逐日观测/);
-  assert.match(ui.body.title, /跨天累计/, "悬停提示要说明宽条的含义：" + ui.body.title);
+  assert.match(span.title, /^2026-10-01 → 2026-10-06：\+960 ★$/, "宽条悬停只给起止与数值：" + span.title);
 });
 
 test("还没有逐日数据时：柱子全部虚化，并直说原因（不假装是 0）", async () => {
@@ -209,18 +221,18 @@ test("还没有逐日数据时：柱子全部虚化，并直说原因（不假�
   const spark = list[0].find((n) => n.className === "spark");
   assert.equal(spark.children.filter((n) => n.className === "spark-bar none").length, 7, "7 个槽位都应是「没观测」");
   assert.equal(spark.children.filter((n) => n.className === "spark-bar zero").length, 0, "绝不能把没观测画成 0");
-  assert.match(ui.body.title, /还没有逐日数据/, "没有逐日数据时，说明应挂在悬停提示上：" + ui.body.title);
-  assert.doesNotMatch(ui.body.all.map((n) => n.textContent ?? "").join(" "), /还没有逐日数据/, "不该把说明印在列表里");
+  assert.ok(!ui.body.title, "没有逐日数据也不写解释，柱子自会显示为虚线：" + ui.body.title);
 });
 
-test("次数只能靠有限观测时，口径行要显眼（warn）", async () => {
+test("降级口径（只能靠有限观测）时榜单照常渲染，不堆解释", async () => {
   const data = JSON.parse(JSON.stringify(payload));
   data.boards.updated.updatesSource = "epoch-pair";
   data.boards.updated.note = "还没有按轮的采样日志：只能用盘上一次更早的观测比对，次数上限是 2";
   const ui = mount({ data });
   ui.button.fire("click");
   await settle();
-  assert.match(ui.body.title, /次数上限是 2/, "观测点不足的限制要挂在悬停提示里：" + ui.body.title);
+  assert.equal(rows(ui.body).length, 2, "降级口径下照样出榜单");
+  assert.ok(!ui.body.title, "降级也不在界面上堆解释：" + ui.body.title);
 });
 
 test("趋势图左侧严格对齐：整行列宽必须固定（auto 列会让每行参差）", async () => {

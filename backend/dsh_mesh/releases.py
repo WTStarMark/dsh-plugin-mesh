@@ -19,7 +19,11 @@ from pathlib import Path
 
 from .build import utcnow
 
-RELEASES_KEEP = 5  # 每个仓库留几个版本
+# 每个仓库留几个版本。放 20 是为了"周更新热榜按发版判定"能数准一周的版本数
+# （留 5 时，一周发版超过 5 次的项目会被截在 5）。代价是拉取体积：
+# per_page=20 平均约 320KB/仓库（版本说明很长），按每轮 300 个仓库算 ≈ 93MB/轮
+# —— 嫌带宽大就调小 --releases-budget，别调小这个上限（否则周榜计数又会被截）。
+RELEASES_KEEP = 20
 REFRESH_DAYS = 3.0  # 抓过超过这么多天就重抓（发版不频繁，3 天足够）
 RECENT_PUSH_DAYS = 7.0  # "近 7 天推过"的仓库优先：最可能刚发版
 CORE_FLOOR = 300  # core 配额剩这么少就收手，别把 README/详情的份吃掉
@@ -46,6 +50,8 @@ def load_releases(path: Path) -> dict:
 def save_releases(payload: dict, path: Path) -> int:
     """原子写：临时文件 + replace，进程被杀也不会留下半截缓存。"""
     path.parent.mkdir(parents=True, exist_ok=True)
+    # 文件里的 keep 描述的是"当前保留策略"，不能沿用旧文件里的值（否则上限调大了它还写着旧数）
+    payload["keep"] = RELEASES_KEEP
     text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(text, encoding="utf-8")

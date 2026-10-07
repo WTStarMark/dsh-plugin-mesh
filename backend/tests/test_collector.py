@@ -493,7 +493,8 @@ class RunOnceOrderTest(unittest.TestCase):
         ), mock.patch.object(collect, "LAST_CRAWL", TMP / "last-crawl.json"), mock.patch.object(
             collect, "STATUS_FILE", TMP / "status.json"
         ), mock.patch.object(collect, "STAR_HISTORY", TMP / "star-history.json"), mock.patch.object(
-            collect, "UPDATE_LOG", TMP / "update-log.json"
+            collect, "UPDATE_LOG", TMP / "update-log.json"), mock.patch.object(
+        collect, "STAR_DAILY", TMP / "star-daily.json"
         ):
             code = collect.main(["--from-raw", "--frontend-limit", "100", "--quiet"])
         self.assertEqual(code, 0)
@@ -1192,11 +1193,19 @@ class StarHistoryTest(unittest.TestCase):
         self.assertEqual(snap.load_star_history(self.path)["points"], [])
 
     def test_same_day_is_overwritten_not_appended(self):
+        # "同一天"按每日界限算（默认北京时间 00:00）：下面两个时刻都是北京 10-01（01:00Z=09:00、12:00Z=20:00）
         snap.update_star_history(self._mesh("2026-10-01T01:00:00Z", {"a": 1}), self.path)
-        payload = snap.update_star_history(self._mesh("2026-10-01T22:00:00Z", {"a": 9, "b": 2}), self.path)
-        self.assertEqual(len(payload["points"]), 1, "同一天只留一个点")
-        self.assertEqual(payload["points"][0]["at"], "2026-10-01T22:00:00Z", "留当天的最后一次观测")
+        payload = snap.update_star_history(self._mesh("2026-10-01T12:00:00Z", {"a": 9, "b": 2}), self.path)
+        self.assertEqual(len(payload["points"]), 1, "同一个当地日只留一个点")
+        self.assertEqual(payload["points"][0]["at"], "2026-10-01T12:00:00Z", "留当天的最后一次观测")
         self.assertEqual(payload["points"][0]["stars"], {"a": 9, "b": 2})
+
+    def test_local_midnight_starts_a_new_point(self):
+        # UTC 10-01 15:59 = 北京 23:59（还是 10-01）；UTC 16:00 = 北京 10-02 00:00（换天）
+        snap.update_star_history(self._mesh("2026-10-01T15:59:00Z", {"a": 1}), self.path)
+        payload = snap.update_star_history(self._mesh("2026-10-01T16:00:00Z", {"a": 2}), self.path)
+        self.assertEqual(len(payload["points"]), 2, "跨过北京 00:00 应新增一个点，而不是覆盖")
+        self.assertEqual([p["day"] for p in payload["points"]], ["2026-10-01", "2026-10-02"])
 
     def test_keeps_only_recent_days_and_sorts_ascending(self):
         for day in range(1, 13):
@@ -1391,6 +1400,94 @@ class InclusionAndDirectionTest(unittest.TestCase):
         mesh = build_mesh(raws, {})
         owner = [(e["source"], e["target"]) for e in mesh["edges"] if e["type"] == "owner"]
         self.assertEqual(owner, [("alice/a-repo", "alice/b-repo")], "对等关系仍按字母序归一化（去重靠它）")
+
+
+class StarDailyTest(unittest.TestCase):
+    """逐日星标增量：每轮把本轮变化累加进当天桶（首次见到只记基线），掉星如实记负。"""
+
+    def setUp(self):
+        shutil.rmtree(TMP, ignore_errors=True)
+        TMP.mkdir(parents=True, exist_ok=True)
+        self.path = TMP / "star-daily.json"
+
+    def tearDown(self):
+        shutil.rmtree(TMP, ignore_errors=True)
+
+    @staticmethod
+    def _mesh(day: str, stars: dict) -> dict:
+        return {"meta": {"generatedAt": day + "T00:30:00Z"}, "nodes": [{"id": k, "stars": v} for k, v in stars.items()]}
+
+    def test_first_sighting_only_records_baseline(self):
+        out = snap.update_star_daily(self._mesh("2026-10-07", {"a/b": 100}), self.path)
+        self.assertEqual(out["days"], {}, "首次见到不该计数（它本来就有这么多星）")
+        self.assertEqual(out["seen"]["a/b"], 100, "但要记基线")
+        self.assertEqual(out["lastRound"]["counted"], 0)
+
+    def test_deltas_accumulate_into_the_same_day(self):
+        snap.update_star_daily(self._mesh("2026-10-07", {"a/b": 100}), self.path)
+        snap.update_star_daily(self._mesh("2026-10-07", {"a/b": 130}), self.path)
+        out = snap.update_star_daily(self._mesh("2026-10-07", {"a/b": 145, "c/d": 5}), self.path)
+        self.assertEqual(out["days"]["2026-10-07"]["a/b"], 45, "同一天的多轮要累加")
+        self.assertEqual(out["lastRound"]["counted"], 1, "c/d 是首次见到，不计数")
+        self.assertEqual(out["lastRound"]["gained"], 15)
+
+    def test_negative_delta_is_recorded_honestly(self):
+        snap.update_star_daily(self._mesh("2026-10-07", {"a/b": 100}), self.path)
+        out = snap.update_star_daily(self._mesh("2026-10-07", {"a/b": 90}), self.path)
+        self.assertEqual(out["days"]["2026-10-07"]["a/b"], -10, "掉星要如实记负，不能当 0")
+        self.assertEqual(out["lastRound"]["gained"], 0, "净涨不含掉星")
+
+    def test_day_rollover_and_keep_window(self):
+        for i in range(9):
+            day = "2026-10-%02d" % (1 + i)
+            self._round(day, 100 + i * 10)
+            self._round(day, 100 + i * 10 + 5)
+        out = snap.load_star_daily(self.path)
+        self.assertEqual(len(out["days"]), 8, "只留最近 8 天（含当天）")
+        self.assertNotIn("2026-10-01", out["days"], "最老的一天要被滚掉")
+        # 当天桶 = 跨天那一步的变化（+5）+ 当天再涨的（+5）= 10：累加的是"观测到的变化"，不摊派
+        self.assertEqual(out["days"]["2026-10-09"]["a/b"], 10)
+        self.assertEqual(out["sampledDays"], ["2026-10-02", "2026-10-03", "2026-10-04", "2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08", "2026-10-09"])
+
+    def _round(self, day: str, stars: int) -> None:
+        snap.update_star_daily(self._mesh(day, {"a/b": stars}), self.path)
+
+    def test_seen_is_rebuilt_from_current_nodes(self):
+        snap.update_star_daily(self._mesh("2026-10-07", {"a/b": 1, "c/d": 2}), self.path)
+        out = snap.update_star_daily(self._mesh("2026-10-08", {"a/b": 3}), self.path)
+        self.assertEqual(sorted(out["seen"].keys()), ["a/b"], "不在本轮节点表里的仓库要从基线表清掉（文件不随总量膨胀）")
+
+    def test_tolerates_missing_or_broken_file(self):
+        self.assertEqual(snap.load_star_daily(self.path)["days"], {})
+        self.path.write_text("不是 json", encoding="utf-8")
+        self.assertEqual(snap.load_star_daily(self.path)["seen"], {})
+
+
+class DayBoundaryTest(unittest.TestCase):
+    """每日界限：按 DAY_TZ_OFFSET_HOURS（默认 +8）的 00:00 切天，而不是 UTC 00:00（= 北京 08:00）。"""
+
+    def setUp(self):
+        shutil.rmtree(TMP, ignore_errors=True)
+        TMP.mkdir(parents=True, exist_ok=True)
+        self.path = TMP / "star-daily.json"
+
+    def tearDown(self):
+        shutil.rmtree(TMP, ignore_errors=True)
+
+    def test_day_of_shifts_at_local_midnight(self):
+        self.assertEqual(snap.day_of("2026-10-07T15:59:59Z"), "2026-10-07")
+        self.assertEqual(snap.day_of("2026-10-07T16:00:00Z"), "2026-10-08", "北京 00:00 就该换日")
+        self.assertEqual(snap.day_of("2026-10-07T23:30:00Z"), "2026-10-08")
+        self.assertEqual(snap.day_of("2026-10-08T00:30:00Z"), "2026-10-08")
+        self.assertEqual(snap.day_of("坏数据"), "坏数据", "解析不了就原样返回，不抛异常")
+
+    def test_buckets_follow_local_day(self):
+        # 北京 10-08 00:30（UTC 10-07 16:30）那一轮的增量应进 10-08 的桶
+        snap.update_star_daily({"meta": {"generatedAt": "2026-10-07T16:30:00Z"}, "nodes": [{"id": "a/b", "stars": 100}]}, self.path)
+        out = snap.update_star_daily({"meta": {"generatedAt": "2026-10-07T16:45:00Z"}, "nodes": [{"id": "a/b", "stars": 130}]}, self.path)
+        self.assertEqual(list(out["days"].keys()), ["2026-10-08"], "跨过北京 00:00 后应记进新的一天")
+        self.assertEqual(out["days"]["2026-10-08"]["a/b"], 30)
+        self.assertEqual(out["sampledDays"], ["2026-10-08"], "sampledDays 也用当地日期")
 
 
 if __name__ == "__main__":

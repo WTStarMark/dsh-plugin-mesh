@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createApi, categoryColor, xmlEscape, validNamePart, apiIndex, MAX_LIMIT, textWidth, wrapText, DEFAULT_SITE } from "../tools/api.mjs";
+import { createApi, categoryColor, xmlEscape, validNamePart, apiIndex, MAX_LIMIT, textWidth, wrapText, DEFAULT_SITE, DAY_TZ_OFFSET_HOURS } from "../tools/api.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const api = createApi({ root: ROOT });
@@ -152,13 +152,22 @@ test("榜单：周更新榜按更新次数排序，star 榜给真实增量与真
   assert.deepEqual(counts, [...counts].sort((a, b) => b - a), "周更新热榜必须按更新次数排序（这是它的关键指标）");
   assert.ok(counts.every((u) => Number.isInteger(u) && u >= 1), "窗口内确实推送过的仓库至少算 1 次，实际 " + counts.join(","));
   assert.ok(counts[0] <= (updated.maxUpdates ?? 1), "榜首次数应与 maxUpdates 一致");
-  const times = updated.items.map((n) => Date.parse(n.pushedAt));
-  for (let i = 1; i < updated.items.length; i++) {
-    if (counts[i] === counts[i - 1]) assert.ok(times[i] <= times[i - 1], "次数相同时应按最近推送降序");
+  // 排序链随口径走：按发版判定时比"最新版本日期"，采样口径才比"最近推送"
+  if (updated.metric === "releases") {
+    const latest = updated.items.map((n) => String(n.latestReleaseAt ?? ""));
+    for (let i = 1; i < updated.items.length; i++) {
+      if (counts[i] === counts[i - 1]) assert.ok(latest[i] <= latest[i - 1], "版本数相同时应按最新版本日期降序");
+    }
+    assert.ok(updated.items.every((n) => (n.series ?? []).some((v) => v !== null)), "按发版判定时逐日柱来自发布日期，不该全空");
+  } else {
+    const times = updated.items.map((n) => Date.parse(n.pushedAt));
+    for (let i = 1; i < updated.items.length; i++) {
+      if (counts[i] === counts[i - 1]) assert.ok(times[i] <= times[i - 1], "次数相同时应按最近推送降序");
+    }
   }
   assert.ok(
-    ["update-log", "epoch-pair", "current-only"].includes(updated.updatesSource),
-    "必须说明次数是怎么观测来的，实际 " + updated.updatesSource,
+    ["releases", "update-log", "epoch-pair", "current-only"].includes(updated.updatesSource),
+    "必须说明次数是怎么观测来的（releases = 按发版，其余是 pushedAt 采样），实际 " + updated.updatesSource,
   );
   assert.ok((updated.note ?? "").length > 0, "必须写明采样口径");
 
@@ -178,7 +187,15 @@ test("榜单：周更新榜按更新次数排序，star 榜给真实增量与真
     }
   }
   const since = Date.parse(out.now) - out.windowDays * 86400000;
-  assert.ok(times.every((t) => t >= since), "每条都要落在窗口内");
+  if (updated.metric === "releases") {
+    const floorDay = new Date(since).toISOString().slice(0, 10);
+    assert.ok(
+      updated.items.every((n) => String(n.latestReleaseAt ?? "") >= floorDay),
+      "按发版判定时，最新版本日期必须落在窗口内",
+    );
+  } else {
+    assert.ok(updated.items.every((n) => Date.parse(n.pushedAt) >= since), "每条都要落在窗口内");
+  }
   assert.ok(updated.total >= updated.items.length, "总数不小于一页");
   assert.ok(updated.items.every((n) => n.id && n.name && typeof n.stars === "number"), "行字段要齐");
 
@@ -212,7 +229,10 @@ test("榜单：周更新榜按更新次数排序，star 榜给真实增量与真
     assert.equal(item.series.length, 7, "每行都要有 7 个槽位：" + item.id);
     assert.ok(item.series.every((v) => v === null || (Number.isFinite(v) && v >= 0)), "槽位只能是 null 或非负数");
   }
-  if (updated.updatesSource !== "update-log") {
+  if (updated.updatesSource === "releases") {
+    // 按发版判定：逐日柱来自"发布日期"，窗口内的天数就该非 0
+    assert.ok(updated.seriesDays > 0, "按发版判定时应有窗口天数，实际 " + updated.seriesDays);
+  } else if (updated.updatesSource !== "update-log") {
     assert.equal(updated.seriesDays, 0, "没有按天采样时应报告 0 天");
     assert.ok(updated.items.every((it) => it.series.every((v) => v === null)), "没有按天采样时绝不许编柱子");
   }
@@ -235,8 +255,9 @@ test("榜单：周更新榜按更新次数排序，star 榜给真实增量与真
   assert.ok(capped.limit <= 50, "榜单 limit 应被夹住，实际 " + capped.limit);
 });
 
-test("榜单行带版本列表：读采集器抓的 data/cache/releases.json", async () => {
+test("榜单行带版本列表：读采集器抓的 data/cache/releases.json（并按发版判定周更新）", async () => {
   const hoursAgo = (h) => new Date(Date.now() - h * 3600000).toISOString();
+  const daysAgo = (d) => new Date(Date.now() - d * 86400000).toISOString().slice(0, 10);
   const tmp = await mkdtemp(join(tmpdir(), "mesh-rel-"));
   try {
     await mkdir(join(tmp, "data", "cache"), { recursive: true });
@@ -253,20 +274,105 @@ test("榜单行带版本列表：读采集器抓的 data/cache/releases.json", a
       JSON.stringify({
         updatedAt: hoursAgo(0.2),
         keep: 5,
-        repos: { "a/one": { at: hoursAgo(0.2), releases: [{ tag: "v1.2.3", name: "1.2.3", at: "2026-10-05", pre: false }, { tag: "v1.2.4-rc.1", name: "rc", at: "2026-10-06", pre: true }] } },
+        // 日期用相对时间造：写死日期过一周就掉出窗口，测试会变定时炸弹
+        repos: {
+          "a/one": {
+            at: hoursAgo(0.2),
+            releases: [
+              { tag: "v1.2.3", name: "1.2.3", at: daysAgo(3), pre: false },
+              { tag: "v1.2.4-rc.1", name: "rc", at: daysAgo(2), pre: true },
+              { tag: "v1.2.0", name: "1.2.0", at: daysAgo(40), pre: false }, // 窗口外的老版本：不该计数
+            ],
+          },
+        },
       }),
     );
     const local = createApi({ root: tmp });
     const out = await local.ranking(new URLSearchParams("limit=5"));
     assert.equal(out.releases.cached, 1, "要报告版本缓存规模");
     const row = out.boards.updated.items[0];
-    assert.equal(row.releases.length, 2, "行里要带版本列表");
+    assert.equal(row.releases.length, 3, "行里要带完整的版本列表（含窗口外的老版本）");
     assert.equal(row.releases[0].tag, "v1.2.3");
     assert.equal(row.releases[1].pre, true, "预发布标记要透传");
     assert.ok(Array.isArray(out.boards.stars.items?.[0]?.releases ?? []), "没有版本数据时给空数组，不是 undefined");
+
+    // 周更新热榜改用 releases 判定"本周有更新"：计数 = 窗口内真实发布的版本数（不是采样下界）
+    const board = out.boards.updated;
+    assert.equal(board.metric, "releases", "有 releases 数据时按发版判定，实际 " + board.metric);
+    assert.equal(board.updatesSource, "releases");
+    assert.equal(board.total, 1, "只有 1 个仓库本周发过版");
+    assert.equal(board.maxUpdates, 2, "计数 = 窗口内的版本数（窗口外那 2 个老版本不算）");
+    assert.equal(row.updates, 2, "行里的次数就是发版数");
+    assert.equal(row.latestReleaseAt, daysAgo(2), "要带上本周最新那个版本的日期");
+    const bars = (row.series ?? []).filter((v) => typeof v === "number").reduce((s, v) => s + v, 0);
+    assert.equal(bars, 2, "逐日柱加总 = 本周发版数（用发布日期算，真实计数）");
+    assert.match(board.note, /release/, "口径要写清是按 release 判定：" + board.note);
   } finally {
     await rm(tmp, { recursive: true, force: true });
   }
+});
+
+test("周更新热榜：窗口与横轴对齐（最左那天的版本必须被画出来）", async () => {
+  // 复现过的线上 bug：窗口按"现在往前 7x24 小时"（起点比横轴早一天），
+  // 于是最早那天的版本被算进总数却不画柱子（实测第 5 行 12 个版本 vs 柱子和 6）。
+  const shift = (day, delta) => new Date(Date.parse(day + "T00:00:00Z") + delta * 86400000).toISOString().slice(0, 10);
+  const localDay = new Date(Date.now() + DAY_TZ_OFFSET_HOURS * 3600000).toISOString().slice(0, 10);
+  const axisFirst = shift(localDay, -6);
+  const nowIso = new Date().toISOString();
+  const tmp = await mkdtemp(join(tmpdir(), "mesh-align-"));
+  try {
+    await mkdir(join(tmp, "data", "cache"), { recursive: true });
+    await writeFile(
+      join(tmp, "data", "mesh.json"),
+      JSON.stringify({
+        meta: { generatedAt: nowIso },
+        tags: [], clusters: [], hubs: [], edges: [],
+        nodes: [{ id: "a/one", name: "one", owner: "a", stars: 5, pushedAt: nowIso, archived: false, fork: false, matchedTags: ["dsh"], topics: [] }],
+      }),
+    );
+    await writeFile(
+      join(tmp, "data", "cache", "releases.json"),
+      JSON.stringify({
+        updatedAt: nowIso,
+        keep: 20,
+        repos: {
+          "a/one": {
+            at: nowIso,
+            releases: [
+              { tag: "v4", name: "", at: shift(axisFirst, -1), pre: false },
+              { tag: "v3", name: "", at: axisFirst, pre: false },
+              { tag: "v2", name: "", at: shift(axisFirst, 3), pre: false },
+            ],
+          },
+        },
+      }),
+    );
+    const local = createApi({ root: tmp });
+    const out = await local.ranking(new URLSearchParams("limit=5"));
+    const board = out.boards.updated;
+    assert.equal(out.seriesDays[0], axisFirst, "横轴起点 = 数据快照当天往前 6 天（当地日）");
+    assert.equal(board.seriesDays, 7, "横轴 7 个当地日");
+    const row = board.items[0];
+    assert.equal(row.updates, 2, "只算横轴覆盖的那两天：横轴之前那个不算，实际 " + row.updates);
+    const bars = (row.series ?? []).filter((v) => typeof v === "number").reduce((s, v) => s + v, 0);
+    assert.equal(bars, row.updates, "总数必须等于逐日柱加总（窗口与横轴同一组日历日）");
+    assert.equal(row.series[0], 1, "最左那天的版本要画出来，不能被漏掉：" + JSON.stringify(row.series));
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("每日界限：接口与采集器用同一个时区偏移（北京时间 00:00 换日）", async () => {
+  const py = await readFile(resolve(ROOT, "backend", "dsh_mesh", "config.py"), "utf8");
+  const found = /DAY_TZ_OFFSET_HOURS\s*=\s*(-?\d+)/.exec(py);
+  assert.ok(found, "config.py 里应有 DAY_TZ_OFFSET_HOURS");
+  assert.equal(DAY_TZ_OFFSET_HOURS, Number(found[1]), "接口与采集器的每日界限必须一致，否则按天的桶会对不上");
+  assert.equal(DAY_TZ_OFFSET_HOURS, 8, "默认按北京时间 00:00 换日");
+
+  // 横轴末位 = 数据快照那天的"当地日期"，不是 UTC 日期
+  const out = await api.ranking(new URLSearchParams("limit=1"));
+  const localDay = new Date(Date.parse(out.generatedAt) + DAY_TZ_OFFSET_HOURS * 3600000).toISOString().slice(0, 10);
+  assert.equal(out.seriesDays[out.seriesDays.length - 1], localDay, "横轴末位应是快照当天的当地日期：" + out.generatedAt);
 });
 
 test("周更新热榜排序：次数相同时，越近推送的排越前（次数 → 最近推送 → 星标）", async () => {

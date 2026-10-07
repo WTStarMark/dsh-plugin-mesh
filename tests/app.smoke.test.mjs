@@ -1105,9 +1105,10 @@ test("榜单弹窗：点奖杯 → 渲染榜单 → 切榜 → 点行跳转 → 
   const textOf = (node) => node.all.map((n) => n.textContent ?? "").join(" ");
   assert.ok(rankRows().length > 0, "周更新榜应渲染出行，实际：" + textOf(body));
   assert.doesNotMatch(textOf(body), /窗口 7 天/, "榜单上下不该有文字，实际：" + textOf(body));
-  assert.match(body.title, /窗口 7 天/, "口径应挂在悬停提示上，实际：" + body.title);
-  assert.match(body.title, /按【更新次数】→ 最近推送 → 星标排序/, "排序口径要写清，实际：" + body.title);
-  assert.match(textOf(body), /3 次/, "要显示更新次数，实际：" + textOf(body));
+  // 前端不展示口径解释：列表与标签页都不挂悬停解释（口径在接口字段里）
+  assert.ok(!body.title, "列表不该挂悬停解释，实际：" + body.title);
+  assert.ok(!tabs.children.find((b) => b.dataset.tab === "updated")?.title, "标签页不该挂悬停解释");
+  assert.match(textOf(body), /≥3 次/, "要显示更新轮次并标明下界（≥），实际：" + textOf(body));
 
   // 切到 star 榜：增量与【真实窗口】都要在，且不能假装是"周"
   const starTab = tabs.children.find((b) => b.dataset.tab === "stars");
@@ -1116,7 +1117,7 @@ test("榜单弹窗：点奖杯 → 渲染榜单 → 切榜 → 点行跳转 → 
   const starText = textOf(body);
   assert.match(starText, /\+\d/, "star 榜应显示增量，实际：" + starText);
   assert.doesNotMatch(starText, /实际窗口/, "列表里不该有窗口文字，实际：" + starText);
-  assert.match(body.title, /实际窗口 1\.75 天/, "必须写出真实窗口，实际：" + body.title);
+  assert.match(starText, /1\.75 天/, "窗口天数要作为数据放在次行（不是解释文字），实际：" + starText);
   assert.ok(starTab.classList.contains("on"), "切换后按钮应处于选中态");
   assert.equal(tabs.children.find((b) => b.dataset.tab === "updated").classList.contains("on"), false, "另一个榜单应取消选中");
 

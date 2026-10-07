@@ -516,6 +516,8 @@ input[type="range"]::-moz-range-thumb {
 .spark-bar { flex: 1 1 0; min-width: 0; height: 3px; border-radius: 2px 2px 0 0; background: var(--accent); opacity: .6; }
 .spark-bar.peak { opacity: 1; }
 .spark-bar.zero { background: var(--border-l2); opacity: 1; }
+/* 掉星（star 榜会真的出现负数）：用告警色如实画出来，不伪装成 0 */
+.spark-bar.down { background: var(--warn); opacity: .9; }
 .spark-bar.none { background: transparent; border-bottom: 2px dashed var(--border-l2); opacity: 1; }
 .spark-empty { opacity: .4; }
 .rank-row:hover .spark-bar { opacity: 1; }

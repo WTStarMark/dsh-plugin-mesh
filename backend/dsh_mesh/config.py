@@ -24,6 +24,11 @@ STATUS_FILE = CACHE_DIR / "status.json"         # 采集进度状态（前端顶
 STAR_HISTORY = CACHE_DIR / "star-history.json"   # 星标历史环：每天一个"id → stars"点，前端「周 star 热榜」算真实增量用
 UPDATE_LOG = CACHE_DIR / "update-log.json"       # 更新日志：每轮采样到的"推送推进"次数（按天计数），前端「周更新热榜」按它排序
 RELEASES_CACHE = CACHE_DIR / "releases.json"     # 版本缓存：每个仓库最近几个 release（tag/名称/时间/预发布），榜单"版本列表"用
+STAR_DAILY = CACHE_DIR / "star-daily.json"       # 逐日星标增量：每轮把本轮变化累加进当天桶，star 榜的逐日趋势柱用它
+
+# 每日界限：按该时区（UTC 偏移小时数）的 00:00 切天，而不是 UTC 00:00（= 北京时间 08:00）。
+# 星标环 / 更新日志 / 逐日星标三个"按天"的落盘都用它；前端接口里有一份同样的常量（tools/api.mjs）。
+DAY_TZ_OFFSET_HOURS = 8
 DEFAULT_BUDGET = 120     # 每轮最多消耗多少次搜索请求
 REFRESH_HOURS = 6.0      # 超过这个时长没刷新的段会重新排队
 ENV_FILE = ROOT / ".env"

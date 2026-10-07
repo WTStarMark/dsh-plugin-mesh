@@ -38,6 +38,7 @@ from dsh_mesh.config import (
     SEGMENT_STATE,
     SNAPSHOT_DIR,
     RELEASES_CACHE,
+    STAR_DAILY,
     STAR_HISTORY,
     UPDATE_LOG,
     README_CACHE,
@@ -339,7 +340,7 @@ def fetch_releases(args, mesh: dict, log) -> dict:
             log("版本：core 配额只剩 " + str(client.stats.core_remaining) + "，本轮提前收手（下一轮接着抓）")
             break
         try:
-            items = client.releases(repo_id)
+            items = client.releases(repo_id, per_page=rel.RELEASES_KEEP)
         except RuntimeError as err:
             failed += 1
             log("版本：" + repo_id + " 抓取失败：" + str(err)[:80])
@@ -479,6 +480,24 @@ def run_once(args, log) -> dict:
         "points": len(history["points"]),
         "latest": history["points"][-1]["at"] if history["points"] else None,
     }
+
+    # 逐日星标增量：星标环一天只留一个点（同天覆盖），攒不出逐日形状 —— 这里每轮把
+    # "本轮星标变化"累加进当天桶，star 榜的逐日趋势柱用它（每天都是真实观测的累加值）。
+    star_daily = snap.update_star_daily(mesh, STAR_DAILY)
+    summary["starDaily"] = {
+        "days": len(star_daily["days"]),
+        "counted": star_daily["lastRound"]["counted"],
+        "gained": star_daily["lastRound"]["gained"],
+    }
+    log(
+        "星标逐日：本轮有变化的仓库 "
+        + str(star_daily["lastRound"]["counted"])
+        + " 个（净涨 "
+        + str(star_daily["lastRound"]["gained"])
+        + " 星）· 已记 "
+        + str(len(star_daily["days"]))
+        + " 天"
+    )
 
     # 更新日志：每轮采样"pushedAt 比上次前进了吗"，按天累计次数。
     # 前端「周更新热榜」按它排序 —— GitHub 只给最后一次推送时间，"一周更新几次"只能这样观测。

@@ -6,10 +6,25 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta
 from pathlib import Path
 
-from .config import KEEP_SNAPSHOTS
+from .config import DAY_TZ_OFFSET_HOURS, KEEP_SNAPSHOTS
 from .build import utcnow
+
+
+def day_of(at: str, offset_hours: int = DAY_TZ_OFFSET_HOURS) -> str:
+    """把 UTC 时间戳换算成"哪一天" —— 按 offset_hours 时区的 00:00 切天。
+
+    默认 UTC+8：北京时间 00:00 换日（原来按 UTC 切，等于北京时间早上 08:00 才换日，
+    前半夜的数据会被算到前一天）。
+    """
+    text = str(at)
+    try:
+        stamp = datetime.strptime(text[:19], "%Y-%m-%dT%H:%M:%S")
+    except ValueError:
+        return text[:10]
+    return (stamp + timedelta(hours=offset_hours)).strftime("%Y-%m-%d")
 
 
 def _write_json(path: Path, payload) -> int:
@@ -99,10 +114,10 @@ def update_star_history(mesh: dict, path: Path, keep: int = STAR_HISTORY_KEEP, n
     - 只留最近 keep 个点（= keep 天），文件大小约 keep × 全量仓库数
     """
     at = (mesh.get("meta") or {}).get("generatedAt") or now or utcnow()
-    day = str(at)[:10]
+    day = day_of(at)  # 按 DAY_TZ_OFFSET_HOURS 时区的 00:00 切天
     previous = load_star_history(path)
     stars = {n["id"]: n.get("stars", 0) for n in mesh.get("nodes", []) if n.get("id")}
-    points = [p for p in previous["points"] if str(p.get("at"))[:10] != day]
+    points = [p for p in previous["points"] if day_of(p.get("at")) != day]
     points.append({"at": at, "day": day, "count": len(stars), "stars": stars})
     points.sort(key=lambda p: str(p["at"]))
     payload = {
@@ -115,6 +130,94 @@ def update_star_history(mesh: dict, path: Path, keep: int = STAR_HISTORY_KEEP, n
     _write_json(path, payload)
     return payload
 
+
+
+STAR_DAILY_KEEP = 8  # 逐日星标增量按天保留 8 天（算 7 天窗口够用）
+
+
+def load_star_daily(path: Path) -> dict:
+    """读逐日星标增量。文件不存在/损坏都当空表 —— 绝不因为一个缓存文件中断采集。"""
+    empty = {"updatedAt": None, "unit": "stars/day", "keepDays": STAR_DAILY_KEEP, "seen": {}, "days": {}, "sampledDays": []}
+    if not path.exists():
+        return empty
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return empty
+    if not isinstance(data, dict):
+        return empty
+    seen = {str(k): int(v) for k, v in (data.get("seen") or {}).items() if isinstance(v, (int, float))}
+    days: dict[str, dict[str, int]] = {}
+    for day, bucket in (data.get("days") or {}).items():
+        if isinstance(bucket, dict):
+            days[str(day)] = {str(k): int(v) for k, v in bucket.items() if isinstance(v, (int, float))}
+    return {
+        "updatedAt": data.get("updatedAt"),
+        "unit": data.get("unit") or "stars/day",
+        "keepDays": int(data.get("keepDays") or STAR_DAILY_KEEP),
+        "seen": seen,
+        "days": days,
+        "sampledDays": [str(d) for d in (data.get("sampledDays") or [])],
+    }
+
+
+def update_star_daily(mesh: dict, path: Path, *, keep: int = STAR_DAILY_KEEP, now: str | None = None) -> dict:
+    """每轮把「本轮星标变化」累加进【当天】的桶 —— 前端 star 榜的逐日趋势柱用它。
+
+    为什么需要它：星标历史环一天只留一个点（同一天重复跑会覆盖），所以"两个日点的差"只能落在
+    后一天，攒不出逐日形状（线上实测：只有 2 个点时，一天的涨幅全堆到最后一天）。
+    这里每轮（默认 1 小时）跟上一轮比一次、把变化累加进当天桶：每天都是真实观测的累加值，
+    **既不跨天摊派，也不编数字**（负数是掉星，如实记为负）。
+
+    - 首次见到某个仓库只记基线，不计数（与更新日志同一套规矩）
+    - seen 每轮按当前节点表重建，所以文件大小只跟索引规模走，不会无限增长
+    - days 只留最近 keep 天
+    """
+    at = (mesh.get("meta") or {}).get("generatedAt") or now or utcnow()
+    day = day_of(at)  # 同上
+    payload = load_star_daily(path)
+    seen = dict(payload["seen"])
+    days = {k: dict(v) for k, v in payload["days"].items()}
+    sampled = set(payload.get("sampledDays") or []) | {day}
+
+    bucket = dict(days.get(day) or {})
+    next_seen: dict[str, int] = {}
+    counted = 0
+    gained = 0
+    for node in mesh.get("nodes", []):
+        nid = node.get("id")
+        stars = node.get("stars")
+        if not nid or not isinstance(stars, (int, float)):
+            continue
+        stars = int(stars)
+        next_seen[nid] = stars
+        before = seen.get(nid)
+        if before is None:
+            continue  # 首次见到：只记基线，"它本来就有这么多星"不是这一轮的增量
+        delta = stars - before
+        if delta:
+            bucket[nid] = int(bucket.get(nid, 0)) + delta
+            counted += 1
+            if delta > 0:
+                gained += delta
+    if bucket:
+        days[day] = bucket
+
+    keep_floor = _day_shift(day, -(keep - 1))  # 含当天在内共 keep 天
+    days = {d: c for d, c in days.items() if d >= keep_floor and c}
+    sampled = {d for d in sampled if d >= keep_floor}
+    out = {
+        "updatedAt": now or utcnow(),
+        "unit": "stars/day",
+        "keepDays": keep,
+        "note": "每轮跟上一轮比一次星标，把变化累加进当天（首次见到不计数）。前端 star 榜的逐日趋势柱用它：每天都是真实观测的累加值，不跨天摊派、不编数字；负数是掉星。",
+        "lastRound": {"at": at, "counted": counted, "gained": gained},
+        "seen": dict(sorted(next_seen.items())),
+        "days": dict(sorted(days.items())),
+        "sampledDays": sorted(sampled),
+    }
+    _write_json(path, out)
+    return out
 
 
 UPDATE_LOG_KEEP = 8  # 更新日志按天保留 8 天（算 7 天窗口够用）
@@ -171,7 +274,7 @@ def update_update_log(mesh: dict, path: Path, *, keep: int = UPDATE_LOG_KEEP, no
     - days 只留最近 keep 天
     """
     at = (mesh.get("meta") or {}).get("generatedAt") or now or utcnow()
-    day = str(at)[:10]
+    day = day_of(at)  # 同上：按北京时间的 00:00 切天
     payload = load_update_log(path)
     seen = dict(payload["seen"])
     days = {k: dict(v) for k, v in payload["days"].items()}
@@ -185,7 +288,7 @@ def update_update_log(mesh: dict, path: Path, *, keep: int = UPDATE_LOG_KEEP, no
         if not nid or not pushed:
             continue
         pushed = str(pushed)
-        if pushed[:10] < floor:
+        if day_of(pushed) < floor:
             seen.pop(nid, None)  # 太久没动：不再跟踪，也不必计数
             continue
         before = seen.get(nid)

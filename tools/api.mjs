@@ -12,6 +12,10 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import { gunzipSync } from "node:zlib";
 import { join } from "node:path";
 import { stripNoiseOwners } from "../src/mesh-data.js";
+/* 每日界限：按该时区（UTC 偏移小时数）的 00:00 切天，必须与 backend/dsh_mesh/config.py 的
+ * DAY_TZ_OFFSET_HOURS 一致（默认 +8 = 北京时间 00:00 换日，而不是 UTC 00:00 = 北京 08:00）。 */
+export const DAY_TZ_OFFSET_HOURS = Number(process.env.DAY_TZ_OFFSET_HOURS ?? 8);
+
 
 const DATA_TTL_MS = 5 * 60 * 1000;
 /** 卡片默认去处：线上站点（可用 SITE_URL 环境变量或 ?link= 覆盖） */
@@ -501,7 +505,35 @@ export function createApi({ root }) {
     return releasesCache.index;
   }
 
-  /** 'YYYY-MM-DD' 加减天数（UTC）：逐日趋势柱的横轴用 */
+  /* 逐日星标增量（data/cache/star-daily.json，采集器每轮写）：star 榜的逐日趋势柱用它。
+   * 为什么不用星标环推：环一天只留一个点（同日覆盖），"两个日点的差"只能落在后一天 ——
+   * 攒不出逐日形状（线上实测：只有 2 个点时，一整天的涨幅全堆在最后一天）。 */
+  let starDailyCache = { mtimeMs: -2, index: { days: new Map(), sampled: new Set(), updatedAt: null } };
+
+  async function loadStarDaily() {
+    const file = join(root, "data", "cache", "star-daily.json");
+    const info = await stat(file).catch(() => null);
+    if (!info) return { days: new Map(), sampled: new Set(), updatedAt: null };
+    if (starDailyCache.mtimeMs === info.mtimeMs) return starDailyCache.index;
+    try {
+      const data = JSON.parse(await readFile(file, "utf8"));
+      const days = new Map();
+      for (const [day, bucket] of Object.entries(data.days ?? {})) {
+        const map = new Map();
+        for (const [id, delta] of Object.entries(bucket ?? {})) if (typeof delta === "number") map.set(id, delta);
+        days.set(day, map);
+      }
+      starDailyCache = { mtimeMs: info.mtimeMs, index: { days, sampled: new Set(data.sampledDays ?? []), updatedAt: data.updatedAt ?? null } };
+    } catch {
+      starDailyCache = { mtimeMs: info.mtimeMs, index: { days: new Map(), sampled: new Set(), updatedAt: null } };
+    }
+    return starDailyCache.index;
+  }
+
+  /** 某个时刻落在"哪一天"（按 DAY_TZ_OFFSET_HOURS 的 00:00 切天） */
+  const dayOf = (ms) => new Date(Number(ms) + DAY_TZ_OFFSET_HOURS * 3600000).toISOString().slice(0, 10);
+
+  /** 'YYYY-MM-DD' 加减天数：逐日趋势柱的横轴用（纯日期串运算，与时区无关） */
   const dayShift = (day, delta) => new Date(Date.parse(day + "T00:00:00Z") + delta * 86400000).toISOString().slice(0, 10);
 
   /** 两个榜单：周更新热榜（更新频率）+ 周 star 热榜（星标历史增量，历史不足时如实降级窗口） */
@@ -533,8 +565,19 @@ export function createApi({ root }) {
      * 排序关键不是"最后一次推送有多新"，而是【一周更新了几次】：
      *   updates = 采样到 pushedAt 前进的轮次数（下界）；没采样到也确有推送时保底 1
      * 次数相同时才比最近推送时间、再比星标。 */
-    const since = now - windowDays * 86400000;
-    const windowStartDay = new Date(since).toISOString().slice(0, 10);
+    /* 逐日趋势柱的横轴：最近 seriesLen 个"当地日"（含数据快照当天）。
+     * 观测不到的那天给 null —— 界面必须能区分「当天 0 次」与「当天没观测」。
+     * 注意：窗口起点必须与横轴对齐（同一组日历日），否则最左边那天的事件会被计数却不画柱子
+     * —— 线上实测过：窗口是"现在往前 7×24 小时"（起点 10-01），横轴却只有 10-02…10-08，
+     * 于是 10-01 的 6 个版本被算进总数（12）却没有柱子（加总只有 6）。 */
+    const meshAtMs = Date.parse(mesh.meta?.generatedAt ?? "");
+    const anchorDay = dayOf(Number.isFinite(meshAtMs) ? meshAtMs : now);
+    const seriesLen = Math.min(7, windowDays);
+    const seriesDays = [];
+    for (let i = seriesLen - 1; i >= 0; i--) seriesDays.push(dayShift(anchorDay, -i));
+    const windowStartDay = seriesDays[0]; // 窗口 = 横轴覆盖的那几天（当地日历日）
+    // 窗口起点对应的时刻：当地 00:00（= UTC 减去时区偏移），供"最近推送"过滤用
+    const since = Date.parse(windowStartDay + "T00:00:00Z") - DAY_TZ_OFFSET_HOURS * 3600000;
     const updateStats = await loadUpdateStats(windowStartDay, nodes);
     /* 次数 = 采样到的推进次数（每轮最多记一次，是**下界**）；一次都没采样到、但窗口内确有推送时保底 1。
      * 为什么不是 "1 + 采样"：采样到的推进里已经包含"把 pushedAt 推到窗口内的那次推送"，
@@ -564,13 +607,38 @@ export function createApi({ root }) {
           (b.stars ?? 0) - (a.stars ?? 0),
       );
 
-    /* 逐日趋势柱的横轴：最近 7 天（含数据快照当天）。
-     * 观测不到的那天给 null —— 界面必须能区分「当天 0 次」与「当天没观测」。 */
-    const meshAtMs = Date.parse(mesh.meta?.generatedAt ?? "");
-    const anchorDay = new Date(Number.isFinite(meshAtMs) ? meshAtMs : now).toISOString().slice(0, 10);
-    const seriesLen = Math.min(7, windowDays);
-    const seriesDays = [];
-    for (let i = seriesLen - 1; i >= 0; i--) seriesDays.push(dayShift(anchorDay, -i));
+    /* 榜一（v0.5.0 修订）：判定"本周有更新"改用 **releases**（真实发布的版本）。
+     * 为什么换：pushedAt 采样数的是"我们采样到几次推进"，天生是下界，而且会把
+     * "只往特性分支推、从不发版"的仓库算成高频更新（线上实据：某项目 24 小时推 41 次）。
+     * 计数 = 窗口内真实发布的版本数（不是下界）；排序 = 版本数 → 最新版本日期 → 星标。
+     * 没有任何 releases 数据时（老部署 / 采集器还没跑）退回采样口径，updatesSource 里标清楚。 */
+    const meshDay = dayOf(Date.parse(mesh.meta?.generatedAt ?? "") || now);
+    const releasesByDay = new Map(); // day -> Map<id, 当天发布的版本数>
+    const releaseRows = [];
+    for (const n of nodes) {
+      if (n.archived || n.fork) continue;
+      const list = releasesIndex.repos[n.id];
+      if (!Array.isArray(list) || !list.length) continue;
+      const inWindow = list.filter((r) => typeof r.at === "string" && r.at >= windowStartDay && r.at <= meshDay);
+      if (!inWindow.length) continue;
+      for (const r of inWindow) {
+        let bucket = releasesByDay.get(r.at);
+        if (!bucket) {
+          bucket = new Map();
+          releasesByDay.set(r.at, bucket);
+        }
+        bucket.set(n.id, (bucket.get(n.id) ?? 0) + 1);
+      }
+      releaseRows.push({ node: n, count: inWindow.length, latest: inWindow.map((r) => r.at).sort().pop() });
+    }
+    releaseRows.sort(
+      (a, b) => b.count - a.count || String(b.latest ?? "").localeCompare(String(a.latest ?? "")) || (b.node.stars ?? 0) - (a.node.stars ?? 0),
+    );
+    const seriesOfReleases = (id) =>
+      seriesDays.map((d) => (d >= windowStartDay && d <= meshDay ? releasesByDay.get(d)?.get(id) ?? 0 : null));
+    const useReleases = releaseRows.length > 0;
+
+
 
 
     /* 榜二：star 增量 */
@@ -598,7 +666,7 @@ export function createApi({ root }) {
     {
       const obs = points.map((p) => ({ at: Date.parse(p.at), stars: p.stars }));
       if (!useNewer) obs.push({ at: currentAt, stars: currentStars });
-      const dayIndex = (at) => seriesDays.indexOf(new Date(at).toISOString().slice(0, 10));
+      const dayIndex = (at) => seriesDays.indexOf(dayOf(Date.parse(at)));
       for (let i = 1; i < obs.length; i++) {
         const gapH = (obs[i].at - obs[i - 1].at) / 3600000;
         if (!(gapH > 0)) continue;
@@ -624,7 +692,7 @@ export function createApi({ root }) {
           });
           continue;
         }
-        const day = new Date(obs[i].at).toISOString().slice(0, 10);
+        const day = dayOf(obs[i].at);
         if (!seriesDays.includes(day)) continue;
         let bucket = starDaily.get(day);
         if (!bucket) {
@@ -645,6 +713,12 @@ export function createApi({ root }) {
         .filter((s) => s.value > 0);
     const seriesForStars = (id) => seriesDays.map((d) => (starDaily.has(d) ? starDaily.get(d).get(id) ?? 0 : null));
 
+    /* 逐日趋势优先用"每轮累加"的数据（star-daily）；没有就退回"环推 + 跨天宽条"。
+     * 有逐日数据时不再画宽条：那会与日柱重复计同一段变化。 */
+    const starDailyIndex = await loadStarDaily();
+    const hasStarDaily = seriesDays.some((d) => starDailyIndex.sampled.has(d));
+    const seriesFromDaily = (id) => seriesDays.map((d) => (starDailyIndex.sampled.has(d) ? starDailyIndex.days.get(d)?.get(id) ?? 0 : null));
+
     const starsBoard = {
       label: "周 star 热榜",
       metric: "star-gain",
@@ -656,8 +730,9 @@ export function createApi({ root }) {
       matched: 0,
       note: "",
       seriesKind: "star-gain",
-      seriesDays: starDaily.size,
-      spanCount: starSpans.length,
+      seriesSource: hasStarDaily ? "star-daily" : "ring",
+      seriesDays: hasStarDaily ? seriesDays.filter((d) => starDailyIndex.sampled.has(d)).length : starDaily.size,
+      spanCount: hasStarDaily ? 0 : starSpans.length,
     };
     if (base) {
       const byId = new Map(nodes.map((n) => [n.id, n]));
@@ -685,8 +760,9 @@ export function createApi({ root }) {
         delta: g.delta,
         starsBefore: g.before,
         starsAfter: g.after,
-        series: seriesForStars(g.node.id),
-        spans: spansForStars(g.node.id), // 跨多天的累计（画成宽柱，不平摊到某一天）
+        series: hasStarDaily ? seriesFromDaily(g.node.id) : seriesForStars(g.node.id),
+        // 逐日是"每轮累加"的真实值；没有逐日数据时才退回跨天累计宽条（不平摊到某一天）
+        spans: hasStarDaily ? [] : spansForStars(g.node.id),
       }));
       starsBoard.note =
         "增量 = 两个时间点的星标之差（真实观测，非估算；已排除归档与复刻）。窗口 " + starsBoard.window.days + " 天" +
@@ -707,30 +783,53 @@ export function createApi({ root }) {
       dataAgeHours: Number(((now - meshAt) / 3600000).toFixed(1)),
       history: { points: points.map((p) => ({ at: p.at, repos: Object.keys(p.stars).length, source: p.source ?? "history" })), latestAt: newest?.at ?? null },
       releases: { cached: Object.keys(releasesIndex.repos).length, updatedAt: releasesIndex.updatedAt ?? null },
+      starDaily: { days: starDailyIndex.days.size, updatedAt: starDailyIndex.updatedAt ?? null },
       boards: {
-        updated: {
-          label: "周更新热榜",
-          metric: "updates",
-          windowDays,
-          total: updatedAll.length,
-          count: Math.min(limit, updatedAll.length),
-          updatesSource: updateStats.source,
-          updatesObservations: updateStats.observations,
-          updatesSampledDays: updateStats.sampledDays,
-          note: updateStats.note,
-          maxUpdates: updatedAll.length ? updatesOf(updatedAll[0]) : 0,
-          seriesKind: "updates",
-          // 只有"按天采样"真的在跑时才有逐日序列；退化口径（两个观测点比对）算不出某一天，
-          // 硬画会变成凭空的柱子 —— 那种情况下一律给 null，让界面显示"暂无逐日数据"。
-          seriesDays: updateStats.source === "update-log" ? seriesDays.filter((d) => updateStats.sampledSet.has(d)).length : 0,
-          items: updatedAll.slice(0, limit).map((n) => ({
-            ...row(n),
-            updates: updatesOf(n),
-            observedAdvances: updateStats.advances.get(n.id) ?? 0,
-            // 逐日趋势：没观测到的天给 null，界面画成"无数据"而不是 0
-            series: seriesOfUpdates(n.id),
-          })),
-        },
+        updated: useReleases
+          ? {
+              label: "周更新热榜",
+              metric: "releases",
+              seriesKind: "releases",
+              windowDays,
+              total: releaseRows.length,
+              count: Math.min(limit, releaseRows.length),
+              updatesSource: "releases",
+              releasesIndexed: Object.keys(releasesIndex.repos).length,
+              note:
+                "判定依据 = 仓库本周真实发布的 release（采集器按仓库抓最近几个版本）。" +
+                "计数 = 窗口内发布的版本数，是真实计数；缓存里只留最近几个版本，超出部分看不到。",
+              maxUpdates: releaseRows.length ? releaseRows[0].count : 0,
+              seriesDays: seriesDays.filter((d) => d >= windowStartDay && d <= meshDay).length,
+              items: releaseRows.slice(0, limit).map((r) => ({
+                ...row(r.node),
+                updates: r.count,
+                latestReleaseAt: r.latest ?? null,
+                series: seriesOfReleases(r.node.id),
+              })),
+            }
+          : {
+              label: "周更新热榜",
+              metric: "updates",
+              windowDays,
+              total: updatedAll.length,
+              count: Math.min(limit, updatedAll.length),
+              updatesSource: updateStats.source,
+              updatesObservations: updateStats.observations,
+              updatesSampledDays: updateStats.sampledDays,
+              note: "还没有 releases 数据（采集器按仓库抓，需要几轮铺开）：先用 pushedAt 采样口径 —— " + updateStats.note,
+              maxUpdates: updatedAll.length ? updatesOf(updatedAll[0]) : 0,
+              seriesKind: "updates",
+              // 只有"按天采样"真的在跑时才有逐日序列；退化口径（两个观测点比对）算不出某一天，
+              // 硬画会变成凭空的柱子 —— 那种情况下一律给 null，让界面显示"暂无逐日数据"。
+              seriesDays: updateStats.source === "update-log" ? seriesDays.filter((d) => updateStats.sampledSet.has(d)).length : 0,
+              items: updatedAll.slice(0, limit).map((n) => ({
+                ...row(n),
+                updates: updatesOf(n),
+                observedAdvances: updateStats.advances.get(n.id) ?? 0,
+                // 逐日趋势：没观测到的天给 null，界面画成"无数据"而不是 0
+                series: seriesOfUpdates(n.id),
+              })),
+            },
         stars: starsBoard,
       },
     };

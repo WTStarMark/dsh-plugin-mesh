@@ -169,7 +169,7 @@ class GitHubClient:
             return None
 
     # ---------- 版本（releases）----------
-    def releases(self, repo_id: str, per_page: int = 5) -> list[dict] | None:
+    def releases(self, repo_id: str, per_page: int = 20) -> list[dict] | None:
         """取一个仓库最近几个 release —— 走 **core** 配额（1 个仓库 = 1 次请求）。
 
         - 返回 []：这个仓库确实没有 release（404 是正常情况，不是错误）；

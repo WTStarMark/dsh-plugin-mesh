@@ -39,14 +39,6 @@ export function timeAgo(iso, now = Date.now()) {
   return Math.floor(day / 30) + " 个月前";
 }
 
-function stamp(iso) {
-  const t = Date.parse(String(iso ?? ""));
-  if (!Number.isFinite(t)) return "—";
-  const d = new Date(t);
-  const p = (n) => String(n).padStart(2, "0");
-  return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes());
-}
-
 /**
  * @param {object} opts
  * @param {HTMLElement} opts.button  奖杯按钮
@@ -88,13 +80,11 @@ export function createRankingBoard({ button, modal, tabs, body, close, fetcher, 
   function sparkline(item, board) {
     const values = Array.isArray(item.series) ? item.series : null;
     const days = Array.isArray(data?.seriesDays) ? data.seriesDays : [];
-    const kind = (board?.seriesKind ?? board?.metric) === "star-gain" ? "star-gain" : "updates";
+    const rawKind = board?.seriesKind ?? board?.metric;
+    const kind = rawKind === "star-gain" ? "star-gain" : rawKind === "releases" ? "releases" : "updates";
     const spans = (Array.isArray(item.spans) ? item.spans : []).filter((s) => s.value > 0);
     const wrap = el("div", "spark" + (values ? "" : " spark-empty"));
-    if (!values && !spans.length) {
-      wrap.title = "这次响应里没有逐日趋势数据";
-      return wrap;
-    }
+    if (!values && !spans.length) return wrap;
     if (!values) {
       // 只有跨天累计、没有逐日数据：仍然把这根宽柱画出来（槽位留空即可，位置按百分比算）
       for (const s of spans) {
@@ -102,12 +92,9 @@ export function createRankingBoard({ button, modal, tabs, body, close, fetcher, 
         const span = el("span", "spark-span");
         span.style.left = (s.fromIdx / n) * 100 + "%";
         span.style.width = ((s.toIdx - s.fromIdx + 1) / n) * 100 + "%";
-        span.title =
-          s.from + " → " + s.to + " 累计 +" + formatStars(s.value) + (kind === "star-gain" ? " ★" : "") +
-          "（跨 " + s.days + " 天，期间没有逐日观测）";
+        span.title = s.from + " → " + s.to + "：+" + formatStars(s.value) + (kind === "star-gain" ? " ★" : "");
         wrap.append(span);
       }
-      wrap.title = "近 7 日" + (kind === "star-gain" ? " star 增量" : "更新次数") + "：只有跨天累计（宽条），没有逐日观测";
       return wrap;
     }
     // 每行按自己的峰值归一：看的是"这一周的起伏形状"，绝对值看右侧指标与悬停明细。
@@ -116,10 +103,12 @@ export function createRankingBoard({ button, modal, tabs, body, close, fetcher, 
     const BAR_MAX = 18; // px
     values.forEach((v, i) => {
       const nodata = v === null || v === undefined;
-      const bar = el("span", "spark-bar" + (nodata ? " none" : v > 0 ? (v >= peak ? " peak" : "") : " zero"));
-      if (!nodata) bar.style.height = Math.max(3, Math.round((v / peak) * BAR_MAX)) + "px";
-      const label = kind === "star-gain" ? (v > 0 ? "+" + v + " ★" : "0 ★") : v + " 次更新";
-      bar.title = (days[i] ?? "第 " + (i + 1) + " 天") + "：" + (nodata ? "没有观测数据" : label);
+      const down = !nodata && v < 0; // 掉星：star 榜会真的出现负数，如实画出来（不显示成 0）
+      const bar = el("span", "spark-bar" + (nodata ? " none" : down ? " down" : v > 0 ? (v >= peak ? " peak" : "") : " zero"));
+      if (!nodata) bar.style.height = Math.max(3, Math.round((Math.abs(v) / peak) * BAR_MAX)) + "px";
+      const label =
+        kind === "star-gain" ? (v > 0 ? "+" + v + " ★" : v < 0 ? v + " ★" : "0 ★") : kind === "releases" ? v + " 个版本" : v + " 次";
+      bar.title = (days[i] ?? "第 " + (i + 1) + " 天") + "：" + (nodata ? "—" : label);
       wrap.append(bar);
     });
     // 跨多天的观测（例如只有一个旧观测点）：画成一根压在底部的宽柱，标出它覆盖了哪几天。
@@ -129,12 +118,9 @@ export function createRankingBoard({ button, modal, tabs, body, close, fetcher, 
       const span = el("span", "spark-span");
       span.style.left = (s.fromIdx / n) * 100 + "%";
       span.style.width = ((s.toIdx - s.fromIdx + 1) / n) * 100 + "%";
-      span.title =
-        s.from + " → " + s.to + " 累计 +" + formatStars(s.value) + (kind === "star-gain" ? " ★" : "") +
-        "（跨 " + s.days + " 天，期间没有逐日观测）";
+      span.title = s.from + " → " + s.to + "：+" + formatStars(s.value) + (kind === "star-gain" ? " ★" : "");
       wrap.append(span);
     }
-    wrap.title = "近 7 日" + (kind === "star-gain" ? " star 增量" : "更新次数") + "（按本行峰值归一；虚线 = 那天没有观测数据）";
     return wrap;
   }
 
@@ -167,17 +153,33 @@ export function createRankingBoard({ button, modal, tabs, body, close, fetcher, 
     row.append(sparkline(item, board));
 
     const metric = el("div", "metric");
-    if (board?.metric === "updates") {
-      // 主指标 = 近 7 天更新次数（1 + 采样到的额外推进），次行才是"最后一次推送有多新"
-      metric.append(el("b", null, (item.updates ?? 1) + " 次"), el("span", null, timeAgo(item.pushedAt) + " · ★ " + formatStars(item.stars)));
+    if (board?.metric === "releases") {
+      // 真实发版数（不是采样下界，所以不加 ≥）；次行给最新那个版本的 tag 与星标
+      const newest = versions.find((v) => v.at && v.at === item.latestReleaseAt) ?? versions[0];
+      metric.append(
+        el("b", null, (item.updates ?? 0) + " 个版本"),
+        el("span", null, "最新 " + (newest?.tag ?? "—") + " · ★ " + formatStars(item.stars)),
+      );
+    } else if (board?.metric === "updates") {
+      // 主指标 = 采样到的"推送推进轮次数"。它是**下界**（每轮最多记一次、同一轮里的多次推送会合并），
+      // 所以数字前加 ≥：一眼能看出"至少这么多次"，不额外堆解释文字。
+      metric.append(
+        el("b", null, "≥" + (item.updates ?? 1) + " 次"),
+        el("span", null, timeAgo(item.pushedAt) + " · ★ " + formatStars(item.stars)),
+      );
     } else {
-      metric.append(el("b", null, "+" + formatStars(item.delta)), el("span", null, "★ " + formatStars(item.starsAfter ?? item.stars)));
+      // 只有"窗口 1 天"却写成周增量会误读，所以把窗口作为数据挂在次行（不是解释文字）
+      const w = board?.window?.days;
+      metric.append(
+        el("b", null, "+" + formatStars(item.delta)),
+        el("span", null, "★ " + formatStars(item.starsAfter ?? item.stars) + (typeof w === "number" ? " · " + w + " 天" : "")),
+      );
     }
     row.append(metric);
     const verText = versions.length
       ? " · 版本：" + versions.map((v) => (v.tag || "—") + (v.at ? "@" + String(v.at).slice(5) : "") + (v.pre ? "（预发布）" : "")).join("、")
       : "";
-    row.title = item.id + verText + "（点击跳到画布上它所在的位置）";
+    row.title = item.id + verText;
     row.addEventListener("click", () => {
       setOpen(false);
       if (typeof onPick === "function") onPick(item.id);
@@ -186,41 +188,6 @@ export function createRankingBoard({ button, modal, tabs, body, close, fetcher, 
   }
 
   /** 口径文字（不上屏）：挂在列表与标签页的悬停提示上 —— 信息不丢，但不占版面 */
-  function boardCaption(board) {
-    if (!board) return "";
-    const hint = seriesHint(board);
-    if (board.metric === "updates") {
-      return (
-        "窗口 " + (data?.windowDays ?? 7) + " 天 · 共 " + (board.total ?? 0) + " 个仓库有推送，按【更新次数】→ 最近推送 → 星标排序（已排除归档与复刻）" +
-        (board.note ? " · " + board.note : "") +
-        (hint ? " · " + hint : "")
-      );
-    }
-    if (board.available && board.window) {
-      const w = board.window;
-      const short = w.days < (w.target ?? 7) - 0.5;
-      return (
-        "实际窗口 " + w.days + " 天（" + stamp(w.from) + " → " + stamp(w.to) + "）" +
-        (short ? " · star 历史还没攒够 " + (w.target ?? 7) + " 天，先按现有历史算（采集器每天记一个点）" : " · 完整周窗口") +
-        (hint ? " · " + hint : "")
-      );
-    }
-    return board.note ?? "";
-  }
-
-  /** 趋势柱的诚实说明：7 天里有几天是真的观测过的 */
-  function seriesHint(board) {
-    const total = Array.isArray(data?.seriesDays) ? data.seriesDays.length : 0;
-    const observed = typeof board?.seriesDays === "number" ? board.seriesDays : 0;
-    const spans = board?.spanCount ?? 0;
-    if (!total) return "";
-    if (!observed && !spans) return "趋势柱：还没有逐日数据（采集器按天记录，攒到第一天后这里就会出现柱子）";
-    if (!observed) return "趋势柱：还没有逐日数据；" + spans + " 段" + (spans > 1 ? "" : "") + "跨天累计用底部宽条标出（悬停看明细，不平摊到某一天）";
-    if (observed >= total && !spans) return "";
-    const extra = spans ? "；另有 " + spans + " 段跨天累计用底部宽条标出" : "";
-    return "趋势柱：近 " + total + " 天里只有 " + observed + " 天有观测数据（虚线 = 没观测，不是 0）" + extra;
-  }
-
   function renderBody() {
     if (!body) return;
     body.textContent = "";
@@ -249,41 +216,11 @@ export function createRankingBoard({ button, modal, tabs, body, close, fetcher, 
     items.forEach((item, i) => body.append(renderRow(item, i)));
   }
 
-  /** 页脚信息（不上屏）：数据快照新旧 + 本页规模 */
-  function footCaption(board) {
-    const parts = [];
-    if (data?.generatedAt) {
-      const age = typeof data.dataAgeHours === "number" ? "（" + (data.dataAgeHours < 1 ? "刚更新" : Math.round(data.dataAgeHours) + " 小时前") + "）" : "";
-      parts.push("数据快照 " + stamp(data.generatedAt) + age);
-    }
-    if (board?.metric === "updates") {
-      parts.push("窗口 " + (data?.windowDays ?? 7) + " 天：共 " + (board.total ?? 0) + " 个仓库有推送，这里按更新次数取前 " + (board.count ?? 0) + " 个");
-      parts.push("榜上次数最高 " + (board.maxUpdates ?? 1) + " 次");
-    } else if (board?.available) {
-      const w = board.window;
-      const short = w && w.days < (w.target ?? 7) - 0.5;
-      parts.push("star 增量窗口 " + (w ? w.days + " 天" : "—") + (short ? "（历史还没攒够 " + (w.target ?? 7) + " 天，先按现有历史算）" : "（完整窗口）"));
-      parts.push("两端可比 " + (board.matched ?? 0) + " 个仓库，其中 " + (board.total ?? 0) + " 个涨了星");
-    }
-    if (board?.note) parts.push(board.note);
-    parts.push("点任意一行 → 跳到画布上它所在的位置");
-    return parts.join(" · ");
-  }
-
   function render() {
     syncTabs();
     renderBody();
-    // 榜单上方/下方不再有任何文字：口径与数据新旧挂到悬停提示（列表 + 标签页），需要时悬停即可看到
-    const board = data?.boards?.[tab];
-    if (body) body.title = [boardCaption(board), footCaption(board)].filter(Boolean).join(" · ");
-    if (tabs) {
-      for (const btn of tabs.children ?? []) {
-        const b = data?.boards?.[btn.dataset?.tab];
-        if (!b) continue;
-        const text = [boardCaption(b), footCaption(b)].filter(Boolean).join(" · ");
-        if (text) btn.title = text;
-      }
-    }
+    // 前端不再展示任何口径解释（列表、标签页都不挂）：口径在接口字段里
+    // （updatesSource / window.days / dataAgeHours / seriesSource / note），文档里也写着。
   }
 
   async function refresh() {
