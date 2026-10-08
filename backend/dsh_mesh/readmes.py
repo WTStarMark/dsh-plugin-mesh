@@ -137,6 +137,14 @@ class ReadmeIndex:
     def put(self, repo_id: str, text: str | None, fetched_at: str | None = None) -> None:
         self.docs[str(repo_id)] = {"t": self.normalize(text), "f": fetched_at or _iso()}
 
+    def count_in(self, ids) -> int:
+        """这些 id 里有多少个已经有 README。
+
+        状态面板要的是"可索引的仓库里索引了多少"，而不是缓存总量 —— 缓存会留早期抓过、
+        现在已经不达标的仓库，于是出现 14513 / 14490 这种"分子大于分母"的怪值。
+        """
+        return sum(1 for rid in ids if str(rid) in self.docs)
+
     def stats(self) -> dict:
         chars = sum(len(d.get("t") or "") for d in self.docs.values())
         empty = sum(1 for d in self.docs.values() if not (d.get("t") or ""))
@@ -151,6 +159,9 @@ def fetch_batch(client, index: ReadmeIndex, repos: list[dict], budget: int, log=
         return {"requested": 0, "fetched": 0, "empty": 0, "indexed": index.stats()["count"]}
     fetched = 0
     empty = 0
+    # 注意：这里**不**吞异常 —— 单个仓库失败就让整批抛给 collect.py 的护栏
+    # （README 索引是加分项，护栏会记一行"本轮失败"并继续跑完这一轮）。
+    # 既有测试 test_readme_fetch_failure_does_not_break_collector 钉住了这个契约。
     for i, repo in enumerate(todo, 1):
         text = client.readme(str(repo["id"]))
         if text:

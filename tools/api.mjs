@@ -16,6 +16,18 @@ import { stripNoiseOwners } from "../src/mesh-data.js";
  * DAY_TZ_OFFSET_HOURS 一致（默认 +8 = 北京时间 00:00 换日，而不是 UTC 00:00 = 北京 08:00）。 */
 export const DAY_TZ_OFFSET_HOURS = Number(process.env.DAY_TZ_OFFSET_HOURS ?? 8);
 
+/**
+ * 某个时刻落在"哪一天"，按 DAY_TZ_OFFSET_HOURS 的 00:00 切天。
+ * 接受毫秒数或 ISO 字符串；解析不出来返回空串（调用方按"不在轴上"处理）。
+ * 绝不能抛：这里曾经对已经转成毫秒的入参又 Date.parse 一次，得到 NaN 后
+ * toISOString 抛 RangeError，把 /api/ranking 整个请求挂死。
+ */
+export const dayOf = (when) => {
+  const ms = typeof when === "number" ? when : Date.parse(String(when ?? ""));
+  if (!Number.isFinite(ms)) return "";
+  return new Date(ms + DAY_TZ_OFFSET_HOURS * 3600000).toISOString().slice(0, 10);
+};
+
 
 const DATA_TTL_MS = 5 * 60 * 1000;
 /** 卡片默认去处：线上站点（可用 SITE_URL 环境变量或 ?link= 覆盖） */
@@ -530,9 +542,6 @@ export function createApi({ root }) {
     return starDailyCache.index;
   }
 
-  /** 某个时刻落在"哪一天"（按 DAY_TZ_OFFSET_HOURS 的 00:00 切天） */
-  const dayOf = (ms) => new Date(Number(ms) + DAY_TZ_OFFSET_HOURS * 3600000).toISOString().slice(0, 10);
-
   /** 'YYYY-MM-DD' 加减天数：逐日趋势柱的横轴用（纯日期串运算，与时区无关） */
   const dayShift = (day, delta) => new Date(Date.parse(day + "T00:00:00Z") + delta * 86400000).toISOString().slice(0, 10);
 
@@ -666,7 +675,8 @@ export function createApi({ root }) {
     {
       const obs = points.map((p) => ({ at: Date.parse(p.at), stars: p.stars }));
       if (!useNewer) obs.push({ at: currentAt, stars: currentStars });
-      const dayIndex = (at) => seriesDays.indexOf(dayOf(Date.parse(at)));
+      // obs[].at 已经是毫秒数；dayOf 两种入参都吃，坏数据返回空串 → indexOf 得 -1 → 上层跳过
+      const dayIndex = (at) => seriesDays.indexOf(dayOf(at));
       for (let i = 1; i < obs.length; i++) {
         const gapH = (obs[i].at - obs[i - 1].at) / 3600000;
         if (!(gapH > 0)) continue;

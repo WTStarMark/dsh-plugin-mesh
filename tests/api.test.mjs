@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createApi, categoryColor, xmlEscape, validNamePart, apiIndex, MAX_LIMIT, textWidth, wrapText, DEFAULT_SITE, DAY_TZ_OFFSET_HOURS } from "../tools/api.mjs";
+import { createApi, categoryColor, xmlEscape, validNamePart, apiIndex, MAX_LIMIT, textWidth, wrapText, DEFAULT_SITE, DAY_TZ_OFFSET_HOURS, dayOf } from "../tools/api.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const api = createApi({ root: ROOT });
@@ -357,6 +357,51 @@ test("周更新热榜：窗口与横轴对齐（最左那天的版本必须被�
     const bars = (row.series ?? []).filter((v) => typeof v === "number").reduce((s, v) => s + v, 0);
     assert.equal(bars, row.updates, "总数必须等于逐日柱加总（窗口与横轴同一组日历日）");
     assert.equal(row.series[0], 1, "最左那天的版本要画出来，不能被漏掉：" + JSON.stringify(row.series));
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("dayOf：坏时间戳不许抛异常（曾经让 /api/ranking 挂死 30 秒）", () => {
+  assert.equal(dayOf(1759886400000), "2025-10-08", "毫秒数要能吃");
+  assert.equal(dayOf("2026-10-06T23:08:14Z"), "2026-10-07", "ISO 串按当地日界换算");
+  assert.equal(dayOf("2026-10-07T15:59:59Z"), "2026-10-07");
+  assert.equal(dayOf("2026-10-07T16:00:00Z"), "2026-10-08", "北京 00:00 换日");
+  for (const bad of [null, undefined, "", "坏数据", NaN, Infinity]) {
+    assert.equal(dayOf(bad), "", "解析不了就返回空串，绝不能抛：" + String(bad));
+  }
+});
+
+test("star 历史里有坏时间点也不许把榜单接口带崩", async () => {
+  // 线上事故：obs[].at 已经是毫秒数，dayOf 又 Date.parse 一遍得到 NaN，toISOString 抛 RangeError，
+  // 而接口层没有兜底 → /api/ranking 挂满 30 秒、前端一直转圈。
+  const nowIso = new Date().toISOString();
+  const tmp = await mkdtemp(join(tmpdir(), "mesh-badstar-"));
+  try {
+    await mkdir(join(tmp, "data", "cache"), { recursive: true });
+    await writeFile(
+      join(tmp, "data", "mesh.json"),
+      JSON.stringify({
+        meta: { generatedAt: nowIso },
+        tags: [], clusters: [], hubs: [], edges: [],
+        nodes: [{ id: "a/one", name: "one", owner: "a", stars: 9, pushedAt: nowIso, archived: false, fork: false, matchedTags: ["dsh"], topics: [] }],
+      }),
+    );
+    await writeFile(
+      join(tmp, "data", "cache", "star-history.json"),
+      JSON.stringify({
+        updatedAt: nowIso,
+        points: [
+          { at: null, day: null, stars: { "a/one": 1 } },
+          { at: "不是时间", day: "x", stars: { "a/one": 2 } },
+          { at: new Date(Date.now() - 51 * 3600000).toISOString(), day: null, stars: { "a/one": 3 } },
+        ],
+      }),
+    );
+    const local = createApi({ root: tmp });
+    const out = await local.ranking(new URLSearchParams("limit=3"));
+    assert.ok(out.boards.stars, "榜单要正常返回，而不是抛异常挂住请求");
+    assert.equal(out.seriesDays.length, 7);
   } finally {
     await rm(tmp, { recursive: true, force: true });
   }

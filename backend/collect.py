@@ -148,10 +148,15 @@ def fetch_live(args, log, blacklist=None):
                 _write_status(phase="readme")
             readme_stats = fetch_readmes(client, index, pool, args.readme_budget, log=log)
             if readme_stats and not getattr(args, "dry_run", False):
+                pool_ids = [str(r.get("id")) for r in pool]
+                in_pool = index.count_in(pool_ids)
                 _write_status(
                     phase="readme",
                     readme={
-                        "indexed": readme_stats.get("indexed"),
+                        # 面板要的是"可索引的仓库里索引了多少"（≤ target）；
+                        # 缓存总量含早期抓过、现已不达标的条目，直接当分子会出现 14513 / 14490 这种怪值
+                        "indexed": in_pool,
+                        "cached": readme_stats.get("indexed"),
                         "target": len(pool),
                         "thisRound": readme_stats.get("requested"),
                         "empty": readme_stats.get("empty"),
@@ -316,6 +321,19 @@ def load_from_store(args, log):
     return raws, tag_totals_from(store.state), None, {"mode": "store-rebuild", "token": "-"}
 
 
+def fetch_releases_safe(args, mesh: dict, log) -> dict:
+    """跑版本抓取，但**永不抛异常**。
+
+    版本缓存是"周更新热榜"的判定依据，却是加分项：它失败不该让本轮的前端数据不落盘。
+    线上踩过：一次 RemoteDisconnected 在写 mesh 之前把整轮打断，站点白等一小时。
+    """
+    try:
+        return fetch_releases(args, mesh, log)
+    except Exception as exc:  # noqa: BLE001 - 这里就是要吞掉它，见上
+        log("⚠ 版本抓取本轮失败（不阻塞前端数据）：" + str(exc)[:120])
+        return {"enabled": True, "error": str(exc)[:120]}
+
+
 def fetch_releases(args, mesh: dict, log) -> dict:
     """按预算抓 releases（走 core 配额），并写回 data/cache/releases.json。
 
@@ -335,16 +353,23 @@ def fetch_releases(args, mesh: dict, log) -> dict:
         return {"enabled": True, "budget": budget, "picked": 0, "fetched": 0, "failed": 0, **rel.stats(payload)}
     client = GitHubClient(token=load_token(), sleep=time.sleep)
     fetched = failed = 0
+    streak = 0  # 连续失败计数
     for repo_id in picked:
         if client.stats.core_remaining is not None and client.stats.core_remaining < rel.CORE_FLOOR:
             log("版本：core 配额只剩 " + str(client.stats.core_remaining) + "，本轮提前收手（下一轮接着抓）")
             break
         try:
             items = client.releases(repo_id, per_page=rel.RELEASES_KEEP)
-        except RuntimeError as err:
+        except Exception as err:  # noqa: BLE001 - 单个仓库失败就跳过：抖动/超时都不该打断整批
             failed += 1
-            log("版本：" + repo_id + " 抓取失败：" + str(err)[:80])
+            streak += 1
+            log("版本：" + repo_id + " 抓取失败（跳过）：" + str(err)[:80])
+            if streak >= 5:
+                # 网络真断了的话，别把剩下几百个仓库挨个重试（每个还要退避 3 次，能耗掉一小时）
+                log("版本：连续 " + str(streak) + " 个仓库抓取失败，判断为网络/配额异常，本轮提前收手")
+                break
             continue
+        streak = 0
         if items is None:
             failed += 1
             continue
@@ -504,8 +529,8 @@ def run_once(args, log) -> dict:
     update_log = snap.update_update_log(mesh, UPDATE_LOG)
     summary["updateLog"] = {"days": len(update_log["days"]), "counted": update_log["lastRound"]["counted"]}
 
-    # 版本（releases）：搜索接口不返回，只能按仓库单独取（1 个仓库 = 1 次 core 配额）。
-    summary["releases"] = fetch_releases(args, mesh, log)
+    # 版本（releases）：搜索接口不返回，只能按仓库单独取（1 个仓库 = 1 次 core 配额）
+    summary["releases"] = fetch_releases_safe(args, mesh, log)
 
     limit_for_frontend(mesh, args.frontend_limit)
     mesh["meta"]["note"] = (

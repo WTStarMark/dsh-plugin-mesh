@@ -129,6 +129,16 @@ class GitHubClient:
                 self._sleep(2 ** attempt)
                 return self._open(url, attempt + 1, accept=accept)
             raise RuntimeError(f"GitHub 返回 {err.code}：{body}") from err
+        except OSError as err:
+            # 连接级抖动（RemoteDisconnected / 读超时 / DNS 抖动 / 连接被重置）：重试几次再放弃。
+            # 这些**不是** HTTPError，原来会一路冒到调用方、把整轮采集打断 ——
+            # 线上实测过一次 RemoteDisconnected，整轮在前端数据落盘之前就结束，站点白等一小时。
+            # 最后统一转成 RuntimeError：调用方（README / releases）已经按 RuntimeError 做了降级。
+            if attempt < 3:
+                self.stats.retries += 1
+                self._sleep(min(30.0, 2.0 ** attempt))
+                return self._open(url, attempt + 1, accept=accept)
+            raise RuntimeError(f"GitHub 连接失败（{type(err).__name__}）：{str(err)[:120]}") from err
 
     def _retry_delay(self, err: urllib.error.HTTPError, attempt: int) -> float:
         retry_after = err.headers.get("Retry-After") if err.headers else None

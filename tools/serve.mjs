@@ -524,7 +524,24 @@ const server = createServer(async (req, res) => {
   }
   // 接口路由：只认白名单里的两个，其余 404，绝不落到静态文件逻辑
   if (pathname === "/api" || pathname.startsWith("/api/")) {
-    await handleApi(req, res, method, pathname, url);
+    try {
+      await handleApi(req, res, method, pathname, url);
+    } catch (err) {
+      // 接口内部异常也必须回一个响应。否则这条连接一直挂着，前端只能等自己超时
+      // —— 线上踩过：ranking 里一个 RangeError 让 /api/ranking 挂满 30 秒、无任何响应。
+      const where = (err && err.stack ? String(err.stack).split("\n")[0] : String(err));
+      console.error("接口异常 " + pathname + " → " + where);
+      try {
+        if (!res.headersSent) sendJson(res, { ok: false, error: "服务器内部错误" }, 500, { ...CORS });
+        else res.end();
+      } catch {
+        try {
+          res.destroy();
+        } catch {
+          /* 连接已经断了，没什么可做的 */
+        }
+      }
+    }
     return;
   }
   // 卡片分享页：/card/:owner/:name（同样是只读、同端口）

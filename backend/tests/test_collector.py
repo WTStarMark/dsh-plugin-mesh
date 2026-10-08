@@ -1490,6 +1490,90 @@ class DayBoundaryTest(unittest.TestCase):
         self.assertEqual(out["sampledDays"], ["2026-10-08"], "sampledDays 也用当地日期")
 
 
+class RobustnessTest(unittest.TestCase):
+    """采集器抗抖动（线上事故回归）。
+
+    事故：2026-10-08 02:08 那一轮，版本抓取时 GitHub 掉了一次连接
+    （RemoteDisconnected: Remote end closed connection without response），
+    异常一路冒到 run_once，整轮在【写 mesh + 预计算】之前就结束了 ——
+    站点数据白等一小时（采集器本身没死，下一轮照跑）。
+    """
+
+    def setUp(self):
+        shutil.rmtree(TMP, ignore_errors=True)
+        TMP.mkdir(parents=True, exist_ok=True)
+        self.path = TMP / "readmes.json"
+
+    def tearDown(self):
+        shutil.rmtree(TMP, ignore_errors=True)
+
+    def test_connection_drops_are_retried_then_raised_as_runtime(self):
+        import http.client
+
+        sleeps: list[float] = []
+        client = GitHubClient(token=None, sleep=sleeps.append)
+        boom = http.client.RemoteDisconnected("Remote end closed connection without response")
+        with mock.patch("dsh_mesh.github.urllib.request.urlopen", side_effect=boom):
+            with self.assertRaises(RuntimeError) as ctx:
+                client.search("topic:dsh", page=1)
+        # 统一成 RuntimeError：README / releases 两层已经按 RuntimeError 做了降级
+        self.assertIn("连接失败", str(ctx.exception))
+        self.assertIn("RemoteDisconnected", str(ctx.exception))
+        self.assertEqual(client.stats.retries, 3, "重试 3 次后再放弃")
+        self.assertEqual(len(sleeps), 3, "每次重试都要退避等待")
+
+    def test_count_in_only_counts_the_current_pool(self):
+        """状态面板的分子要用"可索引集合里已索引多少"，不能拿缓存总量当分子。
+
+        线上出现过 README 索引 14513 / 14490（分子大于分母）：缓存留了早期抓过、
+        现在星标已不达标的仓库，而分母是"当前星标 ≥ 1 的仓库数"。
+        """
+        from dsh_mesh.readmes import ReadmeIndex
+
+        index = ReadmeIndex(self.path, max_chars=50)
+        index.put("a/ok", "hello")
+        index.put("old/gone", "早期抓过、现在已经不达标")
+        self.assertEqual(index.count_in(["a/ok", "b/none", "old/gone"]), 2)
+        self.assertEqual(index.count_in([]), 0)
+        self.assertEqual(index.stats()["count"], 2, "缓存总量仍是 2（含老条目）")
+
+    def test_releases_failure_never_raises_and_reports_error(self):
+        import collect
+
+        fake_args = type("A", (), {"releases_budget": 300, "dry_run": False, "from_raw": False, "from_store": False})()
+        with mock.patch.object(collect, "fetch_releases", side_effect=RuntimeError("RemoteDisconnected: boom")):
+            out = collect.fetch_releases_safe(fake_args, {"nodes": []}, lambda *_a: None)
+        self.assertTrue(out.get("enabled"), "失败也要给出可读结果（而不是抛出去）")
+        self.assertIn("RemoteDisconnected", out.get("error", ""), "把原因留在 summary 里")
+
+    def test_releases_batch_gives_up_after_five_consecutive_failures(self):
+        """连续 5 个仓库失败就本轮收手。
+
+        网络真断时，每个仓库在 _open 里还要退避重试 3 次（约 14 秒），
+        300 个仓库挨个试能耗掉一小时 —— 那才是把整轮拖死的原因。
+        """
+        import collect
+
+        cache = TMP / "releases.json"
+        nodes = [{"id": "a/r" + str(i), "stars": 10, "pushedAt": "2026-10-08T00:00:00Z"} for i in range(12)]
+        args = type("A", (), {"releases_budget": 12, "dry_run": False, "from_raw": False, "from_store": False})()
+
+        class FakeStats:
+            core_remaining = None
+
+        class FakeClient:
+            def __init__(self, **_kw):
+                self.stats = FakeStats()
+
+            def releases(self, repo_id, per_page=20):
+                raise RuntimeError("RemoteDisconnected: boom")
+
+        with mock.patch.object(collect, "RELEASES_CACHE", cache), mock.patch.object(collect, "GitHubClient", FakeClient):
+            out = collect.fetch_releases(args, {"nodes": nodes}, lambda *_a: None)
+        self.assertEqual(out["failed"], 5, "只试 5 个就收手，实际 " + str(out["failed"]))
+        self.assertGreaterEqual(out.get("picked", 0), 5, "本来该抓的仓库数要够触发熔断")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
 
