@@ -506,22 +506,27 @@ def run_once(args, log) -> dict:
         "latest": history["points"][-1]["at"] if history["points"] else None,
     }
 
-    # 逐日星标增量：星标环一天只留一个点（同天覆盖），攒不出逐日形状 —— 这里每轮把
-    # "本轮星标变化"累加进当天桶，star 榜的逐日趋势柱用它（每天都是真实观测的累加值）。
+    # 逐日星标台账：星标环一天只留一个点（同天覆盖），攒不出逐日形状 —— 这里每轮把
+    # "本轮观测到的星标变化"记进当天桶，star 榜的逐日趋势柱用它。
+    # 四条硬规矩见 snapshot.update_star_daily：首轮只落基线 / 断档转 spans / 缺席保留基线 / 首见不计数。
     star_daily = snap.update_star_daily(mesh, STAR_DAILY)
+    last = star_daily["lastRound"]
     summary["starDaily"] = {
         "days": len(star_daily["days"]),
-        "counted": star_daily["lastRound"]["counted"],
-        "gained": star_daily["lastRound"]["gained"],
+        "sampledDays": len(star_daily["sampledDays"]),
+        "spans": len(star_daily["spans"]),
+        "counted": last["counted"],
+        "gained": last["gained"],
+        "carried": last["carried"],
+        "baseline": last["baseline"],
     }
     log(
-        "星标逐日：本轮有变化的仓库 "
-        + str(star_daily["lastRound"]["counted"])
-        + " 个（净涨 "
-        + str(star_daily["lastRound"]["gained"])
-        + " 星）· 已记 "
-        + str(len(star_daily["days"]))
-        + " 天"
+        "星标逐日："
+        + ("首轮只落基线（不计入逐日）" if last["baseline"] else "本轮有变化的仓库 " + str(last["counted"]) + " 个（净涨 " + str(last["gained"]) + " 星）")
+        + " · 观测台账 " + str(len(star_daily["sampledDays"])) + " 天"
+        + " / 逐日 " + str(len(star_daily["days"])) + " 天"
+        + " / 跨天宽条 " + str(len(star_daily["spans"])) + " 条"
+        + (" · 缺席保留基线 " + str(last["carried"]) + " 个" if last["carried"] else "")
     )
 
     # 更新日志：每轮采样"pushedAt 比上次前进了吗"，按天累计次数。

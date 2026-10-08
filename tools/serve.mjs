@@ -385,9 +385,12 @@ async function handleApi(req, res, method, pathname, url) {
     const cats = await api.categories();
     // readme 字段让"README 索引堆了多少"一眼可见（indexed 篇 / diskKB 磁盘 / memoryBytes 检索时的内存）
     const readme = await api.readmeStats().catch(() => null);
+    // starDaily 字段让"逐日星标这几天齐不齐"一眼可见：coveredDays / missingDays / spans / lastRound。
+    // 没有它，"7 天有没有"只能点开榜单去猜。
+    const starDaily = await api.starDailyStats().catch(() => null);
     sendJson(
       res,
-      { ok: true, version: VERSION, nodes: cats.total, generatedAt: cats.generatedAt, readme, time: new Date().toISOString() },
+      { ok: true, version: VERSION, nodes: cats.total, generatedAt: cats.generatedAt, readme, starDaily, time: new Date().toISOString() },
       200,
       { ...API_CACHE, ...CORS },
     );

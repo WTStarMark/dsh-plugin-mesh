@@ -517,15 +517,19 @@ export function createApi({ root }) {
     return releasesCache.index;
   }
 
-  /* 逐日星标增量（data/cache/star-daily.json，采集器每轮写）：star 榜的逐日趋势柱用它。
-   * 为什么不用星标环推：环一天只留一个点（同日覆盖），"两个日点的差"只能落在后一天 ——
-   * 攒不出逐日形状（线上实测：只有 2 个点时，一整天的涨幅全堆在最后一天）。 */
-  let starDailyCache = { mtimeMs: -2, index: { days: new Map(), sampled: new Set(), updatedAt: null } };
+  /* 逐日星标台账（data/cache/star-daily.json，采集器每轮写）：star 榜的逐日趋势柱与
+   * 窗口增量的【唯一来源】。两者同源同窗口，所以 "行内增量 == 逐日柱加总 + 宽条" 由构造成立。
+   * 为什么不再用星标环推：环一天只留一个点（同日覆盖），"两个日点的差"只能落在后一天，
+   * 攒不出逐日形状；而且两个来源各算各的 —— 线上实测 20/20 行的逐日加总都不等于行内增量。 */
+  function emptyStarDaily() {
+    return { days: new Map(), sampled: new Set(), spans: [], rounds: new Map(), baselined: 0, lastRound: null, updatedAt: null };
+  }
+  let starDailyCache = { mtimeMs: -2, index: emptyStarDaily() };
 
   async function loadStarDaily() {
     const file = join(root, "data", "cache", "star-daily.json");
     const info = await stat(file).catch(() => null);
-    if (!info) return { days: new Map(), sampled: new Set(), updatedAt: null };
+    if (!info) return emptyStarDaily();
     if (starDailyCache.mtimeMs === info.mtimeMs) return starDailyCache.index;
     try {
       const data = JSON.parse(await readFile(file, "utf8"));
@@ -535,11 +539,54 @@ export function createApi({ root }) {
         for (const [id, delta] of Object.entries(bucket ?? {})) if (typeof delta === "number") map.set(id, delta);
         days.set(day, map);
       }
-      starDailyCache = { mtimeMs: info.mtimeMs, index: { days, sampled: new Set(data.sampledDays ?? []), updatedAt: data.updatedAt ?? null } };
+      // 跨天宽条：采集端已经按 (from, to) 分好组（断档那一轮的增量不进日柱）
+      const spans = [];
+      for (const s of data.spans ?? []) {
+        if (!s || !s.from || !s.to || !s.d) continue;
+        const d = new Map();
+        for (const [id, delta] of Object.entries(s.d)) if (typeof delta === "number") d.set(id, delta);
+        if (d.size) spans.push({ from: String(s.from), to: String(s.to), hours: Number(s.hours) || 0, d });
+      }
+      const rounds = new Map();
+      for (const [day, r] of Object.entries(data.rounds ?? {})) {
+        if (r && r.first && r.last) rounds.set(day, { first: String(r.first), last: String(r.last) });
+      }
+      starDailyCache = {
+        mtimeMs: info.mtimeMs,
+        index: {
+          days,
+          sampled: new Set(data.sampledDays ?? []),
+          spans,
+          rounds,
+          baselined: Object.keys(data.seen ?? {}).length,
+          lastRound: data.lastRound ?? null,
+          updatedAt: data.updatedAt ?? null,
+        },
+      };
     } catch {
-      starDailyCache = { mtimeMs: info.mtimeMs, index: { days: new Map(), sampled: new Set(), updatedAt: null } };
+      starDailyCache = { mtimeMs: info.mtimeMs, index: emptyStarDaily() };
     }
     return starDailyCache.index;
+  }
+
+  /** 逐日观测覆盖度：回答"这几天到底有几天是真的有观测" —— 没有它，"7 天齐不齐"只能靠猜 */
+  async function starDailyStats() {
+    const index = await loadStarDaily();
+    const anchorDay = dayOf(Date.now());
+    const axis = [];
+    for (let i = 6; i >= 0; i--) axis.push(dayShift(anchorDay, -i));
+    const covered = axis.filter((d) => index.sampled.has(d));
+    return {
+      axis,
+      coveredDays: covered,
+      missingDays: axis.filter((d) => !index.sampled.has(d)),
+      firstDay: covered[0] ?? null,
+      lastDay: covered[covered.length - 1] ?? null,
+      spans: index.spans.length,
+      baselined: index.baselined,
+      lastRound: index.lastRound,
+      updatedAt: index.updatedAt,
+    };
   }
 
   /** 'YYYY-MM-DD' 加减天数：逐日趋势柱的横轴用（纯日期串运算，与时区无关） */
@@ -650,29 +697,53 @@ export function createApi({ root }) {
 
 
 
-    /* 榜二：star 增量 */
+    /* 榜二：star 增量
+     * 唯一来源是采集器的逐日台账（star-daily）：
+     *   逐日柱   = 当天各轮真实观测到的星标变化累加（断档那一轮走 spans，不算任何一天）
+     *   窗口增量 = Σ(窗口内逐日柱) + Σ(窗口内跨天宽条)
+     * 两者同源同窗口，所以 "行内增量 == 逐日柱加总 + 宽条" 由构造成立（与更新榜同一条规矩）。
+     * 星标环只在台账为空时兜底（冷启动）：那时只能给端点差，攒不出逐日形状，如实降级。 */
     const points = await loadStarHistory();
     const meshAt = Date.parse(mesh.meta?.generatedAt ?? "") || now;
-    const newest = points[points.length - 1] ?? null;
-    // "现在"的星标：历史里有比 mesh 更新的点就用它，否则用 mesh 自己（都是真实观测值）
-    const useNewer = !!newest && Date.parse(newest.at) > meshAt + 60000;
-    const currentAt = useNewer ? Date.parse(newest.at) : meshAt;
-    const currentStars = useNewer ? newest.stars : Object.fromEntries(nodes.map((n) => [n.id, n.stars ?? 0]));
-    const candidates = points.filter((p) => {
-      const t = Date.parse(p.at);
-      return Number.isFinite(t) && currentAt - t >= 6 * 3600000;
-    });
-    const target = currentAt - windowDays * 86400000;
-    const base = candidates.slice().sort((a, b) => Math.abs(Date.parse(a.at) - target) - Math.abs(Date.parse(b.at) - target))[0] ?? null;
+    const starDailyIndex = await loadStarDaily();
+    const coveredDays = seriesDays.filter((d) => starDailyIndex.sampled.has(d));
+    const hasStarDaily = coveredDays.length > 0;
 
-    /* star 的逐日趋势：
-     *   · 相邻两次观测间隔 ≤ 26 小时 → 这个差就是"某一天的增量"，画成一根日柱；
-     *   · 间隔更长的（例如只有一个 10-01 的旧观测点，到 10-06 才再观测）→ 算不出逐日，
-     *     但"这两个时点之间涨了多少"是真实观测值，所以画成一根【跨 N 天的累计宽柱】，
-     *     绝不平摊到某一天。 */
+    // 逐日台账：只读，不做任何推算（没观测到的日 = null，不是 0）
+    const seriesFromDaily = (id) => seriesDays.map((d) => (starDailyIndex.sampled.has(d) ? starDailyIndex.days.get(d)?.get(id) ?? 0 : null));
+    const dailySum = (id) => coveredDays.reduce((s, d) => s + (starDailyIndex.days.get(d)?.get(id) ?? 0), 0);
+    // 跨天宽条：写入端已按 (from, to) 分好组，这里只做窗口过滤与横轴下标映射
+    const spansFromDaily = (id) =>
+      starDailyIndex.spans
+        .map((s) => {
+          const toIdx = seriesDays.indexOf(s.to);
+          if (toIdx < 0) return null; // 终点不在窗口里：整段丢弃，不硬塞到别的天
+          return { fromIdx: Math.max(0, seriesDays.indexOf(s.from)), toIdx, from: s.from, to: s.to, hours: s.hours, value: s.d.get(id) ?? 0 };
+        })
+        .filter((s) => s && s.value > 0);
+
+    /* —— 兜底：台账还没有数据（刚部署 / 文件没生成）时，用星标环给端点差 —— */
+    const newest = points[points.length - 1] ?? null;
+    const useNewer = !!newest && Date.parse(newest.at) > meshAt + 60000;
+    let currentAt = useNewer ? Date.parse(newest.at) : meshAt;
+    let currentStars = {};
+    let base = null;
     const starDaily = new Map(); // day -> Map<id, delta>
     const starSpans = []; // [{ fromIdx, toIdx, from, to, days, values }]
-    {
+    if (!hasStarDaily) {
+      // "现在"的星标：历史里有比 mesh 更新的点就用它，否则用 mesh 自己（都是真实观测值）
+      currentStars = useNewer ? newest.stars : Object.fromEntries(nodes.map((n) => [n.id, n.stars ?? 0]));
+      const candidates = points.filter((p) => {
+        const t = Date.parse(p.at);
+        return Number.isFinite(t) && currentAt - t >= 6 * 3600000;
+      });
+      const target = currentAt - windowDays * 86400000;
+      base = candidates.slice().sort((a, b) => Math.abs(Date.parse(a.at) - target) - Math.abs(Date.parse(b.at) - target))[0] ?? null;
+      /* star 的逐日趋势（环推）：
+       *   · 相邻两次观测间隔 ≤ 26 小时 → 这个差就是"某一天的增量"，画成一根日柱；
+       *   · 间隔更长的（例如只有一个 10-01 的旧观测点，到 10-06 才再观测）→ 算不出逐日，
+       *     但"这两个时点之间涨了多少"是真实观测值，所以画成一根【跨 N 天的累计宽柱】，
+       *     绝不平摊到某一天。 */
       const obs = points.map((p) => ({ at: Date.parse(p.at), stars: p.stars }));
       if (!useNewer) obs.push({ at: currentAt, stars: currentStars });
       // obs[].at 已经是毫秒数；dayOf 两种入参都吃，坏数据返回空串 → indexOf 得 -1 → 上层跳过
@@ -723,12 +794,6 @@ export function createApi({ root }) {
         .filter((s) => s.value > 0);
     const seriesForStars = (id) => seriesDays.map((d) => (starDaily.has(d) ? starDaily.get(d).get(id) ?? 0 : null));
 
-    /* 逐日趋势优先用"每轮累加"的数据（star-daily）；没有就退回"环推 + 跨天宽条"。
-     * 有逐日数据时不再画宽条：那会与日柱重复计同一段变化。 */
-    const starDailyIndex = await loadStarDaily();
-    const hasStarDaily = seriesDays.some((d) => starDailyIndex.sampled.has(d));
-    const seriesFromDaily = (id) => seriesDays.map((d) => (starDailyIndex.sampled.has(d) ? starDailyIndex.days.get(d)?.get(id) ?? 0 : null));
-
     const starsBoard = {
       label: "周 star 热榜",
       metric: "star-gain",
@@ -741,10 +806,60 @@ export function createApi({ root }) {
       note: "",
       seriesKind: "star-gain",
       seriesSource: hasStarDaily ? "star-daily" : "ring",
-      seriesDays: hasStarDaily ? seriesDays.filter((d) => starDailyIndex.sampled.has(d)).length : starDaily.size,
-      spanCount: hasStarDaily ? 0 : starSpans.length,
+      seriesDays: hasStarDaily ? coveredDays.length : starDaily.size,
+      spanCount: hasStarDaily ? starDailyIndex.spans.length : starSpans.length,
+      // 覆盖度：逐日观测从哪天到哪天、缺了哪几天 —— 没有它，"7 天齐不齐"只能靠猜
+      coverage: hasStarDaily
+        ? {
+            from: coveredDays[0],
+            to: coveredDays[coveredDays.length - 1],
+            days: coveredDays.length,
+            missing: seriesDays.filter((d) => !starDailyIndex.sampled.has(d)),
+          }
+        : null,
     };
-    if (base) {
+    if (hasStarDaily) {
+      /* 首选：逐日台账。窗口增量与逐日柱同源，所以下面这条恒等式由构造成立：
+       *   delta === Σ(series 里的数值) + Σ(spans 的 value)
+       * 谁动这里的口径，先看 tests/api.test.mjs 的同名断言。 */
+      const byId = new Map(nodes.map((n) => [n.id, n]));
+      const observed = new Set();
+      for (const d of coveredDays) for (const id of starDailyIndex.days.get(d)?.keys() ?? []) observed.add(id);
+      for (const s of starDailyIndex.spans) for (const id of s.d.keys()) observed.add(id);
+      const gains = [];
+      for (const id of observed) {
+        const node = byId.get(id);
+        if (!node || node.archived || node.fork) continue;
+        const spans = spansFromDaily(id);
+        const delta = dailySum(id) + spans.reduce((s, x) => s + x.value, 0);
+        if (delta > 0) gains.push({ node, delta, spans });
+      }
+      gains.sort((a, b) => b.delta - a.delta || (b.node.stars ?? 0) - (a.node.stars ?? 0));
+      starsBoard.available = true;
+      starsBoard.matched = starDailyIndex.baselined;
+      starsBoard.source = "star-daily";
+      starsBoard.window = { from: coveredDays[0], to: coveredDays[coveredDays.length - 1], days: coveredDays.length, target: windowDays };
+      starsBoard.total = gains.length;
+      starsBoard.count = Math.min(limit, gains.length);
+      starsBoard.maxDelta = gains.length ? gains[0].delta : 0;
+      starsBoard.items = gains.slice(0, limit).map((g) => ({
+        ...row(g.node),
+        delta: g.delta,
+        // starsAfter - starsBefore === delta 是接口契约（旧路径给的是两个真实观测点）。
+        // 台账只记"观测到的变化"，起点由终点减回去 —— 算术上精确，且与逐日柱同源。
+        starsAfter: g.node.stars ?? 0,
+        starsBefore: (g.node.stars ?? 0) - g.delta,
+        series: seriesFromDaily(g.node.id),
+        spans: g.spans,
+      }));
+      const missingDays = seriesDays.length - coveredDays.length;
+      starsBoard.note =
+        "增量 = 窗口内每一天真实观测到的星标变化之和（不估算、不平摊；已排除归档与复刻）。已观测 " +
+        coveredDays.length + " 天（" + coveredDays[0] + " 起）" +
+        (missingDays > 0 ? "，另有 " + missingDays + " 天没有观测 —— 那是「未知」而不是「零增长」" : "") +
+        (starDailyIndex.spans.length ? "；" + starDailyIndex.spans.length + " 段跨天观测画成宽条，不计入任何一天" : "") +
+        "。";
+    } else if (base) {
       const byId = new Map(nodes.map((n) => [n.id, n]));
       const gains = [];
       let matched = 0;
@@ -770,14 +885,14 @@ export function createApi({ root }) {
         delta: g.delta,
         starsBefore: g.before,
         starsAfter: g.after,
-        series: hasStarDaily ? seriesFromDaily(g.node.id) : seriesForStars(g.node.id),
-        // 逐日是"每轮累加"的真实值；没有逐日数据时才退回跨天累计宽条（不平摊到某一天）
-        spans: hasStarDaily ? [] : spansForStars(g.node.id),
+        series: seriesForStars(g.node.id),
+        spans: spansForStars(g.node.id),
       }));
       starsBoard.note =
         "增量 = 两个时间点的星标之差（真实观测，非估算；已排除归档与复刻）。窗口 " + starsBoard.window.days + " 天" +
         (starsBoard.window.days < windowDays - 0.5 ? "（历史还没攒够 " + windowDays + " 天，先按现有历史算）" : "") +
-        "，两端共 " + matched + " 个仓库可比 —— 只有这些仓库能算增量，其余是「未知」而不是「零增长」。";
+        "，两端共 " + matched + " 个仓库可比 —— 只有这些仓库能算增量，其余是「未知」而不是「零增长」。" +
+        "（逐日台账还没有数据，此处退回星标环口径，只能给窗口总量、攒不出逐日形状）";
     } else {
       starsBoard.note = points.length
         ? "星标历史点还不够早（至少要比现在早 6 小时），暂时算不出增量。采集器每天记一个点，攒够后这里会自动出现。"
@@ -793,7 +908,14 @@ export function createApi({ root }) {
       dataAgeHours: Number(((now - meshAt) / 3600000).toFixed(1)),
       history: { points: points.map((p) => ({ at: p.at, repos: Object.keys(p.stars).length, source: p.source ?? "history" })), latestAt: newest?.at ?? null },
       releases: { cached: Object.keys(releasesIndex.repos).length, updatedAt: releasesIndex.updatedAt ?? null },
-      starDaily: { days: starDailyIndex.days.size, updatedAt: starDailyIndex.updatedAt ?? null },
+      starDaily: {
+        days: starDailyIndex.days.size,
+        sampledDays: starDailyIndex.sampled.size,
+        spans: starDailyIndex.spans.length,
+        baselined: starDailyIndex.baselined,
+        updatedAt: starDailyIndex.updatedAt ?? null,
+        lastRound: starDailyIndex.lastRound,
+      },
       boards: {
         updated: useReleases
           ? {
@@ -1127,7 +1249,7 @@ export function createApi({ root }) {
     };
   }
 
-  return { load, search, searchIds, readmeStats, status, ranking, categories, one, cardSvg, cardPage, publicNode, slim };
+  return { load, search, searchIds, readmeStats, starDailyStats, status, ranking, categories, one, cardSvg, cardPage, publicNode, slim };
 }
 
 /** API 自描述：给调用者一份可发现的端点清单 */

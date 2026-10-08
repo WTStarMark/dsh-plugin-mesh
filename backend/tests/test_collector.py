@@ -1403,7 +1403,7 @@ class InclusionAndDirectionTest(unittest.TestCase):
 
 
 class StarDailyTest(unittest.TestCase):
-    """逐日星标增量：每轮把本轮变化累加进当天桶（首次见到只记基线），掉星如实记负。"""
+    """逐日星标台账的四条硬规矩：首轮只落基线 / 断档转 spans / 缺席保留基线 / 首见不计数，掉星如实记负。"""
 
     def setUp(self):
         shutil.rmtree(TMP, ignore_errors=True)
@@ -1452,10 +1452,63 @@ class StarDailyTest(unittest.TestCase):
     def _round(self, day: str, stars: int) -> None:
         snap.update_star_daily(self._mesh(day, {"a/b": stars}), self.path)
 
-    def test_seen_is_rebuilt_from_current_nodes(self):
-        snap.update_star_daily(self._mesh("2026-10-07", {"a/b": 1, "c/d": 2}), self.path)
-        out = snap.update_star_daily(self._mesh("2026-10-08", {"a/b": 3}), self.path)
-        self.assertEqual(sorted(out["seen"].keys()), ["a/b"], "不在本轮节点表里的仓库要从基线表清掉（文件不随总量膨胀）")
+    def test_missing_repo_keeps_baseline_within_grace(self):
+        """部分轮次（分段没跑完 / 配额不够）不许静默吞掉变化：缺席仓库在宽限期内保留基线。
+
+        旧行为是"每轮按当前节点表整表重建"——缺席一次就丢基线，下次出现被当成首次见到，
+        这段时间的涨幅静默消失（数字偏小且不自知，比缺一天更危险）。
+        """
+        snap.update_star_daily({"meta": {"generatedAt": "2026-10-07T01:05:00Z"}, "nodes": [{"id": "a/b", "stars": 100}, {"id": "c/d", "stars": 50}]}, self.path)
+        out = snap.update_star_daily({"meta": {"generatedAt": "2026-10-07T02:05:00Z"}, "nodes": [{"id": "a/b", "stars": 110}]}, self.path)
+        self.assertEqual(sorted(out["seen"].keys()), ["a/b", "c/d"], "缺席一轮不该丢掉基线")
+        self.assertEqual(out["lastRound"]["carried"], 1)
+        out = snap.update_star_daily({"meta": {"generatedAt": "2026-10-07T03:05:00Z"}, "nodes": [{"id": "a/b", "stars": 120}, {"id": "c/d", "stars": 70}]}, self.path)
+        self.assertEqual(out["days"]["2026-10-07"]["c/d"], 20, "c/d 回来时 50->70 必须被记上（旧实现会当成首次见到，这 20 星静默消失）")
+
+    def test_baseline_dropped_after_grace_window(self):
+        """宽限期是有限的：超期才丢，文件不随历史总量无限膨胀（替代旧的"整表重建"断言）。"""
+        snap.update_star_daily({"meta": {"generatedAt": "2026-10-01T02:05:00Z"}, "nodes": [{"id": "a/b", "stars": 100}, {"id": "z/z", "stars": 10}]}, self.path)
+        out = snap.update_star_daily({"meta": {"generatedAt": "2026-10-07T02:05:00Z"}, "nodes": [{"id": "a/b", "stars": 100}]}, self.path)
+        self.assertEqual(sorted(out["seen"].keys()), ["a/b"], "缺席超过宽限期的基线要丢弃")
+
+    def test_first_round_is_baseline_not_a_zero_day(self):
+        """首轮只落基线，当天不进 sampledDays。
+
+        否则"还没开始观测"会在榜单上画成"这天涨了 0 星"—— 线上 2026-10-07 正是这么显示的。
+        """
+        out = snap.update_star_daily(self._mesh("2026-10-07", {"a/b": 100}), self.path)
+        self.assertEqual(out["sampledDays"], [], "首轮没有可比对的上一轮，不算观测")
+        self.assertEqual(out["days"], {})
+        self.assertTrue(out["lastRound"]["baseline"])
+
+    def test_gap_goes_to_spans_not_to_the_day_bucket(self):
+        """断档超过 26 小时：这一轮的增量进 spans，绝不塞进恢复日的日柱冒充单日。"""
+        snap.update_star_daily({"meta": {"generatedAt": "2026-10-04T02:05:00Z"}, "nodes": [{"id": "a/b", "stars": 100}]}, self.path)
+        snap.update_star_daily({"meta": {"generatedAt": "2026-10-04T03:05:00Z"}, "nodes": [{"id": "a/b", "stars": 105}]}, self.path)
+        out = snap.update_star_daily({"meta": {"generatedAt": "2026-10-07T02:05:00Z"}, "nodes": [{"id": "a/b", "stars": 400}]}, self.path)
+        self.assertEqual(out["days"]["2026-10-04"]["a/b"], 5)
+        self.assertNotIn("2026-10-07", out["days"], "跨 71 小时的涨幅不能落进 10-07 的日柱")
+        self.assertEqual(len(out["spans"]), 1)
+        self.assertEqual(out["spans"][0]["from"], "2026-10-04")
+        self.assertEqual(out["spans"][0]["to"], "2026-10-07")
+        self.assertEqual(out["spans"][0]["d"]["a/b"], 295)
+        self.assertEqual(out["spans"][0]["hours"], 71.0)
+        out = snap.update_star_daily({"meta": {"generatedAt": "2026-10-07T03:05:00Z"}, "nodes": [{"id": "a/b", "stars": 410}]}, self.path)
+        self.assertEqual(out["days"]["2026-10-07"]["a/b"], 10, "恢复日只装当天观测到的那 10 星")
+
+    def test_every_round_is_written_even_without_changes(self):
+        """每轮都落盘（哪怕 0 变化）：这是"这一轮确实观测过"的唯一证据。"""
+        snap.update_star_daily(self._mesh("2026-10-07", {"a/b": 100}), self.path)
+        out = snap.update_star_daily(self._mesh("2026-10-07", {"a/b": 100}), self.path)
+        self.assertEqual(out["days"], {}, "没有变化就不该有数字")
+        self.assertEqual(out["sampledDays"], ["2026-10-07"], "但这一天算观测过：画浅底座 0，而不是虚线「没数据」")
+
+    def test_rounds_ledger_records_every_observed_round(self):
+        """观测台账 {当地日 -> {first, last}} 回答"这天到底观测过没有"；基线轮不进台账。"""
+        snap.update_star_daily({"meta": {"generatedAt": "2026-10-07T01:05:00Z"}, "nodes": [{"id": "a/b", "stars": 100}]}, self.path)
+        snap.update_star_daily({"meta": {"generatedAt": "2026-10-07T02:05:00Z"}, "nodes": [{"id": "a/b", "stars": 110}]}, self.path)
+        out = snap.update_star_daily({"meta": {"generatedAt": "2026-10-07T03:05:00Z"}, "nodes": [{"id": "a/b", "stars": 120}]}, self.path)
+        self.assertEqual(out["rounds"]["2026-10-07"], {"first": "2026-10-07T02:05:00Z", "last": "2026-10-07T03:05:00Z"})
 
     def test_tolerates_missing_or_broken_file(self):
         self.assertEqual(snap.load_star_daily(self.path)["days"], {})

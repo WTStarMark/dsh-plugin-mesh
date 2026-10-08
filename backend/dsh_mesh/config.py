@@ -29,6 +29,15 @@ STAR_DAILY = CACHE_DIR / "star-daily.json"       # 逐日星标增量：每轮�
 # 每日界限：按该时区（UTC 偏移小时数）的 00:00 切天，而不是 UTC 00:00（= 北京时间 08:00）。
 # 星标环 / 更新日志 / 逐日星标三个"按天"的落盘都用它；前端接口里有一份同样的常量（tools/api.mjs）。
 DAY_TZ_OFFSET_HOURS = 8
+
+# 逐日星标台账（data/cache/star-daily.json）的两条判定线：
+#   1) 相邻两轮相隔【超过】它 => 这一轮的增量不是"某一天"的，转记 spans（跨天宽条），
+#      绝不塞进日柱冒充单日 —— 一次停机恢复否则会把好几天的涨幅写成"这一天涨了 N 星"；
+#   2) 本轮缺席的仓库，基线保留这么多天：部分轮次（分段没跑完、配额不够）不再静默吞掉变化，
+#      超期才丢弃，文件大小只跟索引规模走。
+STAR_OBS_GAP_HOURS = 26
+STAR_SEEN_GRACE_DAYS = 3
+
 DEFAULT_BUDGET = 120     # 每轮最多消耗多少次搜索请求
 REFRESH_HOURS = 6.0      # 超过这个时长没刷新的段会重新排队
 ENV_FILE = ROOT / ".env"

@@ -9,7 +9,7 @@ import json
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from .config import DAY_TZ_OFFSET_HOURS, KEEP_SNAPSHOTS
+from .config import DAY_TZ_OFFSET_HOURS, KEEP_SNAPSHOTS, STAR_OBS_GAP_HOURS, STAR_SEEN_GRACE_DAYS
 from .build import utcnow
 
 
@@ -136,8 +136,21 @@ STAR_DAILY_KEEP = 8  # 逐日星标增量按天保留 8 天（算 7 天窗口够
 
 
 def load_star_daily(path: Path) -> dict:
-    """读逐日星标增量。文件不存在/损坏都当空表 —— 绝不因为一个缓存文件中断采集。"""
-    empty = {"updatedAt": None, "unit": "stars/day", "keepDays": STAR_DAILY_KEEP, "seen": {}, "days": {}, "sampledDays": []}
+    """读逐日星标台账。文件不存在/损坏都当空表 —— 绝不因为一个缓存文件中断采集。
+
+    字段分工（接口端 tools/api.mjs 的 loadStarDaily 逐字段对应）：
+      seen        当前基线（id → 星标）
+      seenCarry   本轮缺席、被宽限保留基线的仓库（id → 最后一次真正被观测到的时刻）。
+                  只记这一类，所以体积跟"缺了几个"走，不跟索引规模走。
+      days        逐日柱：{当地日 → {id → 增量}}，只含【当天轮次观测到的】增量
+      spans       跨天宽条：[{from, to, hours, d}]，断档那一轮的增量走这里，不进 days
+      rounds      观测台账：{当地日 → {first, last}}，回答"这天到底观测过没有"
+      sampledDays 真正比对过的日（有 days 的日一定是它的子集）
+    """
+    empty = {
+        "updatedAt": None, "unit": "stars/day", "keepDays": STAR_DAILY_KEEP,
+        "seen": {}, "seenCarry": {}, "days": {}, "spans": [], "rounds": {}, "sampledDays": [], "lastRound": None,
+    }
     if not path.exists():
         return empty
     try:
@@ -147,73 +160,174 @@ def load_star_daily(path: Path) -> dict:
     if not isinstance(data, dict):
         return empty
     seen = {str(k): int(v) for k, v in (data.get("seen") or {}).items() if isinstance(v, (int, float))}
+    carry = {str(k): str(v) for k, v in (data.get("seenCarry") or {}).items() if v}
     days: dict[str, dict[str, int]] = {}
     for day, bucket in (data.get("days") or {}).items():
         if isinstance(bucket, dict):
             days[str(day)] = {str(k): int(v) for k, v in bucket.items() if isinstance(v, (int, float))}
+    spans: list[dict] = []
+    for s in data.get("spans") or []:
+        if not isinstance(s, dict) or not s.get("from") or not s.get("to") or not isinstance(s.get("d"), dict):
+            continue
+        deltas = {str(k): int(v) for k, v in s["d"].items() if isinstance(v, (int, float))}
+        if deltas:
+            spans.append({"from": str(s["from"]), "to": str(s["to"]), "hours": s.get("hours"), "d": deltas})
+    rounds: dict[str, dict[str, str]] = {}
+    for day, r in (data.get("rounds") or {}).items():
+        if isinstance(r, dict) and r.get("first") and r.get("last"):
+            rounds[str(day)] = {"first": str(r["first"]), "last": str(r["last"])}
     return {
         "updatedAt": data.get("updatedAt"),
         "unit": data.get("unit") or "stars/day",
         "keepDays": int(data.get("keepDays") or STAR_DAILY_KEEP),
         "seen": seen,
+        "seenCarry": carry,
         "days": days,
+        "spans": spans,
+        "rounds": rounds,
         "sampledDays": [str(d) for d in (data.get("sampledDays") or [])],
+        "lastRound": data.get("lastRound") if isinstance(data.get("lastRound"), dict) else None,
     }
 
 
-def update_star_daily(mesh: dict, path: Path, *, keep: int = STAR_DAILY_KEEP, now: str | None = None) -> dict:
-    """每轮把「本轮星标变化」累加进【当天】的桶 —— 前端 star 榜的逐日趋势柱用它。
+def _hours_between(a: str, b: str) -> float:
+    """两个 UTC 时间戳相隔几小时；任一个解析不出来返回 0（按"没断档"处理，不制造假宽条）。"""
+    try:
+        ta = datetime.strptime(str(a)[:19], "%Y-%m-%dT%H:%M:%S")
+        tb = datetime.strptime(str(b)[:19], "%Y-%m-%dT%H:%M:%S")
+    except ValueError:
+        return 0.0
+    return max(0.0, (tb - ta).total_seconds() / 3600.0)
 
-    为什么需要它：星标历史环一天只留一个点（同一天重复跑会覆盖），所以"两个日点的差"只能落在
+
+def update_star_daily(
+    mesh: dict,
+    path: Path,
+    *,
+    keep: int = STAR_DAILY_KEEP,
+    gap_hours: float = STAR_OBS_GAP_HOURS,
+    grace_days: int = STAR_SEEN_GRACE_DAYS,
+    now: str | None = None,
+) -> dict:
+    """每轮把「本轮观测到的星标变化」记进台账 —— 前端 star 榜的逐日趋势柱用它。
+
+    为什么需要它：星标历史环一天只留一个点（同一天重复跑会覆盖），"两个日点的差"只能落在
     后一天，攒不出逐日形状（线上实测：只有 2 个点时，一天的涨幅全堆到最后一天）。
-    这里每轮（默认 1 小时）跟上一轮比一次、把变化累加进当天桶：每天都是真实观测的累加值，
-    **既不跨天摊派，也不编数字**（负数是掉星，如实记为负）。
 
-    - 首次见到某个仓库只记基线，不计数（与更新日志同一套规矩）
-    - seen 每轮按当前节点表重建，所以文件大小只跟索引规模走，不会无限增长
-    - days 只留最近 keep 天
+    四条硬规矩（前三条是"逐日数据能站住"的前提）：
+      1. **首轮只记基线**：没有上一轮可比时，当天不进 sampledDays —— 否则"还没开始观测"
+         会在榜单上画成"这天涨了 0 星"（线上 2026-10-07 正是这么显示的）。
+      2. **断档不算单日**：某个基线距本轮超过 gap_hours 时，这一轮的增量写进 spans
+         （跨天宽条），不进当天桶 —— 一次停机恢复否则会把好几天的涨幅塞进恢复日。
+      3. **缺席不丢基线**：本轮没出现的仓库，在 grace_days 内保留基线。否则它下次出现会被
+         当成"首次见到"，这段变化被静默吞掉 —— 分段没跑完、配额不够时就会这样。
+      4. 首次见到某个仓库只记基线、不计数（"它本来就有这么多星"不是这一轮的增量）。
+
+    - 每轮都落盘（哪怕 0 变化）：这是"这一轮确实观测过"的唯一证据
+    - days / spans / rounds 只留最近 keep 天
     """
     at = (mesh.get("meta") or {}).get("generatedAt") or now or utcnow()
-    day = day_of(at)  # 同上
+    day = day_of(at)  # 按 DAY_TZ_OFFSET_HOURS 时区的 00:00 切天
     payload = load_star_daily(path)
     seen = dict(payload["seen"])
+    carry = dict(payload["seenCarry"])
     days = {k: dict(v) for k, v in payload["days"].items()}
-    sampled = set(payload.get("sampledDays") or []) | {day}
+    spans = [dict(s) for s in payload["spans"]]
+    rounds = {k: dict(v) for k, v in payload["rounds"].items()}
+    sampled = set(payload["sampledDays"])
+
+    prev_round = payload.get("lastRound") or {}
+    prev_at = prev_round.get("at") or payload.get("updatedAt")
+    has_baseline = bool(seen) and bool(prev_at)
 
     bucket = dict(days.get(day) or {})
+    span_groups: dict[tuple[str, str], dict] = {}
     next_seen: dict[str, int] = {}
+    next_carry: dict[str, str] = {}
+    present: set[str] = set()
     counted = 0
     gained = 0
+
     for node in mesh.get("nodes", []):
         nid = node.get("id")
         stars = node.get("stars")
         if not nid or not isinstance(stars, (int, float)):
             continue
         stars = int(stars)
+        present.add(nid)
         next_seen[nid] = stars
         before = seen.get(nid)
         if before is None:
-            continue  # 首次见到：只记基线，"它本来就有这么多星"不是这一轮的增量
+            continue  # 首次见到：只记基线
         delta = stars - before
-        if delta:
+        if not delta:
+            continue
+        counted += 1
+        if delta > 0:
+            gained += delta
+        obs_at = carry.get(nid, prev_at)  # 这份基线是什么时候观测到的
+        gap = _hours_between(obs_at, at)
+        if gap > gap_hours:
+            key = (day_of(obs_at), day)
+            group = span_groups.setdefault(key, {"d": {}, "hours": 0.0})
+            group["d"][nid] = int(group["d"].get(nid, 0)) + delta
+            group["hours"] = round(max(group["hours"], gap), 2)
+        else:
             bucket[nid] = int(bucket.get(nid, 0)) + delta
-            counted += 1
-            if delta > 0:
-                gained += delta
-    if bucket:
-        days[day] = bucket
+
+    # 本轮缺席的仓库：宽限期内保留基线（部分轮次不再静默吞掉变化），超期丢弃
+    grace_floor = _day_shift(day, -grace_days)
+    carried = 0
+    for nid, stars in seen.items():
+        if nid in present:
+            continue
+        last = carry.get(nid, prev_at)
+        if last and day_of(last) >= grace_floor:
+            next_seen[nid] = stars
+            next_carry[nid] = last
+            carried += 1
+
+    span_added = 0
+    if has_baseline:
+        sampled.add(day)
+        record = rounds.setdefault(day, {})
+        record.setdefault("first", at)
+        record["last"] = at
+        if bucket:
+            days[day] = bucket
+        for (frm, to), group in sorted(span_groups.items()):
+            spans.append({"from": frm, "to": to, "hours": group["hours"], "d": group["d"]})
+            span_added += 1
 
     keep_floor = _day_shift(day, -(keep - 1))  # 含当天在内共 keep 天
     days = {d: c for d, c in days.items() if d >= keep_floor and c}
+    spans = [s for s in spans if str(s.get("to") or "") >= keep_floor and s.get("d")]
+    rounds = {d: r for d, r in rounds.items() if d >= keep_floor}
     sampled = {d for d in sampled if d >= keep_floor}
+
     out = {
         "updatedAt": now or utcnow(),
         "unit": "stars/day",
         "keepDays": keep,
-        "note": "每轮跟上一轮比一次星标，把变化累加进当天（首次见到不计数）。前端 star 榜的逐日趋势柱用它：每天都是真实观测的累加值，不跨天摊派、不编数字；负数是掉星。",
-        "lastRound": {"at": at, "counted": counted, "gained": gained},
+        "note": (
+            "逐日柱 = 当天各轮真实观测到的星标变化的累加（首次见到不计数，负数是掉星）。"
+            "断档超过 " + str(gap_hours) + " 小时的那一轮不进日柱，单独记在 spans 里；"
+            "没有观测的日子不落进 days/sampledDays，读取端据此画成「没数据」而不是 0。"
+        ),
+        "lastRound": {
+            "at": at,
+            "day": day,
+            "counted": counted,
+            "gained": gained,
+            "spans": span_added,
+            "carried": carried,
+            "baseline": not has_baseline,
+        },
         "seen": dict(sorted(next_seen.items())),
+        "seenCarry": dict(sorted(next_carry.items())),
         "days": dict(sorted(days.items())),
+        "spans": spans,
+        "rounds": dict(sorted(rounds.items())),
         "sampledDays": sorted(sampled),
     }
     _write_json(path, out)

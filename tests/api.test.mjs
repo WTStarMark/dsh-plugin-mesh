@@ -365,6 +365,107 @@ test("周更新热榜：窗口与横轴对齐（最左那天的版本必须被�
   }
 });
 
+test("star 榜：逐日柱与窗口增量同源，Σ(逐日) + Σ(宽条) 必须等于行内增量", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "mesh-stardaily-"));
+  try {
+    await mkdir(join(tmp, "data", "cache"), { recursive: true });
+    const nowIso = new Date().toISOString();
+    const anchor = dayOf(Date.parse(nowIso));
+    const shift = (d, n) => new Date(Date.parse(d + "T00:00:00Z") + n * 86400000).toISOString().slice(0, 10);
+    const d0 = shift(anchor, -2);
+    const d1 = shift(anchor, -1);
+    const d2 = anchor;
+    const node = (id, stars) => ({ id, name: id.split("/")[1], owner: id.split("/")[0], stars, archived: false, fork: false, matchedTags: ["dsh"], topics: [] });
+    await writeFile(
+      join(tmp, "data", "mesh.json"),
+      JSON.stringify({ meta: { generatedAt: nowIso }, nodes: [node("a/big", 200), node("a/gap", 400), node("a/down", 90)], edges: [], clusters: [] }),
+    );
+    await writeFile(
+      join(tmp, "data", "cache", "star-daily.json"),
+      JSON.stringify({
+        updatedAt: nowIso,
+        lastRound: { at: nowIso, day: d2, counted: 3, gained: 42, spans: 1, carried: 0, baseline: false },
+        seen: { "a/big": 200, "a/gap": 400, "a/down": 90 },
+        // d1 故意"有观测但没变化" => 必须画成 0（浅底座），不是 null（虚线底座）
+        sampledDays: [d0, d1, d2],
+        days: { [d0]: { "a/big": 30 }, [d2]: { "a/big": 12, "a/down": -5 } },
+        spans: [{ from: d0, to: d2, hours: 71, d: { "a/gap": 295 } }],
+        rounds: { [d0]: { first: nowIso, last: nowIso } },
+      }),
+    );
+    const local = createApi({ root: tmp });
+    const out = await local.ranking(new URLSearchParams("limit=10"));
+    const board = out.boards.stars;
+
+    assert.equal(board.seriesSource, "star-daily", "有台账就必须走台账，不许再退回星标环");
+    assert.equal(board.available, true, "有台账就该出榜");
+    assert.equal(board.coverage.from, d0, "覆盖起点 = 第一个真正观测到的日子");
+    assert.equal(board.coverage.to, d2);
+    assert.equal(board.coverage.days, 3);
+    assert.equal(board.coverage.missing.length, out.seriesDays.length - 3, "其余天如实报成没观测");
+
+    // 不变量：行内增量 === Σ(逐日柱) + Σ(宽条)。由构造保证，谁改口径先看这条。
+    for (const it of board.items) {
+      const bars = (it.series ?? []).filter((v) => typeof v === "number").reduce((s, v) => s + v, 0);
+      const spans = (it.spans ?? []).reduce((s, x) => s + x.value, 0);
+      assert.equal(bars + spans, it.delta, "Σ逐日 + Σ宽条 必须等于行内增量：" + it.id);
+    }
+
+    const big = board.items.find((x) => x.id === "a/big");
+    assert.ok(big, "a/big 应在榜上");
+    assert.equal(big.delta, 42, "30（d0）+ 12（d2）");
+    assert.deepEqual(big.series.slice(0, 4), [null, null, null, null], "台账之前的天是「没数据」，不是 0");
+    assert.equal(big.series[out.seriesDays.indexOf(d0)], 30);
+    assert.equal(big.series[out.seriesDays.indexOf(d1)], 0, "观测到但没变化 = 0，不是 null");
+    assert.equal(big.series[out.seriesDays.indexOf(d2)], 12);
+
+    const gap = board.items.find((x) => x.id === "a/gap");
+    assert.equal(gap.delta, 295, "跨天涨幅只能走宽条");
+    assert.equal(gap.series.filter((v) => typeof v === "number").reduce((s, v) => s + v, 0), 0, "宽条不许落到任何一天");
+    assert.equal(gap.spans.length, 1);
+    assert.equal(gap.spans[0].value, 295);
+    assert.equal(gap.spans[0].from, d0);
+    assert.equal(gap.spans[0].to, d2);
+
+    for (const it of board.items) {
+      assert.equal(it.starsAfter - it.starsBefore, it.delta, "增量必须等于两端观测之差（接口契约，旧路径同款）：" + it.id);
+      assert.ok(it.starsAfter >= it.starsBefore, "只有正增长的仓库才进榜");
+    }
+
+    assert.equal(board.items.find((x) => x.id === "a/down"), undefined, "掉星（负增量）不进「热榜」，但已如实记在台账里");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("star 榜：台账为空时如实退回星标环，并在 note 里写明是降级口径", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "mesh-starring-"));
+  try {
+    await mkdir(join(tmp, "data", "cache"), { recursive: true });
+    const nowIso = new Date().toISOString();
+    const shift = (d, n) => new Date(Date.parse(d + "T00:00:00Z") + n * 86400000).toISOString().slice(0, 10);
+    const older = shift(dayOf(Date.parse(nowIso)), -6);
+    await writeFile(
+      join(tmp, "data", "mesh.json"),
+      JSON.stringify({
+        meta: { generatedAt: nowIso },
+        nodes: [{ id: "a/one", name: "one", owner: "a", stars: 150, archived: false, fork: false, matchedTags: ["dsh"], topics: [] }],
+        edges: [],
+        clusters: [],
+      }),
+    );
+    await writeFile(join(tmp, "data", "cache", "star-history.json"), JSON.stringify({ points: [{ at: older + "T02:00:00Z", stars: { "a/one": 100 } }] }));
+    const local = createApi({ root: tmp });
+    const board = (await local.ranking(new URLSearchParams("limit=5"))).boards.stars;
+    assert.equal(board.seriesSource, "ring", "没有台账只能退回环");
+    assert.equal(board.available, true);
+    assert.equal(board.coverage, null, "环口径给不出覆盖度，如实为 null");
+    assert.ok(board.note.includes("退回星标环"), "note 要写明这是降级口径：" + board.note);
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("dayOf：坏时间戳不许抛异常（曾经让 /api/ranking 挂死 30 秒）", () => {
   assert.equal(dayOf(1759886400000), "2025-10-08", "毫秒数要能吃");
   assert.equal(dayOf("2026-10-06T23:08:14Z"), "2026-10-07", "ISO 串按当地日界换算");
