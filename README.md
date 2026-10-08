@@ -3,7 +3,7 @@
 **把带 `dsh` 系列 GitHub 标签的仓库，画成一张可交互的生态网络图。**
 
 [![在线访问](https://img.shields.io/badge/在线访问-104.129.51.126-2f7df6?style=flat-square)](http://104.129.51.126/)
-[![测试](https://img.shields.io/badge/tests-196%20JS%20%2B%2090%20Python-3fb8a8?style=flat-square)](#测试)
+[![测试](https://img.shields.io/badge/tests-204%20JS%20%2B%20103%20Python-3fb8a8?style=flat-square)](#测试)
 [![依赖](https://img.shields.io/badge/dependencies-0-57b894?style=flat-square)](#技术选型)
 [![版本](https://img.shields.io/badge/version-v0.5.0-9b8cf0?style=flat-square)](#)
 
@@ -75,8 +75,8 @@
 git clone <repo> && cd dsh-plugin-mesh
 python3 backend/collect.py --from-raw    # 用仓库里的样本离线复算一份前端契约（零网络、不吃配额）
 npm run serve:lan                        # http://<你的局域网IP>:8788/
-npm test                                 # 196 项前端测试
-python3 backend/tests/test_collector.py  # 90 项后端测试
+npm test                                 # 全部测试：204 项前端 + 103 项后端（npm test 会先补夹具数据）
+npm run test:js                          # 只跑前端；npm run test:py 只跑后端
 ```
 
 > **数据为什么不在仓库里**：采集器的每小时产物（`data/mesh.json` / `mesh-core.*` / `last-crawl.json` / `cache/` / `snapshots/` / `details/`）体积大且每小时都变，提交一次就把仓库撑胖，所以全部 gitignore —— 部署机上由采集器自己生成。克隆下来先跑上面那条 `--from-raw`（用随代码走的 `data/sample-*.json` 夹具）就有一份可看可测的数据。
@@ -204,11 +204,19 @@ GitHub 搜索 API
 
 ## 测试
 
+测试入口只有两个，CI 与本地跑的是同一套：
+
 ```bash
-npm test                                  # 196 项：布局 / 连线 / 分类（协议基座·桌宠·非插件排除）/ 细枝 / 相关性判定 / 生态共鸣 / 面板 / 双击聚焦与关联居中 / 榜单（更新次数·口径与降级·版本胶囊）/ 主题 / 噪声黑名单 / 服务加固 / 冒烟
-python3 backend/tests/test_collector.py   # 90 项：分类 / 分段扫描 / 快照 / 调度 / 采集顺序 / 噪声黑名单 / 三档判定 / 预计算容错 / 星标历史环 / 更新日志 / 版本采集 / **收录口径与共鸣边方向**
-python3 backend/verify_parity.py          # 跨语言一致性（JS 管线 vs Python 采集器）
+npm test                 # 前端 204 项 + 后端 103 项
+npm run test:js          # 前端：布局 / 连线 / 分类 / 细枝 / 相关性 / 生态共鸣 / 面板 / 双击聚焦 / 榜单（发版判定·窗口对齐·版本胶囊）/ 主题 / 噪声黑名单 / 服务加固 / 限流 / 冒烟
+npm run test:py          # 后端：分类 / 分段扫描 / 快照 / 调度 / 采集顺序 / 噪声黑名单 / 三档判定 / 预计算容错 / 星标历史环 / 更新日志 / 版本采集 / 收录口径与共鸣边方向 / 抗网络抖动
+npm run seed:fixture     # 用 data/sample-raw.json 离线生成夹具数据集（npm test 会自动调用；本机已有真实数据时自动跳过）
+python3 backend/verify_parity.py   # 跨语言一致性（JS 管线 vs Python 采集器）
 ```
+
+- **数据前提**：`data/mesh.json` 等运行时产物不入库。干净克隆里 `npm test` 会先跑 `npm run seed:fixture`（走采集器 `--from-raw`，零网络），生成 593 个节点的夹具数据集。
+- **按真实规模才成立的断言**：数据集不够大或样本过期时，相关用例会**显式跳过并写明原因**（统一判断在 `tests/helpers/dataset.mjs`），不会假装通过。夹具上跳过的项，在采集器跑过一轮的机器上会真的执行。
+- **CI**：GitHub Actions（`.github/workflows/ci.yml`）在每次 push 与 PR 上跑同一套流程 —— 语法自检 → 生成夹具 → `npm test`；矩阵是 **Node 22 × Python 3.9 / 3.12**，与线上（Node 22.23 + Python 3.9）对齐。仓库无第三方依赖，CI 不装任何包。
 
 ## 部署（pm2 + 端口 80）
 
@@ -247,7 +255,7 @@ backend/
   dsh_mesh/         github / segments / classify / build / snapshot / releases / readmes / config
   verify_parity.py  跨语言一致性校验
   check_token.py    令牌自检（只打印配额数字）
-  tests/            90 项测试（前端 196 项在根目录 tests/）
+  tests/            103 项测试（前端 204 项在根目录 tests/，夹具探针在 tests/helpers/）
 docs/               data-contract.md / frontend-design.md 与预览图
 ```
 

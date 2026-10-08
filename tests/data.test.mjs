@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import { skipUnless, hasRealDataset } from "./helpers/dataset.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const mesh = JSON.parse(await readFile(resolve(ROOT, "data/mesh.json"), "utf8"));
@@ -142,7 +143,9 @@ test("回归：Tencent 组曾因度数裁剪被静默丢线", () => {
   assert.ok(mesh.meta.ownerEdges > 0, "meta 应记录同作者边数");
 });
 
-test("数据必须自带来源与覆盖范围说明", () => {
+test("数据必须自带来源与覆盖范围说明", (t) => {
+  // meta.queries 是取样器写的；CI 夹具由采集器 --from-raw 离线重算，没有这个字段
+  if (skipUnless(t, hasRealDataset || mesh.meta.kind !== "sample-seed", "当前是 CI 夹具：采集器离线重算的数据集不带取样查询来源")) return;
   // 数据来源可能是离线取样（sample-seed）或每小时采集（hourly-crawl）
   assert.ok(["sample-seed", "hourly-crawl"].includes(mesh.meta.kind), "未知的数据类型：" + mesh.meta.kind);
   assert.ok(mesh.meta.note && mesh.meta.note.length > 0, "必须写明数据覆盖范围（meta.note）");

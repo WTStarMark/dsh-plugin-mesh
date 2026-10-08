@@ -12,6 +12,7 @@ import { gzipSync } from "node:zlib";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApi, categoryColor, xmlEscape, validNamePart, apiIndex, MAX_LIMIT, textWidth, wrapText, DEFAULT_SITE, DAY_TZ_OFFSET_HOURS, dayOf } from "../tools/api.mjs";
+import { skipUnless, hasFreshPushes } from "./helpers/dataset.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const api = createApi({ root: ROOT });
@@ -138,7 +139,9 @@ test("检索：过滤、排序、分页都真的生效（从数据自身推导�
   assert.ok(capped.count <= MAX_LIMIT);
 });
 
-test("榜单：周更新榜按更新次数排序，star 榜给真实增量与真实窗口（不写死数字）", async () => {
+test("榜单：周更新榜按更新次数排序，star 榜给真实增量与真实窗口（不写死数字）", async (t) => {
+  // 样例数据是 2026-10-01 取的，会随时间过期；窗口内没有推送时周更新榜必然为空
+  if (skipUnless(t, hasFreshPushes, "当前数据集最近 7 天没有推送（样本已过期），周更新榜必然是空的")) return;
   const out = await api.ranking(new URLSearchParams("limit=5"));
   assert.equal(out.windowDays, 7, "默认窗口 7 天");
   assert.ok(out.generatedAt, "应带数据快照时间");
@@ -644,9 +647,12 @@ test("HTTP：端点可用、类型正确、带 CORS 与缓存头", async () => {
   const rankingRes = await fetch(base + "/api/ranking?limit=3");
   assert.equal(rankingRes.status, 200, "榜单接口应可用");
   const ranking = await rankingRes.json();
-  assert.ok(ranking.boards?.updated?.items?.length > 0, "HTTP 也要能拿到周更新榜");
-  assert.ok(ranking.boards.updated.items[0].updates >= 1, "HTTP 返回的行也要带更新次数");
   assert.ok(typeof ranking.boards.updated.updatesSource === "string", "要带次数来源");
+  // 榜单行数依赖"窗口内有没有推送"：样本过期时为空，不为空时必须自洽
+  if (hasFreshPushes) {
+    assert.ok(ranking.boards?.updated?.items?.length > 0, "HTTP 也要能拿到周更新榜");
+    assert.ok(ranking.boards.updated.items[0].updates >= 1, "HTTP 返回的行也要带更新次数");
+  }
   assert.ok(ranking.boards?.stars, "HTTP 也要能拿到 star 榜");
   assert.equal(rankingRes.headers.get("access-control-allow-origin"), "*");
   assert.match(rankingRes.headers.get("cache-control") ?? "", /max-age=300/);

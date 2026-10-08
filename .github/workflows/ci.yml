@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Node ${{ matrix.node }} · Python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 线上就是这套：远端 Node 22.23.3 / Python 3.9.25
+          - node: "22"
+            python: "3.9"
+          - node: "22"
+            python: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      # 仓库没有任何第三方依赖：不装包，只做语法自检
+      - name: 语法自检
+        run: |
+          set -e
+          for f in $(git ls-files '*.mjs' '*.js'); do node --check "$f"; done
+          python3 -m compileall -q backend
+          echo "语法自检通过"
+
+      # 运行时产物不入库，用仓库里的夹具离线生成一份数据集
+      - name: 生成夹具数据集
+        run: npm run seed:fixture
+
+      - name: 测试（JS + Python）
+        run: npm test
