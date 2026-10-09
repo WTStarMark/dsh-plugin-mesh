@@ -58,6 +58,25 @@ class ClassifyTest(unittest.TestCase):
                 self.assertNotIn(key, seen, f"规则重复：{key}")
                 seen.add(key)
 
+    def test_pet_skin_self_description_wins(self):
+        """回归：自称皮肤系列的仓库不该被「鲸鱼娘」抢进桌宠（Small-tailqwq/dsh-deep-whale）。"""
+        series = classify_node({
+            "name": "dsh-deep-whale",
+            "description": "Whale Girl skin series for DeepSeek Harness. 适用于 DeepSeek Harness 的，鲸鱼娘系列皮肤。",
+            "topics": ["dsh", "dsh-plugin"],
+        })
+        self.assertEqual(series["id"], "skin")
+        # 真桌宠不受影响：自述了宠物/陪伴玩法，或作者自打 pet 标签
+        self.assertEqual(
+            classify_node({"name": "dsh-whale-pet", "description": "鲸鱼娘桌宠：养成互动、陪聊", "topics": []})["id"], "pet"
+        )
+        self.assertEqual(
+            classify_node({"name": "dsh-maid-whale", "description": "鲸鱼女仆主题插件", "topics": ["pet"]})["id"], "pet"
+        )
+        self.assertNotEqual(
+            classify_node({"name": "dsh-whale-theme", "description": "深海鲸鱼娘主题", "topics": []})["id"], "pet"
+        )
+
     def test_apply_merges_small_categories(self):
         nodes = [{"id": f"a/{i}", "name": f"dsh-skin-{i}", "description": "皮肤", "topics": []} for i in range(20)]
         # 新规则下"插件市场"四个字不足以判定，需要自述汇总（收录/汇集）
@@ -73,7 +92,9 @@ class ParityTest(unittest.TestCase):
 
     def test_matches_js_output(self):
         js = sample_mesh()
-        py = build_mesh(sample_raw(), {})
+        # aliases={}：冻结的 JS 参照物不经改名别名表，这里也不能读盘，
+        # 否则生产机上检测到的改名会让这条比对假红。
+        py = build_mesh(sample_raw(), {}, aliases={})
 
         js_ids = {n["id"] for n in js["nodes"]}
         py_ids = {n["id"] for n in py["nodes"]}

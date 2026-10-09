@@ -1170,7 +1170,7 @@ export function createApi({ root }) {
       "<h2>HTML</h2><pre>" + xmlEscape(html) + "</pre>",
       "<h2>说明</h2>",
       '<p class="note">卡片是自包含 SVG（无外部依赖、无脚本），贴进 README、博客或文档即可。<br>' +
-        "换主题加 <code>?theme=dark</code>；换去处加 <code>?link=https://你的站点/</code>（默认 " + xmlEscape(DEFAULT_SITE) + "）。<br>" +
+        "上面是深色版，换浅色加 <code>?theme=light</code>；换去处加 <code>?link=https://你的站点/</code>（默认 " + xmlEscape(DEFAULT_SITE) + "）。<br>" +
         "数据每小时更新，卡片随之变化。<br>仓库信息：<a href=\"/api/repos/" + xmlEscape(n.id) + "\">/api/repos/" + xmlEscape(n.id) + "</a> · 生态总览：<a href=\"/api/categories\">/api/categories</a></p>",
       "</main></body></html>",
     ];
@@ -1262,14 +1262,16 @@ export function apiIndex(version) {
       { method: "GET", path: "/api", desc: "本清单" },
       { method: "GET", path: "/api/health", desc: "健康检查与数据概况（含 README 索引规模）" },
       { method: "GET", path: "/api/status", desc: "采集进度状态：下一轮开始时间、阶段、分段与 README 进度、配额（顶栏状态圆环用）" },
-      { method: "GET", path: "/api/ranking?days=7&limit=20&fields=all", desc: "榜单：周更新热榜（最近推送的仓库）+ 周 star 热榜（星标历史增量；历史不足时如实返回实际窗口）" },
+      { method: "GET", path: "/api/ranking?days=7&limit=20&fields=all", desc: "榜单：周更新热榜（本周发过 release 的项目，含 updates / updatesSource / releases）+ 周 star 热榜（星标历史增量；历史不足时如实返回实际窗口）" },
       { method: "GET", path: "/api/categories", desc: "扇区（功能分类）与细枝及各自数量" },
       { method: "GET", path: "/api/repos?q=&category=&subcategory=&tag=&language=&minStars=&archived=&sort=stars|pushed|created|name&limit=&offset=&fields=all", desc: "检索仓库（默认 20 条，最多 100 条）" },
       { method: "GET", path: "/api/search?q=&limit=", desc: "紧凑检索：只回命中 id 与计数（含 README 正文命中）" },
       { method: "GET", path: "/api/repos/:owner/:name", desc: "单个仓库详情，含同作者/主题共现连线" },
       { method: "GET", path: "/preview.svg?theme=dark|light&size=&sample=", desc: "README 预览图：按当前数据实时渲染的生态图（也可走 /api/preview.svg）" },
-    { method: "GET", path: "/api/card/:owner/:name.svg?theme=light|dark", desc: "可分享的 SVG 卡片" },
+      { method: "GET", path: "/api/card/:owner/:name.svg?theme=light|dark&link=", desc: "可分享的 SVG 卡片" },
       { method: "GET", path: "/card/:owner/:name", desc: "卡片分享页（预览 + 嵌入代码）" },
+      { method: "GET", path: "/api/stats", desc: "访问统计（只读）" },
+      { method: "POST", path: "/api/ping", desc: "上报一次访问（前端自动调用，唯一接受 POST 的接口）" },
     ],
   };
 }

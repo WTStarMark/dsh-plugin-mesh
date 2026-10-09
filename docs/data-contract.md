@@ -1,6 +1,6 @@
 # 前端数据契约（`data/mesh.json`）
 
-前端只认这一份结构。将来后端采集器产出同样结构，前端一行都不用改。
+前端只认这一份结构；采集器产出同样结构，前端一行都不用改。
 
 ```jsonc
 {
@@ -57,8 +57,6 @@
 | `categoryScore` | number | 分类得分（可解释性） |
 | `categoryHits` | string[] | 命中的规则词，如 `["skin","皮肤"]` |
 | `categoryRaw` | string? | 被长尾合并前的原始分类（仅当被并入「其他」时存在） |
-| `relevance` | number | 相关度评分（当前为占位启发式） |
-| `noise` / `review` | number / boolean | 疑似噪声分与"是否进待复核队列" |
 | `degree` | number | 度数（用于标签显示优先级） |
 
 ## Edge
@@ -81,8 +79,8 @@
 2. 每条边的两端都必须存在于 `nodes` 中，且 `source !== target`。
 3. `matchedTags` 里的每个标签都必须真的出现在该节点的 `topics` 里（**精确命中**，不靠搜索接口的模糊结果）。
 4. 每个节点都必须有 `category` 与 `categoryLabel`；扇区计数之和 = 节点总数。
-4.5 **收录口径（v0.5.0）**：每个节点都必须"有信号" —— `topics.length > 0` 或 `description.trim().length >= 10`。
+5. **收录口径（v0.5.0）**：每个节点都必须"有信号" —— `topics.length > 0` 或 `description.trim().length >= 10`。
    只有名字命中 dsh 的空壳不进 nodes（`meta.noSignalSkipped` 记账）。归类率也按这个分母量
    （无信号仓库本来就无从分类，算进分母是量数据稀疏度，不是量分类器质量）。
-5. **功能分类不得退化为标签分组**：同一个 GitHub 标签必须横跨多个扇区（`tests/data.test.mjs` 强制校验）。
-5. `meta.kind === "sample-seed"` 时必须带 `note` 与 `queries`（取样数据必须自带局限说明）。
+6. **功能分类不得退化为标签分组**：同一个 GitHub 标签必须横跨多个扇区（`tests/data.test.mjs` 强制校验）。
+7. `meta.kind === "sample-seed"` 时必须带 `note` 与 `queries`（取样数据必须自带局限说明）。

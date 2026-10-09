@@ -72,6 +72,14 @@ SPEC_SELF_SRC = (
     r"conventions every plugin|(standard|specification|protocol)\s+for\s+(dsh|deepseek|plugins?)"
 )
 
+# 桌宠扇区的「自述」判据（与 tools/categories.mjs 的 PET_SKIN_SELF / PET_SELF 逐字对齐）：
+#   _PET_SKIN_SELF — 仓库自述是皮肤/主题/壁纸……说的是"长什么样"；
+#   _PET_SELF      — 仓库自述是宠物/陪伴/角色玩法……说的才是"陪着你的角色"。
+# 「鲸鱼娘/小鲸鱼」只说明角色长相，不等于陪伴玩法：一个自称"皮肤系列"的仓库
+# 不该被它拉进桌宠扇区（Small-tailqwq/dsh-deep-whale 的"鲸鱼娘系列皮肤"就是这样被抢走的）。
+_PET_SKIN_SELF = re.compile(r"皮肤|主题|壁纸|外观|美化|配色|skin|theme|wallpaper|appearance", re.I)
+_PET_SELF = re.compile(r"(\bpet\b|\bpets\b|桌宠|宠物|养成|pokemon|live2d|mascot|吉祥物|陪伴|看板娘|小鲸鱼)", re.I | re.ASCII)
+
 CATEGORY_RULES = [
     {"id": "skin", "label": "皮肤美化", "priority": 1, "terms": [
         ("skin", 3), ("theme", 2), ("wallpaper", 3), ("皮肤", 3), ("主题", 2), ("壁纸", 3),
@@ -171,8 +179,13 @@ CATEGORY_RULES = [
         ("folder", 3), ("drag", 2), ("drop", 1), ("file", 1), ("文件", 1), ("目录", 1),
         ("拖拽", 3), ("网盘", 3), ("附件", 1), ("备份", 2)]},
     # "鲸鱼娘/小鲸鱼/看板娘" 是 DSH 桌宠的通用说法（官方吉祥物是鲸鱼）；
-    # 「娘」在这批语料里就是"角色/看板娘"的标记，不是"姑娘"那种泛用
-    {"id": "pet", "label": "桌宠娱乐", "priority": 19, "terms": [
+    # 「娘」在这批语料里就是"角色/看板娘"的标记，不是"姑娘"那种泛用。
+    # 补充（2026-10）：这些词说的仍是"角色长相"，所以自述是皮肤/主题/壁纸的仓库
+    # 先被排除，只有同时自述了宠物/陪伴玩法（或作者自打 pet 标签）才救回。
+    {"id": "pet", "label": "桌宠娱乐", "priority": 19,
+     "exclude": {"name": _PET_SKIN_SELF, "desc": _PET_SKIN_SELF},
+     "override": {"name": _PET_SELF, "desc": _PET_SELF, "topics": _PET_SELF},
+     "terms": [
         ("pet", 3), ("pokemon", 3), ("live2d", 3), ("game", 2), ("桌宠", 3), ("宠物", 3),
         ("养成", 3), ("游戏", 2), ("虚拟形象", 3),
         ("小鲸鱼", 6), ("鲸鱼娘", 5), ("娘", 3), ("看板娘", 3), ("mascot", 3), ("吉祥物", 3), ("陪伴", 2)]},
@@ -374,6 +387,7 @@ def _passes_gate(rule: dict, sig: dict) -> bool:
 
 
 def _is_excluded(rule: dict, sig: dict) -> bool:
+    """排除：命中即失去资格，除非 name/desc/topics 里有强自述把它救回来。"""
     exclude = rule.get("exclude")
     if not exclude:
         return False
@@ -381,7 +395,8 @@ def _is_excluded(rule: dict, sig: dict) -> bool:
     if not hit:
         return False
     override = rule.get("override")
-    if override and any(override.get(key) and override[key].search(sig[key]) for key in ("name", "desc")):
+    # topics 是作者自己打的标签，与 gate 同权：作者标了 pet/desktop-pet 就算自述
+    if override and any(override.get(key) and override[key].search(sig[key]) for key in ("name", "desc", "topics")):
         return False
     return True
 

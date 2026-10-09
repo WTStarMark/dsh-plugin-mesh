@@ -30,7 +30,8 @@ def main(argv=None) -> int:
 
     js = json.loads(args.js.read_text(encoding="utf-8"))
     raw = json.loads(args.raw.read_text(encoding="utf-8"))
-    py = build_mesh(raw["repos"], {})
+    # 冻结参照物（JS 管线 --from-raw）不经过改名别名表，这里同样不读盘
+    py = build_mesh(raw["repos"], {}, aliases={})
 
     problems: list[str] = []
 

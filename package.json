@@ -3,7 +3,7 @@
   "version": "0.5.0",
   "private": true,
   "type": "module",
-  "description": "插件生态图：把带 dsh 系列 GitHub 标签的仓库画成生态网络，含扇区图与 3D 星云两种模式。独立前端原型（非 DSH 插件）。",
+  "description": "插件生态图：把带 dsh 系列 GitHub 标签的仓库按功能铺成可交互的生态网络，含 21 个功能扇区与细枝、单扇区放大、双击聚焦、生态榜单；自带 Python 采集后端与只读查询 API，独立站点（非 DSH 插件）。",
   "scripts": {
     "serve": "node tools/serve.mjs",
     "serve:lan": "HOST=0.0.0.0 node tools/serve.mjs",

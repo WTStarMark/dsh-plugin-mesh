@@ -1,26 +1,20 @@
-# ── 依赖 / 本地环境 ───────────────────────────────────────────
 node_modules/
+dist/
 .env
 .env.local
 .DS_Store
 *.log
 .tmp/
-
-# ── Python ───────────────────────────────────────────────────
 __pycache__/
 *.pyc
 backend/tests/.tmp/
-
-# ── 凭据（只从 .env 读，永不入库）────────────────────────────
 tools/.askpass.sh
 tools/.git-askpass.sh
 .git-token
-
-# ── 采集器的每小时产物：由部署机自己生成，不入库 ──────────────
-# 为什么：它们每小时都被采集器覆盖，且体积大（mesh.json 一份 20MB+）。
-# 一旦跟踪，任何一次提交都会把这些大文件塞进历史，仓库越滚越胖。
-# 想看效果不必入库：跑一次离线复算就有（零网络、不吃配额）
-#   python3 backend/collect.py --from-raw
+.push-github.mjs
+.gh-*.mjs
+.remote-*.sh
+.commit-msg.txt
 data/mesh.json
 data/mesh-core.json
 data/mesh-core.bin
@@ -31,22 +25,8 @@ data/snapshots/
 data/cache/
 data/stats.json
 data/crawl.log
-# 采集器维护的运行时表（远端有自己的副本，不走代码同步）
 data/noise-blacklist.json
 data/renames.json
-# 人工/机器备份（体积大）
 data/*.bak-*.json
-
-# ── 随代码走的夹具：别 ignore ─────────────────────────────────
-#   data/sample-raw.json    离线样本原始记录（--from-raw 的数据源）
-#   data/sample-mesh.json   JS 管线冻结参照物（跨语言一致性校验）
-#   data/dsh-tokens.json    DSH 主题令牌快照（一致性测试）
-
-# ── 部署包与一次性运维脚本 ───────────────────────────────────
-# 预览图的 PNG 核对图（snapshot-svg --png 生成，仓库里只需要 SVG）
 docs/*.png
-dist/
-.push-github.mjs
-.remote-*.sh
-.commit-msg.txt
-.gh-*.mjs
+docs/frontend-design.md

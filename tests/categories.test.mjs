@@ -108,6 +108,27 @@ test("桌宠：鲸鱼娘/小鲸鱼/看板娘这类「角色陪伴」能压过界
   assert.equal(client.id, "desktop", "客户端不该被桌宠词抢走：" + JSON.stringify(client));
 });
 
+test("桌宠：自称皮肤/主题的仓库不该被「鲸鱼娘」抢走", () => {
+  // 事故回归：Small-tailqwq/dsh-deep-whale 自述"鲸鱼娘系列皮肤"，
+  // 「鲸鱼娘」+「娘」的分数把它推到桌宠扇区，而它其实是一套皮肤。
+  const series = classifyNode({
+    id: "Small-tailqwq/dsh-deep-whale",
+    name: "dsh-deep-whale",
+    description: "Whale Girl skin series for DeepSeek Harness. 适用于 DeepSeek Harness 的，鲸鱼娘系列皮肤。",
+    topics: ["dsh", "dsh-plugin"],
+  });
+  assert.equal(series.id, "skin", "皮肤系列不该被角色词抢进桌宠：" + JSON.stringify(series));
+
+  // 真桌宠不受影响：同样写「鲸鱼娘」，但自述了宠物/陪伴玩法，或作者自打 pet 标签
+  const pet = classifyNode({ id: "x/whale-pet", name: "dsh-whale-pet", description: "鲸鱼娘桌宠：养成互动、陪聊", topics: [] });
+  assert.equal(pet.id, "pet", JSON.stringify(pet));
+  const tagged = classifyNode({ id: "x/maid-whale", name: "dsh-maid-whale", description: "鲸鱼女仆主题插件", topics: ["pet"] });
+  assert.equal(tagged.id, "pet", "作者自己标了 pet 的算自述：" + JSON.stringify(tagged));
+  // 只有「娘」、没有任何宠物自述的主题插件，也不该进桌宠
+  const theme = classifyNode({ id: "x/whale-theme", name: "dsh-whale-theme", description: "深海鲸鱼娘主题", topics: [] });
+  assert.notEqual(theme.id, "pet", JSON.stringify(theme));
+});
+
 test("策展基座：人工点名（baseIds）直接归入协议基座", () => {
   const nodes = [];
   for (let i = 0; i < 20; i++) nodes.push({ id: "a/" + i, name: "dsh-skin-" + i, description: "皮肤", topics: [] });

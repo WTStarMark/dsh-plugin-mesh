@@ -92,6 +92,16 @@ const BASE_SELF_DESC = new RegExp(BASE_SELF_SRC, "i");
 const SPEC_SELF_SRC =
   "(插件|生态|社区)[^\\n]{0,10}(规范|标准|公约|共识|契约|协议)|互操作|元协议|meta[- ]protocol|plugin[- ](standard|spec|specification|convention|contract|schema|manifest)|ecosystem[- ](standard|spec|specification|convention)|community[- ](standard|spec|consensus|convention)|conventions every plugin|(standard|specification|protocol)\\s+for\\s+(dsh|deepseek|plugins?)";
 
+/**
+ * 桌宠扇区的「自述」判据（与 backend/dsh_mesh/classify.py 逐字对齐）：
+ *   PET_SKIN_SELF — 仓库自述是皮肤/主题/壁纸……说的是"长什么样"；
+ *   PET_SELF      — 仓库自述是宠物/陪伴/角色玩法……说的才是"陪着你的角色"。
+ * 「鲸鱼娘/小鲸鱼」只说明角色长相，不等于陪伴玩法：一个自称"皮肤系列"的仓库
+ * 不该被它拉进桌宠扇区（Small-tailqwq/dsh-deep-whale 的"鲸鱼娘系列皮肤"就是这样被抢走的）。
+ */
+const PET_SKIN_SELF = /皮肤|主题|壁纸|外观|美化|配色|skin|theme|wallpaper|appearance/i;
+const PET_SELF = /\bpet\b|\bpets\b|桌宠|宠物|养成|pokemon|live2d|mascot|吉祥物|陪伴|看板娘|小鲸鱼/i;
+
 /** 规则表：可直接手改。priority 越小优先级越高（仅用于同分裁决） */
 export const CATEGORY_RULES = [
   {
@@ -226,7 +236,11 @@ export const CATEGORY_RULES = [
     label: "桌宠娱乐",
     priority: 19,
     // "鲸鱼娘/小鲸鱼/看板娘" 是 DSH 桌宠的通用说法（官方吉祥物是鲸鱼），
-    // 但权重给得克制：只有当它确实是"陪着你的角色"时才压得过别的扇区分数
+    // 但权重给得克制：只有当它确实是"陪着你的角色"时才压得过别的扇区分数。
+    // 补充（2026-10）：这些词说的仍是"角色长相"，所以自述是皮肤/主题/壁纸的仓库
+    // 先被排除，只有同时自述了宠物/陪伴玩法（或作者自打 pet 标签）才救回。
+    exclude: { name: PET_SKIN_SELF, desc: PET_SKIN_SELF },
+    override: { name: PET_SELF, desc: PET_SELF, topics: PET_SELF },
     terms: [
       ["pet", 3], ["pokemon", 3], ["live2d", 3], ["game", 2], ["桌宠", 3], ["宠物", 3], ["养成", 3], ["游戏", 2], ["虚拟形象", 3],
       // 「娘」在这批语料里就是"角色/看板娘"的标记（鲸鱼娘/看板娘/女仆娘），不是"姑娘"那种泛用
@@ -441,14 +455,20 @@ function passesGate(rule, sig) {
   return false;
 }
 
-/** 排除：命中即失去资格，除非描述里有强自述把它救回来 */
+/** 排除：命中即失去资格，除非 name/desc/topics 里有强自述把它救回来 */
 function isExcluded(rule, sig) {
   const exclude = rule.exclude;
   if (!exclude) return false;
   const hit = (exclude.name && exclude.name.test(sig.name)) || (exclude.desc && exclude.desc.test(sig.desc));
   if (!hit) return false;
   const override = rule.override;
-  if (override && ((override.name && override.name.test(sig.name)) || (override.desc && override.desc.test(sig.desc)))) {
+  if (
+    override &&
+    ((override.name && override.name.test(sig.name)) ||
+      (override.desc && override.desc.test(sig.desc)) ||
+      // topics 是作者自己打的标签，与 gate 同权：作者标了 pet/desktop-pet 就算自述
+      (override.topics && override.topics.test(sig.topics)))
+  ) {
     return false;
   }
   return true;

@@ -265,11 +265,16 @@ def build_mesh(
     *,
     source: str = "GitHub REST Search API",
     blacklist: dict | None = None,
+    aliases: dict | None = None,
 ) -> dict:
     """主构图流程：精确命中 -> 剔除黑名单/新识别的噪声作者 -> 去重 -> 分类 -> 连线 -> 裁剪。
 
     blacklist 是【已判定】的噪声作者（owner -> 说明），来自 data/noise-blacklist.json：
     一旦判定就长期生效，哪怕下一轮只抓到它几个仓库也不再收录。
+
+    aliases 是改名别名表（旧名 -> 现名）。默认从 data/cache/aliases.json 读，这是生产行为；
+    传 {} 表示不读盘 —— 跨语言一致性校验必须这么传：冻结的 JS 参照物是 --from-raw 产出的，
+    不经过别名表，读盘会把"本机检测过的改名"混进比对（生产机上就撞过这个）。
     """
     tag_totals = tag_totals or {}
     blacklist = dict(blacklist or {})
@@ -284,7 +289,8 @@ def build_mesh(
     skipped_no_signal = 0
     excluded_repos: dict[str, str] = {}
 
-    aliases = load_aliases()
+    if aliases is None:
+        aliases = load_aliases()
     for raw in raw_repos:
         repo = normalize_repo(raw)
         if aliases and str(repo.get("id")) in aliases:
