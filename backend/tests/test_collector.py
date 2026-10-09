@@ -1336,6 +1336,10 @@ class ReleasesTest(unittest.TestCase):
     def _iso(days_ago: float) -> str:
         return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(time.time() - days_ago * 86400))
 
+    @staticmethod
+    def _day(days_ago: float) -> str:
+        return time.strftime("%Y-%m-%d", time.gmtime(time.time() - days_ago * 86400))
+
     def test_slim_keeps_four_fields_and_drops_drafts(self):
         payload = [
             {"tag_name": "v1.2.0", "name": "1.2.0", "published_at": "2026-10-01T00:00:00Z", "prerelease": False, "draft": False, "body": "x" * 5000, "assets": [1, 2]},
@@ -1381,6 +1385,73 @@ class ReleasesTest(unittest.TestCase):
         self.assertIn("a/old", picked2, "抓过 9 天了要重抓")
         self.assertNotIn("a/fresh", picked2, "才抓过半天的不该重抓")
         self.assertEqual(len(rel.pick_candidates({"repos": {}}, nodes * 5, limit=3, now_ts=now)), 3, "预算就是上限")
+
+    def test_candidates_refresh_after_push_since_last_fetch(self):
+        """回归（线上实例）：抓过一次之后又推过的仓库，不能被 REFRESH_DAYS 压住。
+
+        xling001/dsh-reading-companion 在 10-08 发了 4 个版本，缓存却停在 10-07：
+        旧口径只看"缓存多少天"，于是周更新热榜少算它一天的版本。
+        """
+        now = time.time()
+        nodes = [{"id": "active/releaser", "stars": 2, "pushedAt": self._iso(0.2), "archived": False}]
+        payload = {
+            "repos": {
+                "active/releaser": {
+                    "at": self._iso(1.5),
+                    "releases": [
+                        {"tag": "v2", "name": "", "at": self._day(1), "pre": False},
+                        {"tag": "v1", "name": "", "at": self._day(2), "pre": False},
+                    ],
+                }
+            }
+        }
+        self.assertEqual(
+            rel.pick_candidates(payload, nodes, limit=10, now_ts=now),
+            ["active/releaser"],
+            "抓过之后又推过的要立刻重抓，哪怕缓存还很新",
+        )
+
+    def test_candidates_refresh_active_releaser_after_active_hours(self):
+        """近 7 天发过版的仓库最多压 ACTIVE_REFRESH_HOURS，不再压满 REFRESH_DAYS。"""
+        now = time.time()
+        releases = [{"tag": "v1", "name": "", "at": self._day(1), "pre": False}]
+        nodes = [{"id": "a/active", "stars": 10, "pushedAt": self._iso(2), "archived": False}]
+        stale = {"repos": {"a/active": {"at": self._iso(8 / 24.0), "releases": releases}}}
+        self.assertEqual(rel.pick_candidates(stale, nodes, limit=10, now_ts=now), ["a/active"], "活跃发版仓库超过 6 小时要重抓")
+        fresh = {"repos": {"a/active": {"at": self._iso(1 / 24.0), "releases": releases}}}
+        self.assertEqual(rel.pick_candidates(fresh, nodes, limit=10, now_ts=now), [], "才抓过 1 小时的不重复抓")
+
+    def test_candidates_keep_a_discovery_share(self):
+        """预算不能全给活跃仓库：从没抓过的要留一份，否则新仓库永远发现不了。"""
+        now = time.time()
+        nodes = [{"id": "hot/" + str(i), "stars": 100 - i, "pushedAt": self._iso(0.1), "archived": False} for i in range(10)]
+        nodes += [{"id": "new/" + str(i), "stars": i, "pushedAt": self._iso(1), "archived": False} for i in range(6)]
+        payload = {"repos": {}}
+        for i in range(10):
+            payload["repos"]["hot/" + str(i)] = {"at": self._iso(1.0), "releases": [{"tag": "v1", "name": "", "at": self._day(1), "pre": False}]}
+        picked = rel.pick_candidates(payload, nodes, limit=8, now_ts=now)
+        self.assertEqual(len(picked), 8, "预算就是上限")
+        self.assertTrue(any(p.startswith("new/") for p in picked), "必须给从没抓过的留名额：" + str(picked))
+        self.assertTrue(any(p.startswith("hot/") for p in picked), "活跃仓库也不能被挤掉")
+
+    def test_candidates_order_by_window_releases(self):
+        """同一档内按"缓存里近 7 天的版本数"排 —— 周榜就是照这个指标排的，星标不能压过它。"""
+        now = time.time()
+        nodes = [
+            {"id": "few/releases", "stars": 9999, "pushedAt": self._iso(0.1), "archived": False},
+            {"id": "many/releases", "stars": 1, "pushedAt": self._iso(0.1), "archived": False},
+        ]
+        many = [{"tag": "v" + str(i), "name": "", "at": self._day(1), "pre": False} for i in range(6)]
+        few = [{"tag": "v1", "name": "", "at": self._day(1), "pre": False}]
+        payload = {"repos": {
+            "few/releases": {"at": self._iso(1), "releases": few},
+            "many/releases": {"at": self._iso(1), "releases": many},
+        }}
+        self.assertEqual(
+            rel.pick_candidates(payload, nodes, limit=10, now_ts=now),
+            ["many/releases", "few/releases"],
+            "窗口内版本多的先抓",
+        )
 
     def test_put_and_stats(self):
         payload = rel.load_releases(self.path)

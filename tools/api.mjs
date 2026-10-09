@@ -33,6 +33,9 @@ const DATA_TTL_MS = 5 * 60 * 1000;
 /** 卡片默认去处：线上站点（可用 SITE_URL 环境变量或 ?link= 覆盖） */
 export const DEFAULT_SITE = "http://104.129.51.126/";
 export const MAX_LIMIT = 100;
+/** 榜单弹窗的行数上限：周更新热榜 200 行，周 star 热榜维持 50 行 */
+export const RANKING_LIMIT = 200;
+export const RANKING_STARS_LIMIT = 50;
 const SORTS = {
   stars: (a, b) => (b.stars ?? 0) - (a.stars ?? 0),
   pushed: (a, b) => String(b.pushedAt ?? "").localeCompare(String(a.pushedAt ?? "")),
@@ -598,7 +601,9 @@ export function createApi({ root }) {
     const nodes = mesh.nodes ?? [];
     const now = Date.now();
     const windowDays = Math.min(30, Math.max(1, Number(params.get("days") ?? 7) || 7));
-    const limit = Math.min(50, Math.max(1, Number(params.get("limit") ?? 20) || 20));
+    const limit = Math.min(RANKING_LIMIT, Math.max(1, Number(params.get("limit") ?? 20) || 20));
+    // 周 star 热榜本轮不跟着放开：两个榜同用一个 limit，各自封顶（前端统一请求 limit=200）
+    const starsLimit = Math.min(RANKING_STARS_LIMIT, limit);
     const wantAll = params.get("fields") === "all";
     const releasesIndex = await loadReleases();
 
@@ -840,9 +845,9 @@ export function createApi({ root }) {
       starsBoard.source = "star-daily";
       starsBoard.window = { from: coveredDays[0], to: coveredDays[coveredDays.length - 1], days: coveredDays.length, target: windowDays };
       starsBoard.total = gains.length;
-      starsBoard.count = Math.min(limit, gains.length);
+      starsBoard.count = Math.min(starsLimit, gains.length);
       starsBoard.maxDelta = gains.length ? gains[0].delta : 0;
-      starsBoard.items = gains.slice(0, limit).map((g) => ({
+      starsBoard.items = gains.slice(0, starsLimit).map((g) => ({
         ...row(g.node),
         delta: g.delta,
         // starsAfter - starsBefore === delta 是接口契约（旧路径给的是两个真实观测点）。
@@ -878,9 +883,9 @@ export function createApi({ root }) {
       starsBoard.source = base.source ?? "history";
       starsBoard.window = { from: base.at, to: new Date(currentAt).toISOString(), days: Number(((currentAt - fromMs) / 86400000).toFixed(2)), target: windowDays };
       starsBoard.total = gains.length;
-      starsBoard.count = Math.min(limit, gains.length);
+      starsBoard.count = Math.min(starsLimit, gains.length);
       starsBoard.maxDelta = gains.length ? gains[0].delta : 0;
-      starsBoard.items = gains.slice(0, limit).map((g) => ({
+      starsBoard.items = gains.slice(0, starsLimit).map((g) => ({
         ...row(g.node),
         delta: g.delta,
         starsBefore: g.before,
@@ -928,7 +933,8 @@ export function createApi({ root }) {
               updatesSource: "releases",
               releasesIndexed: Object.keys(releasesIndex.repos).length,
               note:
-                "判定依据 = 仓库本周真实发布的 release（采集器按仓库抓最近几个版本）。" +
+                "判定依据 = 仓库本周真实发布的 release（采集器按仓库抓最近几个版本；" +
+                "活跃发版仓库最多 6 小时刷新一次，抓过之后又有推送的立刻重抓）。" +
                 "计数 = 窗口内发布的版本数，是真实计数；缓存里只留最近几个版本，超出部分看不到。",
               maxUpdates: releaseRows.length ? releaseRows[0].count : 0,
               seriesDays: seriesDays.filter((d) => d >= windowStartDay && d <= meshDay).length,
@@ -1262,7 +1268,7 @@ export function apiIndex(version) {
       { method: "GET", path: "/api", desc: "本清单" },
       { method: "GET", path: "/api/health", desc: "健康检查与数据概况（含 README 索引规模）" },
       { method: "GET", path: "/api/status", desc: "采集进度状态：下一轮开始时间、阶段、分段与 README 进度、配额（顶栏状态圆环用）" },
-      { method: "GET", path: "/api/ranking?days=7&limit=20&fields=all", desc: "榜单：周更新热榜（本周发过 release 的项目，含 updates / updatesSource / releases）+ 周 star 热榜（星标历史增量；历史不足时如实返回实际窗口）" },
+      { method: "GET", path: "/api/ranking?days=7&limit=200&fields=all", desc: "榜单：周更新热榜（本周发过 release 的项目，最多 200 行，含 updates / updatesSource / releases）+ 周 star 热榜（星标历史增量，最多 50 行；历史不足时如实返回实际窗口）" },
       { method: "GET", path: "/api/categories", desc: "扇区（功能分类）与细枝及各自数量" },
       { method: "GET", path: "/api/repos?q=&category=&subcategory=&tag=&language=&minStars=&archived=&sort=stars|pushed|created|name&limit=&offset=&fields=all", desc: "检索仓库（默认 20 条，最多 100 条）" },
       { method: "GET", path: "/api/search?q=&limit=", desc: "紧凑检索：只回命中 id 与计数（含 README 正文命中）" },

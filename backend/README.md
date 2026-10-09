@@ -34,7 +34,7 @@ python3 backend/collect.py --releases-budget 300     # 每轮顺带抓 300 个�
 | `data/cache/star-history.json` | 星标历史环：每天一个点（`id → stars`，同日重复跑会覆盖），只留 8 天。周 star 榜取它与约 7 天前那个点的差 |
 | `data/cache/star-daily.json` | 逐日星标增量：每轮把本轮星标变化累加进当天桶（首见只记基线，掉星记负），只留 8 天，供趋势柱使用 |
 | `data/cache/update-log.json` | 更新日志：每轮采样「pushedAt 是否前进」，按天累计次数（首次见到不计数），周更新热榜按它排序 |
-| `data/cache/releases.json` | 版本缓存（同时是周更新热榜的判定依据），每仓库留最近 20 个版本 |
+| `data/cache/releases.json` | 版本缓存（同时是周更新热榜的判定依据），每仓库留最近 20 个版本。刷新优先级见 `dsh_mesh/releases.py`：抓过之后又推过 → 近 7 天发过版（最多放 6 小时）→ 冷仓库超过 3 天 → 从没抓过（保留 25% 预算） |
 | `data/last-crawl.json` | 本轮溯源：时间、模式、请求数、重试、配额剩余、各标签总数、与上一份快照的差异 |
 
 每日界限由 `config.DAY_TZ_OFFSET_HOURS = 8` 决定：星标环、更新日志、逐日星标三份按天落盘的缓存都按北京时间 00:00 切天（接口侧 `tools/api.mjs` 有同名常量，测试会断言两边一致）。

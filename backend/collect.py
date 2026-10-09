@@ -339,7 +339,7 @@ def fetch_releases(args, mesh: dict, log) -> dict:
 
     为什么单独一轮一步：搜索接口不返回 releases，只能一个仓库一次请求；
     配额实测是"按认证身份一个桶"（同账号多令牌共享），所以这里只能限量 + 排优先级：
-    先抓"近 7 天推过 / 星标高 / 从没抓过或过期"的仓库（见 releases.pick_candidates）。
+    先抓"抓过之后又推过 / 近 7 天发过版 / 过期 / 从没抓过"的仓库（见 releases.pick_candidates）。
 
     离线模式（--from-raw / --from-store）与 dry-run 一律跳过 —— 测试因此完全不碰网络。
     """
