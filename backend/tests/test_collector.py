@@ -554,6 +554,43 @@ class RunOnceOrderTest(unittest.TestCase):
         self.assertEqual(last["updateLog"]["days"], 0)
 
 
+class StatusBudgetTest(unittest.TestCase):
+    """回归：状态浮窗的「请求 N / 预算 M」必须反映【本轮】参数。
+
+    线上表现：预算早已改成 900，浮窗却还挂着 "147 / 预算 600 · 配额余 20" ——
+    那两个数是上一轮爬分段时写的，而这一轮 0 个分段到期，分段循环一次都没跑。
+    """
+
+    def setUp(self):
+        shutil.rmtree(TMP, ignore_errors=True)
+        TMP.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self):
+        shutil.rmtree(TMP, ignore_errors=True)
+
+    def test_round_refreshes_budget_and_clears_stale_quota(self):
+        import collect
+
+        status_path = TMP / "status.json"
+        # 先摆一份"上一轮"的陈旧状态：请求 147 / 预算 600 · 配额余 20
+        status_path.write_text(json.dumps({"requests": 147, "budget": 600, "quotaRemaining": 20}), encoding="utf-8")
+
+        with mock.patch.object(collect, "MESH_JSON", TMP / "mesh.json"), mock.patch.object(
+            collect, "SNAPSHOT_DIR", TMP / "snapshots"
+        ), mock.patch.object(collect, "LAST_CRAWL", TMP / "last-crawl.json"), mock.patch.object(
+            collect, "STATUS_FILE", status_path
+        ), mock.patch.object(collect, "STAR_HISTORY", TMP / "star-history.json"), mock.patch.object(
+            collect, "UPDATE_LOG", TMP / "update-log.json"
+        ), mock.patch.object(collect, "STAR_DAILY", TMP / "star-daily.json"):
+            code = collect.main(["--from-raw", "--budget", "900", "--releases-budget", "1200", "--quiet"])
+        self.assertEqual(code, 0)
+
+        status = json.loads(status_path.read_text(encoding="utf-8"))
+        self.assertEqual(status["budget"], 900, "浮窗要用本轮预算，不能留上一轮的 600")
+        self.assertEqual(status["requests"], 0, "本轮请求数从 0 开始，不能留上一轮的 147")
+        self.assertNotIn("quotaRemaining", status, "本轮还没发请求，旧的配额余数必须清掉而不是继续显示")
+
+
 class SnapshotTest(unittest.TestCase):
     def setUp(self):
         shutil.rmtree(TMP, ignore_errors=True)

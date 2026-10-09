@@ -128,6 +128,9 @@ def fetch_live(args, log, blacklist=None):
             _report_progress(store, fetched, added_this_round, client, args, done=index + 1, total=len(batch))
     store.save()
 
+    # 收尾再报一次：分段数不是 5 的倍数时，面板上的请求数要停在真实值上
+    _report_progress(store, fetched, added_this_round, client, args, done=len(batch), total=len(batch))
+
     after = store.coverage()
     log(
         "本轮抓取 " + str(fetched) + " 条 · 累积索引 " + str(after["repos"]) + " 个仓库（新增 "
@@ -397,6 +400,9 @@ def run_once(args, log) -> dict:
     started = time.time()
     log(f"=== 采集开始 {utcnow()} ===")
     if not args.dry_run:
+        # 每轮开头就把本轮的请求计数与预算写进去：批次为空（所有分段都还新鲜）时
+        # 分段循环一次都不跑，浮窗会一直挂着上一轮的 "147 / 预算 600"（线上就这么看过）。
+        # quotaRemaining=None 是删除该键：本轮还没发过请求，留着旧值等于报假数。
         _write_status(
             state="crawling",
             phase="segments",
@@ -406,6 +412,9 @@ def run_once(args, log) -> dict:
             error=None,
             fetched=0,
             added=0,
+            requests=0,
+            budget=getattr(args, "budget", 0),
+            quotaRemaining=None,
         )
     # 噪声作者黑名单：长期生效。命中者既不进累积索引、也不进前端契约。
     blacklist = snap.load_blacklist(NOISE_BLACKLIST)
