@@ -5,10 +5,11 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { request as httpRequest } from "node:http";
 import { readFile, mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { gzipSync } from "node:zlib";
+import { gzipSync, gunzipSync, brotliDecompressSync } from "node:zlib";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApi, categoryColor, xmlEscape, validNamePart, apiIndex, MAX_LIMIT, textWidth, wrapText, DEFAULT_SITE, DAY_TZ_OFFSET_HOURS, dayOf } from "../tools/api.mjs";
@@ -766,6 +767,36 @@ test("HTTP：端点可用、类型正确、带 CORS 与缓存头", async () => {
   const list = await fetch(base + "/api/repos?limit=2");
   assert.equal(list.status, 200);
   assert.equal((await list.json()).count, 2);
+});
+
+/** 用 node:http 直连：fetch 会自动解压，看不到 content-encoding 与压缩后的长度 */
+function rawGet(url, headers = {}) {
+  return new Promise((resolvePromise, reject) => {
+    const req = httpRequest(url, { headers }, (res) => {
+      const chunks = [];
+      res.on("data", (c) => chunks.push(c));
+      res.on("end", () => resolvePromise({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks) }));
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+test("HTTP：API JSON 走协商压缩（200 行榜单 450KB → 80KB）", async () => {
+  const plain = await rawGet(base + "/api/categories");
+  assert.equal(plain.status, 200);
+  assert.ok(plain.body.length > 1024, "这份响应要大到值得压缩，实际 " + plain.body.length);
+  assert.equal(plain.headers["content-encoding"], undefined, "不带 accept-encoding 就不该压缩");
+
+  const gz = await rawGet(base + "/api/categories", { "accept-encoding": "gzip" });
+  assert.equal(gz.status, 200);
+  assert.match(String(gz.headers["content-encoding"] ?? ""), /^(gzip|br)$/, "带 accept-encoding 应启用压缩");
+  assert.match(String(gz.headers["vary"] ?? ""), /accept-encoding/i, "压缩响应必须声明 Vary");
+  assert.ok(gz.body.length < plain.body.length, "压缩后要更小：" + gz.body.length + " vs " + plain.body.length);
+  assert.equal(gz.headers["content-type"], "application/json; charset=utf-8");
+  // 解压回来必须还是同一份 JSON
+  const decoded = String(gz.headers["content-encoding"]) === "br" ? brotliDecompressSync(gz.body) : gunzipSync(gz.body);
+  assert.deepEqual(JSON.parse(decoded.toString("utf8")), JSON.parse(plain.body.toString("utf8")));
 });
 
 test("HTTP：卡片是 SVG，分享页是 HTML，错误码正确", async () => {
