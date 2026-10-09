@@ -5,7 +5,7 @@
 [![在线访问](https://img.shields.io/badge/在线访问-104.129.51.126-2f7df6?style=flat-square)](http://104.129.51.126/)
 [![测试](https://img.shields.io/badge/tests-207%20JS%20%2B%20109%20Python-3fb8a8?style=flat-square)](#测试与-ci)
 [![依赖](https://img.shields.io/badge/dependencies-0-57b894?style=flat-square)](#技术选型)
-[![版本](https://img.shields.io/badge/version-v0.5.0-9b8cf0?style=flat-square)]()
+[![版本](https://img.shields.io/badge/version-v0.5.1-9b8cf0?style=flat-square)]()
 
 在线地址：<http://104.129.51.126/>
 

@@ -933,6 +933,15 @@ async function main() {
   }
   applyPanels();
   const narrow = window.matchMedia?.("(max-width: 900px)");
+
+  // 手机端搜索框窄、字号又是 16px：长占位符会被截成半句，这里换短提示
+  const SEARCH_HINT = { wide: "搜索仓库 / 作者 / 描述，回车定位", narrow: "搜索仓库 / 作者" };
+  const applySearchHint = () => {
+    if (dom.search) dom.search.placeholder = isNarrow() ? SEARCH_HINT.narrow : SEARCH_HINT.wide;
+  };
+  applySearchHint();
+  narrow?.addEventListener?.("change", applySearchHint);
+
   narrow?.addEventListener?.("change", (ev) => {
     if (ev.matches && !state.hideRail && !state.hideDossier) {
       state.hideRail = true;

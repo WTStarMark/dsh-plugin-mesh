@@ -94,6 +94,8 @@ button { cursor: pointer; background: none; border: 0; }
   background: var(--bg-layer-1); color: var(--label-2); font-size: 12px; transition: background .12s;
 }
 .key:hover { background: var(--hover); color: var(--label-1); }
+/* 链接型按键（如「反馈」）：外观与 .key 一致，但不带下划线、文字居中 */
+a.key { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
 #palette { color: var(--accent); border-color: var(--accent-soft); }
 .author {
   display: flex; align-items: center; gap: 7px; height: 30px; padding: 0 11px 0 4px;
@@ -338,20 +340,36 @@ input[type="range"]::-moz-range-thumb {
 
 /* ---------------- 手机端：画布全屏，侧栏变底部抽屉 ---------------- */
 @media (max-width: 900px) {
-  /* 顶栏：允许换行、搜索独占一行——高度随内容长，主甲板由 flex 让位，绝不会被盖住 */
-  .cmdbar { padding: 6px 10px; gap: 8px; row-gap: 6px; }
-  .brand-text small, .readouts { display: none; }
-  .prompt { order: 9; flex: 1 1 100%; max-width: none; height: 32px; }
-  .keys { gap: 6px; margin-left: auto; }
-  .key { min-height: 32px; padding: 0 10px; font-size: 12px; }
+  /* 顶栏（手机）：第一行 = 品牌 + 按键，第二行 = 搜索框独占整行；主甲板由 flex 让位，绝不被盖住 */
+  .cmdbar { padding: 6px 8px; gap: 6px; row-gap: 6px; }
+  .brand { gap: 6px; }
+  .sigil { width: 24px; height: 24px; font-size: 12px; }
+  .brand-text small { display: none; }
+  /* 数据源 / 快照两个胶囊太长，手机上整组收起（状态圆环与浮窗也在这组里，保持原样不显示） */
+  .readouts { display: none; }
+  .key { min-height: 32px; padding: 0 8px; font-size: 12px; }
+  /* 按键排一行：放不下就横向滑动，不折行挤掉画布高度；margin-left:auto 让放得下时仍然右对齐 */
+  .keys {
+    flex: 1 1 auto; min-width: 0; margin-left: auto; gap: 6px;
+    flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none;
+  }
+  .keys::-webkit-scrollbar { display: none; }
+  /* 作者胶囊只留头像：名字要占 70px 以上 */
+  .author { padding: 0 4px; }
+  .author span { display: none; }
+  .prompt { order: 9; flex: 1 1 100%; max-width: none; height: 34px; }
+  /* iOS 上输入框字号 <16px，聚焦时会自动放大整页 */
+  .prompt input { font-size: 16px; }
 
   .deck { display: flex; flex-direction: column; position: relative; }
   /* 关键：手机上两组 HUD 改为正常流里各占一行，"同作者"栏与"头像"栏不再叠在一起 */
   .stage { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+  /* 两组 HUD（缩放/头像 一行、同作者/主题共现/生态共鸣 一行）跟着顶栏走。
+     DOM 里它们在 <canvas> 之后，只按 order 排会掉到画布下方——这里把画布排到最后。 */
   .hud { position: static; margin: 8px 8px 0; align-self: stretch; flex-wrap: wrap; }
   .hud-tl { order: 1; }
   .hud-tr { order: 2; justify-content: flex-end; margin-bottom: 0; }
-  #graph { flex: 1 1 0; min-height: 0; height: auto; margin-top: 8px; }
+  #graph { order: 3; flex: 1 1 0; min-height: 0; height: auto; margin-top: 8px; }
   .hud button { min-height: 30px; }
 
   .ticker { height: 30px; padding: 0 10px; gap: 8px; }
@@ -360,7 +378,8 @@ input[type="range"]::-moz-range-thumb {
   /* 左右两栏在手机上是同一块抽屉区域，同时只能开一个（互斥），避免互相压住 */
   .rail, .dossier {
     position: absolute; left: 0; right: 0; bottom: 30px; top: auto;
-    max-height: 62%; overflow-y: auto; z-index: 30;
+    /* 手机端抽屉高度：原为 62%，按要求缩到 40%（62% × 0.4 ≈ 25%），内容照旧内部滚动 */
+    max-height: 25%; overflow-y: auto; z-index: 30;
     border: none; border-top: 1px solid var(--border-l2);
     border-radius: var(--r-lg) var(--r-lg) 0 0;
     box-shadow: 0 -10px 34px rgba(0, 0, 0, .26);
@@ -368,6 +387,13 @@ input[type="range"]::-moz-range-thumb {
     overscroll-behavior: contain;
   }
   .deck.hide-rail .rail, .deck.hide-dossier .dossier { display: none; }
+}
+
+/* 窄屏手机（≤430px）：顶栏连标题都放不下，只留品牌标记 ◈，把宽度让给按键与搜索 */
+@media (max-width: 430px) {
+  .cmdbar { padding: 6px 6px; }
+  .brand-text b { display: none; }
+  .key { padding: 0 7px; }
 }
 
 /* 触屏：画布自己处理手势，别让页面跟着滚/缩放 */
