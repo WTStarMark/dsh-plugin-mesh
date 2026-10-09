@@ -26,7 +26,7 @@
 | 扇区布局 | 按功能分区、同心散布；坐标由可播种 PRNG 生成，同一 seed 逐点可复现 |
 | 单扇区放大 | 点扇区 → 该扇区铺满整圆，圆内按细枝重新分区；`Esc` 或左栏「返回全景」退回 |
 | 双击聚焦 | 双击任一仓库 → 以它为中心重建扇形图（圆心＝它，扇区＝它的关联仓库按当前划分依据分类）；双击官方仓库直接回全景 |
-| 生态榜单 | 顶栏奖杯弹窗两个榜：**周更新热榜**（最多 200 行；本周真实发过 release 的项目，按「本周版本数 → 最新版本日期 → 星标」排序；没有 releases 数据时退回 pushedAt 采样口径并标成 `≥N 次`）与 **周 star 热榜**（最多 50 行；星标历史增量）。每行带版本胶囊、近 7 日趋势柱，排除归档与复刻 |
+| 生态榜单 | 顶栏奖杯弹窗两个榜，各最多 50 行：**周更新热榜**（本周真实发过 release 的项目，按「本周版本数 → 最新版本日期 → 星标」排序；没有 releases 数据时退回 pushedAt 采样口径并标成 `≥N 次`）与 **周 star 热榜**（星标历史增量）。每行带版本胶囊、近 7 日趋势柱，排除归档与复刻 |
 | 关联居中 | 右栏点关联仓库 → 选中并把镜头移过去；目标不在当前画面时，改以它为中心另建扇形图 |
 | 三类连线 | 同作者（完整关系，不受度数上限影响）、主题共现（琥珀虚线）、生态共鸣（紫罗兰实线，基座 → 插件，有向） |
 | 搜索 | 本地即时匹配仓库名 / 作者 / 描述 / topics；README 正文走 `GET /api/search`，只回命中 id。命中超过 100 个只高亮、不画线 |
@@ -129,7 +129,7 @@ GitHub 搜索 API
 - 星标历史环（`cache/star-history.json`）每天一个点、留 8 天，周 star 榜取它与约 7 天前那个点的差；历史不足时接口如实返回实际窗口天数。
 - 逐日星标（`cache/star-daily.json`）每轮把本轮星标变化累加进当天桶（首见只记基线，掉星记负），趋势柱用它，不跨天摊派。
 - 更新日志（`cache/update-log.json`）每轮采样一次「pushedAt 是否前进」，按天累计；GitHub 只给最后一次推送时间，所以它是下界，界面按这个口径标注。
-- 版本缓存（`cache/releases.json`）每仓库留最近 20 个 release。搜索接口不返回 releases，只能按仓库单抓（1 个仓库 = 1 次 core 配额），每轮预算见 `--releases-budget`（默认 300）。刷新优先级：抓过之后又推过 → 近 7 天发过版（最多放 6 小时）→ 冷仓库超过 3 天 → 从没抓过（保留 25% 预算），同一档内按「缓存里近 7 天的版本数」排 —— 高频发版的项目不会被压满 3 天。`per_page=20` 时平均约 320KB/仓库，带宽吃紧就调小 `--releases-budget`。
+- 版本缓存（`cache/releases.json`）每仓库留最近 **200** 个 release（周榜按"窗口内版本数"排，留 20 会把高频项目截在 20）。搜索接口不返回 releases，只能按仓库单抓（1 个仓库 = 1 次 core 配额，GitHub 单页上限 100，要 200 个版本得翻第二页——只有第一页就抓满 100 的仓库才会发第二次请求）。每轮预算见 `--releases-budget`（默认 300）。刷新优先级：抓过之后又推过 → 近 7 天发过版（最多放 6 小时）→ 冷仓库超过 3 天 → 从没抓过（保留 25% 预算），同一档内按「缓存里近 7 天的版本数」排 —— 高频发版的项目不会被压满 3 天。`per_page=20` 时平均约 320KB/仓库，带宽吃紧就调小 `--releases-budget`。
 - 落盘用临时文件 + 原子替换，且先写仓库数据、后写队列状态。
 - 噪声黑名单长期生效（`data/noise-blacklist.json`），删掉条目即解除；阈值在 `backend/dsh_mesh/config.py`。
 
@@ -243,7 +243,7 @@ docs/               data-contract.md 与预览图
 | GET | `/api/repos` | 检索仓库（过滤 / 排序 / 翻页），`q` 同时匹配 README 正文 |
 | GET | `/api/search?q=&limit=` | 紧凑检索：只回命中 id 与计数（含 README 命中） |
 | GET | `/api/status` | 采集进度：`nextRunAt`、阶段、分段与 README 进度、请求与配额；不缓存 |
-| GET | `/api/ranking?days=7&limit=200&fields=all` | 榜单：周更新热榜（最多 200 行，含 `updates`、`updatesSource`、`releases`）+ 周 star 热榜（最多 50 行，含 `window.days`、`matched`）；响应含 `dataAgeHours` |
+| GET | `/api/ranking?days=7&limit=50&fields=all` | 榜单：周更新热榜（含 `updates`、`updatesSource`、`releases`）+ 周 star 热榜（含 `window.days`、`matched`）；两个榜都最多 50 行，响应含 `dataAgeHours` |
 | GET | `/api/repos/:owner/:name` | 单个仓库详情 + 同作者 / 主题共现连线 |
 | GET | `/api/card/:owner/:name.svg` | SVG 卡片 |
 | GET | `/preview.svg`（同 `/api/preview.svg`） | 预览图：按当前数据实时渲染（`?theme=dark|light&size=&sample=`），ETag + 5 分钟缓存 |

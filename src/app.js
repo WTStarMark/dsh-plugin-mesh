@@ -72,7 +72,7 @@ const rankingBoard = createRankingBoard({
   close: dom.rankingClose,
   fetcher:
     typeof fetch === "function"
-      ? () => fetch("/api/ranking?limit=200").then((res) => (res.ok ? res.json() : null))
+      ? () => fetch("/api/ranking?limit=50").then((res) => (res.ok ? res.json() : null))
       : null,
   onPick: (id) => actions.openRelated(id),
 });

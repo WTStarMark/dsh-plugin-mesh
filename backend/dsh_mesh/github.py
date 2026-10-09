@@ -179,14 +179,16 @@ class GitHubClient:
             return None
 
     # ---------- 版本（releases）----------
-    def releases(self, repo_id: str, per_page: int = 20) -> list[dict] | None:
-        """取一个仓库最近几个 release —— 走 **core** 配额（1 个仓库 = 1 次请求）。
+    def releases(self, repo_id: str, per_page: int = 20, page: int = 1) -> list[dict] | None:
+        """取一个仓库的一页 release —— 走 **core** 配额（1 个仓库 = 1 次请求）。
+
+        per_page 上限是 100；要更多版本由调用方翻页（见 collect.fetch_release_pages）。
 
         - 返回 []：这个仓库确实没有 release（404 是正常情况，不是错误）；
         - 返回 None：这次没拿到（网络/限流），下次再说；
         - 草稿（draft）在公开抓取里本来就看不到，由 slim_releases 再兜一层。
         """
-        url = f"{API_ROOT}/repos/{repo_id}/releases?per_page={per_page}"
+        url = f"{API_ROOT}/repos/{repo_id}/releases?per_page={per_page}&page={page}"
         try:
             payload = self._request(url)
         except RuntimeError as err:

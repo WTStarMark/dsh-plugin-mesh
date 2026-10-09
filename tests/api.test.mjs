@@ -256,12 +256,12 @@ test("榜单：周更新榜按更新次数排序，star 榜给真实增量与真
   }
 
   const big = await api.ranking(new URLSearchParams("limit=200"));
-  assert.equal(big.limit, 200, "周更新热榜上限已放开到 200 行");
-  assert.ok((big.boards?.stars?.items ?? []).length <= 50, "周 star 热榜仍按 50 行封顶");
-  assert.ok((big.boards?.updated?.count ?? 0) <= 200, "周更新热榜行数不超过 200");
+  assert.equal(big.limit, 50, "榜单行数上限固定 50：请求更大也夹到 50");
+  assert.ok((big.boards?.updated?.items ?? []).length <= 50, "周更新热榜最多 50 行");
+  assert.ok((big.boards?.stars?.items ?? []).length <= 50, "周 star 热榜最多 50 行");
 
   const capped = await api.ranking(new URLSearchParams("limit=9999"));
-  assert.ok(capped.limit <= 200, "榜单 limit 应被夹住，实际 " + capped.limit);
+  assert.ok(capped.limit <= 50, "榜单 limit 应被夹住，实际 " + capped.limit);
 });
 
 test("榜单行带版本列表：读采集器抓的 data/cache/releases.json（并按发版判定周更新）", async () => {

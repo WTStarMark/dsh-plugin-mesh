@@ -337,6 +337,26 @@ def fetch_releases_safe(args, mesh: dict, log) -> dict:
         return {"enabled": True, "error": str(exc)[:120]}
 
 
+def fetch_release_pages(client, repo_id: str, keep: int = rel.RELEASES_KEEP) -> list[dict] | None:
+    """取一个仓库的 releases，最多 keep 个（GitHub 单页上限 100，所以可能要翻页）。
+
+    只有"第一页就抓满 100"的高频仓库才会发第二次请求，普通仓库仍是一次请求。
+    返回 None 表示这次没拿到（网络/限流），交给上层跳过。
+    """
+    out: list[dict] = []
+    page = 1
+    while len(out) < keep and page <= 5:
+        want = min(rel.RELEASES_PAGE, keep - len(out))
+        chunk = client.releases(repo_id, per_page=want, page=page)
+        if chunk is None:
+            return None if not out else out  # 第一页就失败 → 整条跳过；后续页失败 → 用已拿到的
+        out.extend(chunk)
+        if len(chunk) < want:
+            break
+        page += 1
+    return out[:keep]
+
+
 def fetch_releases(args, mesh: dict, log) -> dict:
     """按预算抓 releases（走 core 配额），并写回 data/cache/releases.json。
 
@@ -362,7 +382,7 @@ def fetch_releases(args, mesh: dict, log) -> dict:
             log("版本：core 配额只剩 " + str(client.stats.core_remaining) + "，本轮提前收手（下一轮接着抓）")
             break
         try:
-            items = client.releases(repo_id, per_page=rel.RELEASES_KEEP)
+            items = fetch_release_pages(client, repo_id)
         except Exception as err:  # noqa: BLE001 - 单个仓库失败就跳过：抖动/超时都不该打断整批
             failed += 1
             streak += 1

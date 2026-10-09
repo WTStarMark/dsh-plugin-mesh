@@ -1490,6 +1490,37 @@ class ReleasesTest(unittest.TestCase):
             "窗口内版本多的先抓",
         )
 
+    def test_release_pages_keep_up_to_the_cap(self):
+        """版本上限 200：GitHub 单页上限 100，所以要翻页；普通仓库仍只发一次请求。"""
+        import collect
+
+        self.assertEqual(rel.RELEASES_KEEP, 200, "周榜计数不能被截在 20")
+        self.assertEqual(rel.RELEASES_PAGE, 100)
+
+        class FakeClient:
+            def __init__(self, pages):
+                self.pages = pages
+                self.calls = []
+
+            def releases(self, repo_id, per_page=100, page=1):
+                self.calls.append((repo_id, per_page, page))
+                return self.pages.get(page)
+
+        many = FakeClient({1: [{"tag": "v%d" % i} for i in range(100)], 2: [{"tag": "w%d" % i} for i in range(30)]})
+        out = collect.fetch_release_pages(many, "a/many")
+        self.assertEqual(len(out), 130)
+        self.assertEqual([c[2] for c in many.calls], [1, 2], "第一页抓满就该翻第二页")
+
+        few = FakeClient({1: [{"tag": "v1"}]})
+        self.assertEqual(len(collect.fetch_release_pages(few, "a/few")), 1)
+        self.assertEqual(len(few.calls), 1, "一次就抓完的不该翻页")
+
+        down = FakeClient({1: None})
+        self.assertIsNone(collect.fetch_release_pages(down, "a/down"), "第一页就失败 → 整条跳过")
+
+        flaky = FakeClient({1: [{"tag": "v%d" % i} for i in range(100)], 2: None})
+        self.assertEqual(len(collect.fetch_release_pages(flaky, "a/flaky")), 100, "第二页失败就用已拿到的")
+
     def test_put_and_stats(self):
         payload = rel.load_releases(self.path)
         rel.put(payload, "a/b", [{"tag": "v1", "name": "", "at": "2026-10-01", "pre": False}])
