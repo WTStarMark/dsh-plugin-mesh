@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="420" height="168" viewBox="0 0 420 168" role="img" aria-label="WTStarMark/dsh-myskin · 皮肤美化 · 主题皮肤">
   <title>WTStarMark/dsh-myskin · 皮肤美化 · 主题皮肤</title>
-  <desc>点击卡片前往 http://104.129.51.126/</desc>
+  <desc>点击卡片前往 https://www.moc-chen.cn/</desc>
   <style>.bg{transition:stroke .2s ease}.card:hover .bg{stroke:#8c959f}.nm:hover{text-decoration:underline}</style>
-  <a xlink:href="http://104.129.51.126/" href="http://104.129.51.126/" target="_blank">
+  <a xlink:href="https://www.moc-chen.cn/" href="https://www.moc-chen.cn/" target="_blank">
     <rect class="bg" x="0.5" y="0.5" width="419" height="167" rx="12" fill="#ffffff" stroke="#d0d7de"/>
     <rect x="0.5" y="0.5" width="6" height="167" rx="3" fill="#51b1d6"/>
   </a>
@@ -17,5 +17,5 @@
   <text x="162.625" y="108" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="12.5" fill="#656d76">更新于 23 小时前</text>
   <rect x="20" y="129" width="135" height="22" rx="11" fill="#eff2f5" stroke="#d0d7de"/>
   <text x="32" y="144" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="11.5" font-weight="500" fill="#51b1d6">皮肤美化 · 主题皮肤</text>
-  <a xlink:href="http://104.129.51.126/" href="http://104.129.51.126/" target="_blank"><text x="400" y="144" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="11.5" text-anchor="end" class="nm" fill="#0969da">插件生态图 · 104.129.51.126 ↗</text></a>
+  <a xlink:href="https://www.moc-chen.cn/" href="https://www.moc-chen.cn/" target="_blank"><text x="400" y="144" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Microsoft YaHei',sans-serif" font-size="11.5" text-anchor="end" class="nm" fill="#0969da">插件生态图 · www.moc-chen.cn ↗</text></a>
 </svg>

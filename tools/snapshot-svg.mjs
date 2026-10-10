@@ -2,7 +2,7 @@
 /**
  * 生成 README 用的预览图（离线副本）。
  *
- * 现在 README 默认用站点实时接口 http://104.129.51.126/preview.svg（每次采集后自动更新），
+ * 现在 README 默认用站点实时接口 https://www.moc-chen.cn/preview.svg（每次采集后自动更新），
  * 本工具用于两种场景：
  *   1. 生成仓库内的静态副本 docs/preview*.svg（断网/接口挂了也能看，且随版本留档）
  *   2. 本地核对：--png 自己 rasterize 一张，在没有浏览器/rsvg 的机器上也能"肉眼看图"

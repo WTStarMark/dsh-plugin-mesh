@@ -32,7 +32,7 @@ import { renderPreviewSvg, sceneFromCore } from "./preview-svg.mjs";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const VERSION = "0.5.1";
 /** 卡片默认去处（线上站点），可用环境变量 SITE_URL 或请求参数 ?link= 覆盖 */
-const SITE_URL = process.env.SITE_URL ?? "http://104.129.51.126/";
+const SITE_URL = process.env.SITE_URL ?? "https://www.moc-chen.cn/";
 
 /** 只接受 http/https 的去处，其余一律回落到默认站点（挡 javascript: 之类） */
 function siteFrom(url) {

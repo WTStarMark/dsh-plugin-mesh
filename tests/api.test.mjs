@@ -816,7 +816,7 @@ test("HTTP：卡片是 SVG，分享页是 HTML，错误码正确", async () => {
   assert.ok(custom.includes("https://example.com/"), "合法 link 应生效");
   const evil = await (await fetch(base + "/api/card/" + id + ".svg?link=javascript:alert(1)")).text();
   assert.ok(!/javascript:/i.test(evil), "非法 link 必须被丢弃");
-  assert.ok(evil.includes("104.129.51.126"), "非法 link 应回落到默认站点");
+  assert.ok(evil.includes(new URL(DEFAULT_SITE).host), "非法 link 应回落到默认站点 " + DEFAULT_SITE);
 
   const page = await fetch(base + "/card/" + id);
   assert.equal(page.status, 200);

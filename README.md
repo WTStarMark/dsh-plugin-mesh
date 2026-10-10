@@ -2,17 +2,17 @@
 
 把带 `dsh` 系列 GitHub 标签的仓库，按功能铺成一张可交互的生态网络图：圆心固定为官方仓库 `deepseek-ai/deepseek-harness`，向外是 21 个功能扇区，扇区下再分细枝。数据由 Python 采集器每小时刷新一次。
 
-[![在线访问](https://img.shields.io/badge/在线访问-104.129.51.126-2f7df6?style=flat-square)](http://104.129.51.126/)
+[![在线访问](https://img.shields.io/badge/在线访问-www.moc-chen.cn-2f7df6?style=flat-square)](https://www.moc-chen.cn/)
 [![测试](https://img.shields.io/badge/tests-207%20JS%20%2B%20109%20Python-3fb8a8?style=flat-square)](#测试与-ci)
 [![依赖](https://img.shields.io/badge/dependencies-0-57b894?style=flat-square)](#技术选型)
 [![版本](https://img.shields.io/badge/version-v0.5.1-9b8cf0?style=flat-square)]()
 
-在线地址：<http://104.129.51.126/>
+在线地址：<https://www.moc-chen.cn/>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="http://104.129.51.126/preview.svg?theme=dark">
-  <source media="(prefers-color-scheme: light)" srcset="http://104.129.51.126/preview.svg?theme=light">
-  <img alt="插件生态图预览：功能扇区与仓库球，圆心是官方仓库" src="http://104.129.51.126/preview.svg?theme=light" width="100%">
+  <source media="(prefers-color-scheme: dark)" srcset="https://www.moc-chen.cn/preview.svg?theme=dark">
+  <source media="(prefers-color-scheme: light)" srcset="https://www.moc-chen.cn/preview.svg?theme=light">
+  <img alt="插件生态图预览：功能扇区与仓库球，圆心是官方仓库" src="https://www.moc-chen.cn/preview.svg?theme=light" width="100%">
 </picture>
 
 > 预览图由站点实时渲染（`/preview.svg?theme=dark|light`），读 `data/mesh-core.json`，随采集更新。静态副本：[`docs/preview.svg`](docs/preview.svg)、[`docs/preview-light.svg`](docs/preview-light.svg)（`node tools/snapshot-svg.mjs --theme dark`）。
@@ -231,7 +231,7 @@ docs/               data-contract.md 与预览图
 
 ## 查询 API
 
-`http://104.129.51.126` 上，API 与前端共用同一个端口：不需要另外开服务、不需要密钥、不占额外端口。零依赖、只读、允许跨域（`Access-Control-Allow-Origin: *`），响应带 5 分钟公共缓存。
+`https://www.moc-chen.cn` 上，API 与前端共用同一个端口：不需要另外开服务、不需要密钥、不占额外端口。零依赖、只读、允许跨域（`Access-Control-Allow-Origin: *`），响应带 5 分钟公共缓存。
 
 ### 端点一览
 
@@ -254,7 +254,7 @@ docs/               data-contract.md 与预览图
 ### 快速上手
 
 ```bash
-BASE=http://104.129.51.126
+BASE=https://www.moc-chen.cn
 
 curl -s "$BASE/api/repos?sort=stars&limit=5"              # 星标最高的 5 个仓库
 curl -s "$BASE/api/repos?q=皮肤&limit=3&fields=all"        # 搜关键词（owner/name、描述、topics、命中标签）
@@ -333,32 +333,32 @@ curl -s "$BASE/api/ranking?limit=10" | jq '.boards.updated.items[] | {id, update
 
 任何被收录的仓库都有一张自包含 SVG 卡片：无脚本、无外部字体、无外部依赖，420×168，GitHub 仓库卡片风格（默认深色，`?theme=light` 出浅色）。卡面含仓库图标、`owner / name`、两行简介、语言色点、星标、复刻数、更新时间与所属扇区；点卡片背景去站点，点仓库名去 GitHub。
 
-[![dsh-myskin 卡片示例（深色）](docs/card-example-dark.svg)](http://104.129.51.126/)
+[![dsh-myskin 卡片示例（深色）](docs/card-example-dark.svg)](https://www.moc-chen.cn/)
 
-[![dsh-myskin 卡片示例（浅色）](docs/card-example.svg)](http://104.129.51.126/)
+[![dsh-myskin 卡片示例（浅色）](docs/card-example.svg)](https://www.moc-chen.cn/)
 
-上面两张是仓库内的静态样本（按当前数据生成、随仓库版本化），点图去线上站点；真实卡片（每小时更新）见 <http://104.129.51.126/api/card/WTStarMark/dsh-myskin.svg>。
+上面两张是仓库内的静态样本（按当前数据生成、随仓库版本化），点图去线上站点；真实卡片（每小时更新）见 <https://www.moc-chen.cn/api/card/WTStarMark/dsh-myskin.svg>。
 
 贴进 README：
 
 ```markdown
-[![dsh-myskin](http://104.129.51.126/api/card/WTStarMark/dsh-myskin.svg)](http://104.129.51.126/)
+[![dsh-myskin](https://www.moc-chen.cn/api/card/WTStarMark/dsh-myskin.svg)](https://www.moc-chen.cn/)
 ```
 
 贴进网页（用 `img` 嵌入时 SVG 内部链接不生效，所以去处也印在卡面上）：
 
 ```html
-<a href="http://104.129.51.126/">
-  <img src="http://104.129.51.126/api/card/WTStarMark/dsh-myskin.svg" alt="dsh-myskin" width="420" height="168">
+<a href="https://www.moc-chen.cn/">
+  <img src="https://www.moc-chen.cn/api/card/WTStarMark/dsh-myskin.svg" alt="dsh-myskin" width="420" height="168">
 </a>
 ```
 
 | 参数 | 默认 | 说明 |
 |---|---|---|
 | `theme` | `dark` | 传 `light` 出浅色版（SVG 读不到 prefers-color-scheme，需要显式指定） |
-| `link` | `http://104.129.51.126/` | 点击去处，只接受 `http`/`https`（其他协议回落默认），保留完整路径 |
+| `link` | `https://www.moc-chen.cn/` | 点击去处，只接受 `http`/`https`（其他协议回落默认），保留完整路径 |
 
-打开 `http://104.129.51.126/card/<owner>/<name>` 可实时预览两版并复制 Markdown / HTML 代码；换默认去处用环境变量 `SITE_URL=https://your-site.example pm2 restart dsh-plugin-mesh --update-env`。
+打开 `https://www.moc-chen.cn/card/<owner>/<name>` 可实时预览两版并复制 Markdown / HTML 代码；换默认去处用环境变量 `SITE_URL=https://your-site.example pm2 restart dsh-plugin-mesh --update-env`。
 
 ## 许可
 

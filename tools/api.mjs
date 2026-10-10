@@ -31,7 +31,7 @@ export const dayOf = (when) => {
 
 const DATA_TTL_MS = 5 * 60 * 1000;
 /** 卡片默认去处：线上站点（可用 SITE_URL 环境变量或 ?link= 覆盖） */
-export const DEFAULT_SITE = "http://104.129.51.126/";
+export const DEFAULT_SITE = "https://www.moc-chen.cn/";
 export const MAX_LIMIT = 100;
 /** 榜单弹窗的行数上限：周更新热榜与周 star 热榜都是 50 行 */
 export const RANKING_LIMIT = 50;
