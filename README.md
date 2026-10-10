@@ -2,7 +2,7 @@
 
 把带 `dsh` 系列 GitHub 标签的仓库，按功能铺成一张可交互的生态网络图：圆心固定为官方仓库 `deepseek-ai/deepseek-harness`，向外是 21 个功能扇区，扇区下再分细枝。数据由 Python 采集器每小时刷新一次。
 
-[![在线访问](https://img.shields.io/badge/在线访问-www.moc-chen.cn-2f7df6?style=flat-square)](https://www.moc-chen.cn/)
+[![在线访问](https://img.shields.io/badge/在线访问-www.moc--chen.cn-2f7df6?style=flat-square)](https://www.moc-chen.cn/)
 [![测试](https://img.shields.io/badge/tests-208%20JS%20%2B%20116%20Python-3fb8a8?style=flat-square)](#测试与-ci)
 [![依赖](https://img.shields.io/badge/dependencies-0-57b894?style=flat-square)](#技术选型)
 [![版本](https://img.shields.io/badge/version-v0.5.1-9b8cf0?style=flat-square)]()
@@ -260,7 +260,7 @@ curl -s "$BASE/api/repos?sort=stars&limit=5"              # 星标最高的 5 �
 curl -s "$BASE/api/repos?q=皮肤&limit=3&fields=all"        # 搜关键词（owner/name、描述、topics、命中标签）
 curl -s "$BASE/api/search?q=sidebar&limit=500"            # 检索（含 README 正文），只回 id 与计数
 curl -s "$BASE/api/repos?category=skin&sort=stars&limit=10"  # 某个扇区下的仓库
-curl -s "$BASE/api/repos/WTStarMark/dsh-myskin"           # 单个仓库的完整档案
+curl -s "$BASE/api/repos/WTStarMark/dsh-plugin-mesh"      # 单个仓库的完整档案
 curl -s "$BASE/api/categories"                            # 扇区 + 细枝分布
 curl -s "$BASE/api/ranking?limit=10" | jq '.boards.updated.items[] | {id, updates, pushedAt, releases: [.releases[].tag]}'
 # 榜单每行字段：updates / updatesSource / pushedAt / stars / series（近 7 日趋势）/ releases / spans（跨天累计）
@@ -333,23 +333,23 @@ curl -s "$BASE/api/ranking?limit=10" | jq '.boards.updated.items[] | {id, update
 
 任何被收录的仓库都有一张自包含 SVG 卡片：无脚本、无外部字体、无外部依赖，420×168，GitHub 仓库卡片风格（默认深色，`?theme=light` 出浅色）。卡面含仓库图标、`owner / name`、两行简介、语言色点、星标、复刻数、更新时间与所属扇区；点卡片背景去站点，点仓库名去 GitHub。
 
-[![dsh-myskin 卡片示例（深色）](docs/card-example-dark.svg)](https://www.moc-chen.cn/)
+[![dsh-plugin-mesh 卡片示例（深色）](docs/card-example-dark.svg)](https://www.moc-chen.cn/)
 
-[![dsh-myskin 卡片示例（浅色）](docs/card-example.svg)](https://www.moc-chen.cn/)
+[![dsh-plugin-mesh 卡片示例（浅色）](docs/card-example.svg)](https://www.moc-chen.cn/)
 
-上面两张是仓库内的静态样本（按当前数据生成、随仓库版本化），点图去线上站点；真实卡片（每小时更新）见 <https://www.moc-chen.cn/api/card/WTStarMark/dsh-myskin.svg>。
+上面两张是仓库内的静态样本（按当前数据生成、随仓库版本化），点图去线上站点；真实卡片（每小时更新）见 <https://www.moc-chen.cn/api/card/WTStarMark/dsh-plugin-mesh.svg>。
 
 贴进 README：
 
 ```markdown
-[![dsh-myskin](https://www.moc-chen.cn/api/card/WTStarMark/dsh-myskin.svg)](https://www.moc-chen.cn/)
+[![dsh-plugin-mesh](https://www.moc-chen.cn/api/card/WTStarMark/dsh-plugin-mesh.svg)](https://www.moc-chen.cn/)
 ```
 
 贴进网页（用 `img` 嵌入时 SVG 内部链接不生效，所以去处也印在卡面上）：
 
 ```html
 <a href="https://www.moc-chen.cn/">
-  <img src="https://www.moc-chen.cn/api/card/WTStarMark/dsh-myskin.svg" alt="dsh-myskin" width="420" height="168">
+  <img src="https://www.moc-chen.cn/api/card/WTStarMark/dsh-plugin-mesh.svg" alt="dsh-plugin-mesh" width="420" height="168">
 </a>
 ```
 
