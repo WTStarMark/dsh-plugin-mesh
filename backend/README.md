@@ -76,5 +76,5 @@ python3 backend/verify_parity.py
 ## 测试
 
 ```bash
-python3 backend/tests/test_collector.py    # 109 项：分类规则 / 跨语言一致性 / 构图 / 快照 diff / 限流重试 / 整点对齐
+python3 backend/tests/test_collector.py    # 116 项：分类规则 / 跨语言一致性 / 构图 / 快照 diff / 限流重试 / 整点对齐
 ```

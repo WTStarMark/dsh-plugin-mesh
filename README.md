@@ -3,7 +3,7 @@
 把带 `dsh` 系列 GitHub 标签的仓库，按功能铺成一张可交互的生态网络图：圆心固定为官方仓库 `deepseek-ai/deepseek-harness`，向外是 21 个功能扇区，扇区下再分细枝。数据由 Python 采集器每小时刷新一次。
 
 [![在线访问](https://img.shields.io/badge/在线访问-www.moc-chen.cn-2f7df6?style=flat-square)](https://www.moc-chen.cn/)
-[![测试](https://img.shields.io/badge/tests-207%20JS%20%2B%20109%20Python-3fb8a8?style=flat-square)](#测试与-ci)
+[![测试](https://img.shields.io/badge/tests-208%20JS%20%2B%20116%20Python-3fb8a8?style=flat-square)](#测试与-ci)
 [![依赖](https://img.shields.io/badge/dependencies-0-57b894?style=flat-square)](#技术选型)
 [![版本](https://img.shields.io/badge/version-v0.5.1-9b8cf0?style=flat-square)]()
 
@@ -48,7 +48,7 @@
 git clone https://github.com/WTStarMark/dsh-plugin-mesh && cd dsh-plugin-mesh
 python3 backend/collect.py --from-raw    # 用仓库里的样本离线算一份前端契约（零网络、不耗配额）
 npm run serve:lan                        # http://<局域网IP>:8788/
-npm test                                 # 207 项前端 + 109 项后端
+npm test                                 # 208 项前端 + 116 项后端
 npm run test:js                          # 只跑前端；npm run test:py 只跑后端
 ```
 
@@ -165,7 +165,7 @@ GitHub 搜索 API
 ## 测试与 CI
 
 ```bash
-npm test                 # 前端 207 项 + 后端 109 项
+npm test                 # 前端 208 项 + 后端 116 项
 npm run test:js          # 前端：布局 / 连线 / 分类 / 细枝 / 相关性 / 生态共鸣 / 面板 / 双击聚焦 / 榜单 / 主题 / 噪声黑名单 / 服务加固 / 限流 / 冒烟
 npm run test:py          # 后端：分类 / 分段扫描 / 快照 / 调度 / 采集顺序 / 噪声黑名单 / 三档判定 / 预计算容错 / 星标历史环 / 更新日志 / 版本采集 / 收录口径与共鸣边方向 / 抗网络抖动
 npm run seed:fixture     # 用 data/sample-raw.json 离线生成夹具数据集（npm test 会自动调用；本机已有真实数据时自动跳过）
@@ -219,7 +219,7 @@ backend/
   dsh_mesh/         github / segments / classify / build / snapshot / releases / readmes / config
   verify_parity.py  跨语言一致性校验
   check_token.py    令牌自检（只打印配额数字）
-  tests/            109 项测试（前端 207 项在根目录 tests/）
+  tests/            116 项测试（前端 208 项在根目录 tests/）
 docs/               data-contract.md 与预览图
 ```
 
