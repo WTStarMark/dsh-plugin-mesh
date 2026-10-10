@@ -1389,6 +1389,27 @@ class ReleasesTest(unittest.TestCase):
         self.assertTrue(out[1]["pre"])
         self.assertLess(len(json.dumps(out, ensure_ascii=False)), 400, "精简后要小到能塞进几 MB 的缓存")
 
+    def test_release_day_uses_the_same_boundary_as_the_board(self):
+        """回归：版本日期必须按北京时间的日界线切，不能直接用 UTC 日。
+
+        线上实例：hol-guard v3.38.0 发布于 UTC 2026-10-09 20:20 = 北京 10-10 04:20，
+        旧实现存成 "2026-10-09"，周榜就把它算进前一天，当天(10-10)计数为 0。
+        """
+        payload = [
+            {"tag_name": "北京凌晨发的", "published_at": "2026-10-09T20:20:22Z"},   # 北京 10-10 04:20
+            {"tag_name": "北京昨晚发的", "published_at": "2026-10-09T15:54:13Z"},   # 北京 10-09 23:54
+            {"tag_name": "北京零点整", "published_at": "2026-10-09T16:00:00Z"},     # 北京 10-10 00:00
+            {"tag_name": "只有日期", "published_at": None, "created_at": "2026-10-08"},
+        ]
+        out = rel.slim_releases(payload)
+        self.assertEqual(
+            [r["at"] for r in out],
+            ["2026-10-10", "2026-10-09", "2026-10-10", "2026-10-08"],
+            "UTC 日与北京时间日必须按 DAY_TZ_OFFSET_HOURS 对齐",
+        )
+        self.assertEqual(rel.local_day("2026-10-09T15:59:59Z"), "2026-10-09")
+        self.assertEqual(rel.local_day("2026-10-09T16:00:00Z"), "2026-10-10")
+
     def test_load_save_roundtrip_is_atomic_and_tolerates_garbage(self):
         self.assertEqual(rel.load_releases(self.path)["repos"], {})
         self.path.write_text("不是 json", encoding="utf-8")

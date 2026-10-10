@@ -18,6 +18,7 @@ import time
 from pathlib import Path
 
 from .build import utcnow
+from .config import DAY_TZ_OFFSET_HOURS
 
 # 每个仓库留几个版本。周更新热榜按"窗口内发布的版本数"排，高频项目一周发几十个版本
 # （实测榜首有连着几十个的），留 20 会把它们截在 20 —— 所以上限放到 200。
@@ -67,10 +68,26 @@ def save_releases(payload: dict, path: Path) -> int:
     return len(text)
 
 
+def local_day(iso: str | None) -> str:
+    """published_at（UTC）→ 当地日历日，与星标环 / 更新日志 / 榜单横轴同一条日界线。
+
+    坑：直接取 published_at[:10] 拿到的是 **UTC 日**，而榜单横轴是北京时间日 ——
+    北京时间 00:00~08:00（= UTC 前一天 16:00~24:00）发的版本会被记到前一天。
+    线上实例：hol-guard v3.38.0 发布于 UTC 10-09 20:20 = 北京 10-10 04:20，
+    榜单却把它算进 10-09，当天(10-10)计数是 0。
+    """
+    try:
+        ts = calendar.timegm(time.strptime(str(iso)[:19], "%Y-%m-%dT%H:%M:%S"))
+    except (ValueError, TypeError):
+        return str(iso or "")[:10]
+    return time.strftime("%Y-%m-%d", time.gmtime(ts + DAY_TZ_OFFSET_HOURS * 3600))
+
+
 def slim_releases(payload, keep: int = RELEASES_KEEP) -> list[dict]:
     """把 GitHub 的 releases 响应裁成"版本列表"要用的最小字段。
 
     draft 直接丢掉：草稿只有仓库有权者能看到，公开抓取本来也拿不到。
+    日期按 local_day() 转成当地日历日（不是 UTC 日），否则周榜的逐日柱会错位一天。
     """
     out = []
     for item in payload or []:
@@ -80,7 +97,7 @@ def slim_releases(payload, keep: int = RELEASES_KEEP) -> list[dict]:
             {
                 "tag": str(item.get("tag_name") or "")[:80],
                 "name": str(item.get("name") or "")[:80],
-                "at": str(item.get("published_at") or item.get("created_at") or "")[:10],
+                "at": local_day(item.get("published_at") or item.get("created_at")),
                 "pre": bool(item.get("prerelease")),
             }
         )
