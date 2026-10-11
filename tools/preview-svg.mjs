@@ -3,6 +3,9 @@
  *   sceneFromCore(core)   读 data/mesh-core.json（站点接口用，不跑布局）
  *   sceneFromLayout(...)  现场跑布局（离线工具用，保证与前端布局代码一致）
  * README 用站点实时接口而非提交静态图：静态图数据一变就过期（曾变成「没画面」）。
+ * 尺寸无关：字号 / 图例 / 留白 / 球半径都是按 REF_SIZE 设计的固定像素，统一乘 size/REF_SIZE，
+ *   所以 600 与 1400 出的是同一张图的不同分辨率。只缩坐标不缩这些常量的话，小画布上字会互相压、
+ *   球会挤成一片 —— 线上 README 预览图（当时落到最小档 600）就是这么坏掉的。
  */
 import { groupColor } from "../src/mesh-data.js";
 import { PALETTES } from "../src/palettes.js";
@@ -95,9 +98,14 @@ export function pickSample(nodes, sample) {
   return top;
 }
 
+/** 参考画布：字号 / 图例 / 留白 / 球半径这些固定像素常量都按这个尺寸设计 */
+export const REF_SIZE = 1400;
+
 /** 渲染预览 SVG；scene：{ nodes, arms, total, generatedAt, hubId?, edges? } */
 /** 场景 → 画布坐标变换（渲染与"核对图"共用，保证两者完全一致） */
-export function previewView(scene, size = 1400, pad = 96) {
+export function previewView(scene, size = REF_SIZE, pad = 96) {
+  const k = size / REF_SIZE; // 画布缩放比：固定像素常量都乘它，构图才与画布尺寸无关
+  pad *= k; // 留白也跟着缩，否则小画布上图形只占中间一小块，字显得比图还大
   let minX = Infinity;
   let maxX = -Infinity;
   let minY = Infinity;
@@ -125,12 +133,13 @@ export function previewView(scene, size = 1400, pad = 96) {
     scale,
     midX,
     midY,
+    k,
     px: (x) => size / 2 + (x - midX) * scale,
     py: (y) => size / 2 + (y - midY) * scale,
   };
 }
 
-export function renderPreviewSvg(scene, { theme: themeMode = "dark", size = 1400, sample = 7000 } = {}) {
+export function renderPreviewSvg(scene, { theme: themeMode = "dark", size = REF_SIZE, sample = 7000 } = {}) {
   const theme = PALETTES.fresh[themeMode] ?? PALETTES.fresh.dark;
   const canvas = theme.canvas;
   const nodes = scene.nodes.filter((n) => Number.isFinite(n.x) && Number.isFinite(n.y));
@@ -138,7 +147,9 @@ export function renderPreviewSvg(scene, { theme: themeMode = "dark", size = 1400
     (scene.hubId && nodes.find((n) => n.id === scene.hubId)) ||
     nodes.reduce((best, n) => (best === null || Math.hypot(n.x, n.y) < Math.hypot(best.x, best.y) ? n : best), null);
 
-  const { scale, px, py } = previewView(scene, size);
+  const { scale, px, py, k } = previewView(scene, size);
+  /** 固定像素常量 → 当前画布像素（画布缩小时字、图例、球一起缩，避免"坐标缩了、字没缩"挤成一团） */
+  const at = (v) => Math.round(v * k * 10) / 10;
 
   const armColor = (id) => groupColor(id, scene.arms.findIndex((a) => a.id === id));
   const colorOfNode = new Map();
@@ -178,15 +189,16 @@ export function renderPreviewSvg(scene, { theme: themeMode = "dark", size = 1400
   const idOf = (key) => "s" + key.replace(/[^0-9a-zA-Z]/g, "_");
   for (const n of draw) {
     const color = colorOfNode.get(n.id) ?? canvas.accent;
-    const key = color.replace("#", "") + "-" + Math.round(radiusOf(n) * 2) / 2;
-    if (!symbolOf.has(key)) symbolOf.set(key, { color, r: Math.round(radiusOf(n) * 2) / 2 });
+    const r = Math.round(radiusOf(n) * k * 2) / 2; // 球半径也是固定像素，不缩的话小画布上球会挤成一片
+    const key = color.replace("#", "") + "-" + r;
+    if (!symbolOf.has(key)) symbolOf.set(key, { color, r });
     balls.push('<use href="#' + idOf(key) + '" x="' + px(n.x).toFixed(1) + '" y="' + py(n.y).toFixed(1) + '"/>');
   }
   const defs = ["<defs>"];
   for (const [key, s] of symbolOf) {
     defs.push(
       '<circle id="' + idOf(key) + '" r="' + s.r + '" fill="' + canvas.ball + '" stroke="' + s.color +
-        '" stroke-width="' + Math.max(1.1, s.r * 0.34).toFixed(1) + '"/>',
+        '" stroke-width="' + Math.max(at(1.1), s.r * 0.34).toFixed(1) + '"/>',
     );
   }
   defs.push("</defs>");
@@ -196,37 +208,37 @@ export function renderPreviewSvg(scene, { theme: themeMode = "dark", size = 1400
   if (hub) {
     const hx = px(hub.x);
     const hy = py(hub.y);
-    parts.push('<circle cx="' + hx.toFixed(1) + '" cy="' + hy.toFixed(1) + '" r="20" fill="' + canvas.ball + '" stroke="' + canvas.accent + '" stroke-width="6"/>');
-    parts.push('<text x="' + hx.toFixed(1) + '" y="' + (hy + 42).toFixed(1) + '" text-anchor="middle" font-family="' + FONT + '" font-size="17" font-weight="600" fill="' + canvas.text + '">' + esc(hub.id) + "</text>");
+    parts.push('<circle cx="' + hx.toFixed(1) + '" cy="' + hy.toFixed(1) + '" r="' + at(20) + '" fill="' + canvas.ball + '" stroke="' + canvas.accent + '" stroke-width="' + at(6) + '"/>');
+    parts.push('<text x="' + hx.toFixed(1) + '" y="' + (hy + at(42)).toFixed(1) + '" text-anchor="middle" font-family="' + FONT + '" font-size="' + at(17) + '" font-weight="600" fill="' + canvas.text + '">' + esc(hub.id) + "</text>");
   }
 
-  const fontSize = 21;
+  const fontSize = at(21); // 21px 是按 1400 画布定的，小画布上仍用 21px 就会和邻居压在一起
   parts.push('<g font-family="' + FONT + '" text-anchor="middle">');
   for (const a of scene.arms) {
     if (!a.count) continue;
     const dist = (a.endRadius ?? 0) * 1.04 + 26;
     const x = px(Math.cos(a.angle) * dist);
     const y = py(Math.sin(a.angle) * dist);
-    if (x < 60 || y < 40 || x > size - 60 || y > size - 30) continue;
+    if (x < at(60) || y < at(40) || x > size - at(60) || y > size - at(30)) continue;
     parts.push('<text x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" font-size="' + fontSize + '" font-weight="600" fill="' + armColor(a.id) + '">' + esc(a.label) + "</text>");
-    parts.push('<text x="' + x.toFixed(1) + '" y="' + (y + fontSize - 2).toFixed(1) + '" font-size="' + (fontSize - 5) + '" fill="' + canvas.text + '" opacity="0.55">' + a.count + "</text>");
+    parts.push('<text x="' + x.toFixed(1) + '" y="' + (y + fontSize - at(2)).toFixed(1) + '" font-size="' + (fontSize - at(5)) + '" fill="' + canvas.text + '" opacity="0.55">' + a.count + "</text>");
   }
   parts.push("</g>");
 
   const secCount = scene.arms.filter((a) => a.count).length;
   parts.push('<g font-family="' + FONT + '" fill="' + canvas.text + '">');
-  parts.push('<text x="34" y="52" font-size="30" font-weight="700">插件生态图</text>');
-  parts.push('<text x="34" y="82" font-size="17" opacity="0.62">' + scene.total + " 个仓库 · " + secCount + " 个功能扇区 · 圆心为官方仓库</text>");
-  parts.push('<text x="34" y="106" font-size="14" opacity="0.45">图上按星标抽样 ' + draw.length + " 个仓库球；颜色 = 功能分类，半径 = 星标（对数）</text>");
-  if (scene.generatedAt) parts.push('<text x="34" y="128" font-size="14" opacity="0.45">数据 ' + esc(scene.generatedAt) + " · 由站点实时渲染</text>");
+  parts.push('<text x="' + at(34) + '" y="' + at(52) + '" font-size="' + at(30) + '" font-weight="700">插件生态图</text>');
+  parts.push('<text x="' + at(34) + '" y="' + at(82) + '" font-size="' + at(17) + '" opacity="0.62">' + scene.total + " 个仓库 · " + secCount + " 个功能扇区 · 圆心为官方仓库</text>");
+  parts.push('<text x="' + at(34) + '" y="' + at(106) + '" font-size="' + at(14) + '" opacity="0.45">图上按星标抽样 ' + draw.length + " 个仓库球；颜色 = 功能分类，半径 = 星标（对数）</text>");
+  if (scene.generatedAt) parts.push('<text x="' + at(34) + '" y="' + at(128) + '" font-size="' + at(14) + '" opacity="0.45">数据 ' + esc(scene.generatedAt) + " · 由站点实时渲染</text>");
   parts.push("</g>");
 
   const legend = scene.arms.filter((a) => a.count).slice(0, 8);
-  parts.push('<g font-family="' + FONT + '" font-size="16">');
+  parts.push('<g font-family="' + FONT + '" font-size="' + at(16) + '">');
   legend.forEach((a, i) => {
-    const y = size - 30 - (legend.length - 1 - i) * 25;
-    parts.push('<circle cx="40" cy="' + (y - 5) + '" r="7" fill="' + armColor(a.id) + '"/>');
-    parts.push('<text x="56" y="' + y + '" fill="' + canvas.text + '" opacity="0.8">' + esc(a.label) + "（" + a.count + "）</text>");
+    const y = size - at(30) - (legend.length - 1 - i) * at(25);
+    parts.push('<circle cx="' + at(40) + '" cy="' + (y - at(5)) + '" r="' + at(7) + '" fill="' + armColor(a.id) + '"/>');
+    parts.push('<text x="' + at(56) + '" y="' + y + '" fill="' + canvas.text + '" opacity="0.8">' + esc(a.label) + "（" + a.count + "）</text>");
   });
   parts.push("</g>");
   parts.push("</svg>");

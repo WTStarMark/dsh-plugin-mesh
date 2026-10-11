@@ -284,6 +284,11 @@ async function sceneFor(info) {
 
 /** size/sample 只认固定档位：否则攻击者可以用任意数值组合造出无数缓存键，每个键都要重新解析 19.6MB 数据并渲染一张大图 —— 单线程服务会被一个循环请求打死。 */
 function snapTo(value, steps, fallback) {
+  // 缺参数要用声明的默认档位。注意 Number(null) 与 Number("") 都是 0、都是"有限数"，
+  // 老写法会把「没带参数」当成「用户选了 0」，直接落进最小档 600/500，默认值 1400/6000 永远轮不到 ——
+  // 线上 README 预览图（url 只带 ?theme=dark）就是这么变成 600px 的：坐标缩到 600 画布、字号还是 1400 画布的，
+  // 21 个扇区标签在圆心挤成一团。缺参数 / 空串一律回退，非法值仍然走下面的就近取档。
+  if (value === null || value === undefined || value === "") return fallback;
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
   let best = steps[0];

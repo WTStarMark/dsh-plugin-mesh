@@ -9,7 +9,7 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { deflateSync } from "node:zlib";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { renderPreviewSvg, sceneFromCore, sceneFromLayout, previewView, pickSample, radiusOf } from "./preview-svg.mjs";
+import { renderPreviewSvg, sceneFromCore, sceneFromLayout, previewView, pickSample, radiusOf, REF_SIZE } from "./preview-svg.mjs";
 import { PALETTES } from "../src/palettes.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -104,7 +104,8 @@ if (PNG) {
     const c = hex2rgb(groupColor(n.category, scene.arms.findIndex((a) => a.id === n.category)) ?? canvas.accent);
     const cx0 = Math.round(px(n.x) * k);
     const cy0 = Math.round(py(n.y) * k);
-    const rr = Math.max(1, Math.round(radiusOf(n) * k));
+    // 球半径：SVG 渲染里是 radiusOf × (SIZE/REF_SIZE)，这里再乘 PNG 像素比 k，两边才逐像素对齐
+    const rr = Math.max(1, Math.round(radiusOf(n) * k * (SIZE / REF_SIZE)));
     for (let y = cy0 - rr; y <= cy0 + rr; y++) for (let x = cx0 - rr; x <= cx0 + rr; x++) {
       if (x < 0 || y < 0 || x >= W || y >= W) continue;
       if ((x - cx0) ** 2 + (y - cy0) ** 2 > rr * rr) continue;

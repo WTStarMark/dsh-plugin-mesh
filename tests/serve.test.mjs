@@ -186,3 +186,22 @@ test("缓存分层：数据永远实时，代码与样式走浏览器缓存", as
     assert.ok(res.headers.get("etag"), path + " 应带 ETag 以便 304 校验");
   }
 });
+
+test("预览图不带参数时落默认档位 1400，而不是最小档 600", async () => {
+  // 回归：snapTo() 曾把"没带参数"（Number(null) === 0）当成"用户选了 0"，就近取档落到 600/500，
+  // 声明的默认值 1400/6000 永远用不上 —— README 预览图因此变成 600px 的小图，标签全挤在一起。
+  const res = await fetch(base + "/preview.svg");
+  assert.equal(res.status, 200, "预览图应能渲染（夹具数据必须已生成）");
+  const svg = await res.text();
+  assert.match(svg, /<svg[^>]*width="1400" height="1400"/, "缺 size 参数应落默认 1400");
+  assert.doesNotMatch(svg, /width="600" height="600"/, "不应再退回最小档 600");
+
+  // 显式指定仍然生效，且是同一张图的不同分辨率
+  const small = await (await fetch(base + "/preview.svg?size=600")).text();
+  assert.match(small, /<svg[^>]*width="600" height="600"/, "显式 size=600 应生效");
+  assert.match(small, /font-size="9"/, "600 画布上的扇区标签字号应缩放为 21×0.43");
+
+  // 主题参数不受影响
+  const light = await (await fetch(base + "/preview.svg?theme=light")).text();
+  assert.match(light, /<rect width="1400" height="1400" fill="#f6faff"/, "浅色主题底色");
+});

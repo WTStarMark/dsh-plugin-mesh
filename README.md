@@ -3,19 +3,19 @@
 插件生态图是一个网页：把 GitHub 上带 `dsh` 系列标签的仓库，按功能画成一张可交互的关系图。圆心固定是官方仓库 `deepseek-ai/deepseek-harness`，往外分成 21 个功能扇区（扇区就是功能分区），数据每小时自动更新。
 
 [![在线访问](https://img.shields.io/badge/在线访问-www.moc--chen.cn-2f7df6?style=flat-square)](https://www.moc-chen.cn/)
-[![测试](https://img.shields.io/badge/tests-231%20JS%20%2B%20133%20Python-3fb8a8?style=flat-square)](#测试与-ci)
+[![测试](https://img.shields.io/badge/tests-237%20JS%20%2B%20133%20Python-3fb8a8?style=flat-square)](#测试与-ci)
 [![依赖](https://img.shields.io/badge/dependencies-0-57b894?style=flat-square)](#技术选型)
 [![版本](https://img.shields.io/badge/version-v0.5.2-9b8cf0?style=flat-square)]()
 
 在线地址：<https://www.moc-chen.cn/>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://www.moc-chen.cn/preview.svg?theme=dark">
-  <source media="(prefers-color-scheme: light)" srcset="https://www.moc-chen.cn/preview.svg?theme=light">
-  <img alt="插件生态图预览：功能扇区与仓库球，圆心是官方仓库" src="https://www.moc-chen.cn/preview.svg?theme=light" width="100%">
+  <source media="(prefers-color-scheme: dark)" srcset="https://www.moc-chen.cn/preview.svg?theme=dark&size=1400&sample=6000">
+  <source media="(prefers-color-scheme: light)" srcset="https://www.moc-chen.cn/preview.svg?theme=light&size=1400&sample=6000">
+  <img alt="插件生态图预览：功能扇区与仓库球，圆心是官方仓库" src="https://www.moc-chen.cn/preview.svg?theme=light&size=1400&sample=6000" width="100%">
 </picture>
 
-> 预览图由站点实时渲染（`/preview.svg?theme=dark|light`），读 `data/mesh-core.json`，随采集更新。
+> 预览图由站点实时渲染（`/preview.svg?theme=dark|light`），读 `data/mesh-core.json`，随采集更新。地址里的 `size` / `sample` 可省：不带参数时默认 1400px / 6000 球；字号、图例、球半径都会随画布等比缩放，所以任何尺寸出的都是同一张图的不同分辨率。
 
 **页面本身没有明暗开关。** 顶栏只有「清爽 / 粉黛」两套配色键，`<html data-theme="light">` 固定浅色。`src/palettes.js` 里的深色变体仍然保留，但只服务于上面这张预览图（以及 `docs/preview.svg`、`docs/preview-light.svg` 两个离线副本）——预览图按读者的系统明暗偏好选色，页面上切不到深色。
 
@@ -137,7 +137,7 @@ npm run serve                       # 然后访问 http://127.0.0.1:8788/<ADMIN_
 ## 测试与 CI
 
 ```bash
-npm test                           # 前端 + 后端（本机实测：前端 231 项、后端 133 项）
+npm test                           # 前端 + 后端（本机实测：前端 237 项、后端 133 项）
 npm run test:js                    # 只跑前端（node:test）
 npm run test:py                    # 只跑后端（unittest）
 npm run seed:fixture               # 用 data/sample-raw.json 生成夹具数据集（npm test 会自动调用）

@@ -1211,7 +1211,7 @@ export function apiIndex(version) {
       { method: "GET", path: "/api/repos?q=&category=&subcategory=&tag=&language=&minStars=&archived=&sort=stars|pushed|created|name&limit=&offset=&fields=all", desc: "检索仓库（默认 20 条，最多 100 条）" },
       { method: "GET", path: "/api/search?q=&limit=", desc: "紧凑检索：只回命中 id 与计数（含 README 正文命中）" },
       { method: "GET", path: "/api/repos/:owner/:name", desc: "单个仓库详情，含同作者/主题共现连线" },
-      { method: "GET", path: "/preview.svg?theme=dark|light&size=&sample=", desc: "README 预览图：按当前数据实时渲染的生态图（也可走 /api/preview.svg）" },
+      { method: "GET", path: "/preview.svg?theme=dark|light&size=&sample=", desc: "README 预览图：按当前数据实时渲染的生态图；不带参数时 size=1400、sample=6000（也可走 /api/preview.svg）" },
       { method: "GET", path: "/api/card/:owner/:name.svg?theme=light|dark&link=", desc: "可分享的 SVG 卡片" },
       { method: "GET", path: "/card/:owner/:name", desc: "卡片分享页（预览 + 嵌入代码）" },
       { method: "GET", path: "/api/stats", desc: "访问统计（只读）" },
