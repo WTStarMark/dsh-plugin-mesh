@@ -79,6 +79,9 @@ function mount({ data = payload, fail = false } = {}) {
     body: new FakeNode("div"),
     foot: new FakeNode("div"),
     close: new FakeNode("button"),
+    noiseToggle: new FakeNode("label"),
+    noiseBox: new FakeNode("input"),
+    noiseLabel: new FakeNode("span"),
   };
   nodes.modal.hidden = true;
   const mask = new FakeNode("div");
@@ -245,6 +248,46 @@ test("趋势图左侧严格对齐：整行列宽必须固定（auto 列会让每
   assert.ok(/minmax\(0,\s*1fr\)/.test(cols), "只留仓库名那一列伸缩：" + cols);
   const spark = /\.spark\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
   assert.ok(/width:\s*\d+px/.test(spark), "趋势图本身也要固定宽度：" + spark);
+});
+
+test("噪声行：默认只标注不隐藏；开了开关才藏，且名次不重排", async () => {
+  const data = JSON.parse(JSON.stringify(payload));
+  data.boards.updated.items = [
+    { ...data.boards.updated.items[0], id: "acme/noisy", name: "noisy", verdict: "noise", reason: "挂了 3 个 DSH 标签，正文却没有插件线索" },
+    data.boards.updated.items[1],
+  ];
+  const ui = mount({ data });
+  ui.button.fire("click");
+  await settle();
+
+  let list = rows(ui.body);
+  assert.equal(list.length, 2, "默认不隐藏：噪声行照常显示（只标注）");
+  const chip = list[0].find((n) => n.className === "noise");
+  assert.ok(chip, "噪声行要有标注：" + list[0].all.map((n) => n.className).join(","));
+  assert.equal(chip.textContent, "噪声");
+  assert.match(chip.title, /已判定为噪声：/, "悬停要给出判定理由：" + chip.title);
+  assert.equal(ui.noiseLabel.textContent, "隐藏噪声（1 条）", "开关上要写清会藏几条");
+  assert.equal(ui.noiseToggle.hidden, false, "有噪声行时开关才露出来");
+
+  // 打开开关：只藏这一行，剩下的行保留原来的名次（名次是榜位，不重新编号）
+  ui.noiseBox.checked = true;
+  ui.noiseBox.fire("change");
+  list = rows(ui.body);
+  assert.equal(list.length, 1, "藏掉后只剩 1 行");
+  assert.equal(list[0].find((n) => n.className === "rk").textContent, "2", "第 2 名还是第 2 名，不能被顶成第 1");
+  assert.ok(!list[0].className.includes("top1"), "被顶上来的行不该拿到冠军样式：" + list[0].className);
+
+  ui.noiseBox.checked = false;
+  ui.noiseBox.fire("change");
+  assert.equal(rows(ui.body).length, 2, "关掉开关就回来");
+});
+
+test("榜单里没有噪声行时：开关收起（不给一个点了没反应的按钮）", async () => {
+  const ui = mount();
+  ui.button.fire("click");
+  await settle();
+  assert.equal(ui.noiseLabel.textContent, "隐藏噪声");
+  assert.equal(ui.noiseToggle.hidden, true, "没有噪声行时整枚开关收起");
 });
 
 test("点一行：回调仓库 id 并自动关闭弹窗", async () => {

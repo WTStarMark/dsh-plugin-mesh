@@ -246,6 +246,11 @@ export function createApi({ root }) {
     return out;
   }
 
+  /** 三档相关性结论：related / noise / manual。老数据没有 verdict 字段时按 review 兜底（与预计算产物同一套规则） */
+  function verdictOf(n) {
+    return n.verdict ?? (n.review ? "manual" : "related");
+  }
+
   function publicNode(n) {
     return {
       id: n.id,
@@ -267,7 +272,7 @@ export function createApi({ root }) {
       pushedAt: n.pushedAt ?? null,
       archived: !!n.archived,
       review: !!n.review,
-      verdict: n.verdict ?? (n.review ? "manual" : "related"),
+      verdict: verdictOf(n),
       reason: n.reason ?? null,
       url: "https://github.com/" + n.id,
     };
@@ -281,6 +286,8 @@ export function createApi({ root }) {
       subcategoryLabel: n.subcategoryLabel ?? null,
       language: n.language ?? null,
       description: clip(n.description, 120),
+      // 精简行也带判定：列表要能标出噪声、也能按噪声过滤（每个多一个短字符串）
+      verdict: verdictOf(n),
     };
   }
 
@@ -294,6 +301,9 @@ export function createApi({ root }) {
     const language = params.get("language");
     const minStars = Number(params.get("minStars") ?? 0) || 0;
     const archived = params.get("archived");
+    // 噪声过滤：默认不过滤（行里照样带 verdict 供标注）。hide = 排除已判定噪声，only = 只看噪声
+    const noiseParam = params.get("noise");
+    const noiseFilter = noiseParam === "hide" || noiseParam === "only" ? noiseParam : "all";
     // 必须用 hasOwnProperty 之类的方式查表：SORTS["__proto__"] 会拿到 Object.prototype（真值！），
 // 接着 hits.sort(Object.prototype) 抛 TypeError —— 一个 &&sort=__proto__ 的查询就是 500。
     const sortParam = String(params.get("sort") ?? "");
@@ -310,6 +320,10 @@ export function createApi({ root }) {
     if (minStars > 0) hits = hits.filter((n) => (n.stars ?? 0) >= minStars);
     if (archived === "hide") hits = hits.filter((n) => !n.archived);
     if (archived === "only") hits = hits.filter((n) => n.archived);
+    // 先数后滤：响应里如实报出「这批条件下一共有多少条噪声」，界面才能说清自己藏了什么
+    const noiseMatched = hits.filter((n) => verdictOf(n) === "noise").length;
+    if (noiseFilter === "hide") hits = hits.filter((n) => verdictOf(n) !== "noise");
+    if (noiseFilter === "only") hits = hits.filter((n) => verdictOf(n) === "noise");
     let readme = { indexed: 0, total: 0 };
     if (q) {
       await loadReadmes();
@@ -330,7 +344,8 @@ export function createApi({ root }) {
     hits = hits.slice().sort(SORTS[sortKey]);
     const page = hits.slice(offset, offset + limit);
     return {
-      query: { q, category, subcategory, tag, language, minStars, archived, sort: sortKey, limit, offset },
+      query: { q, category, subcategory, tag, language, minStars, archived, noise: noiseFilter, sort: sortKey, limit, offset },
+      noise: { filter: noiseFilter, matched: noiseMatched },
       readme,
       total,
       count: page.length,
@@ -574,7 +589,18 @@ export function createApi({ root }) {
 
   async function ranking(params) {
     const mesh = await load();
-    const nodes = mesh.nodes ?? [];
+    const allNodes = mesh.nodes ?? [];
+    // 噪声过滤：默认不过滤（行里带 verdict 供前端标注）；hide / only 由调用方显式要求。
+    // 只影响「进榜的是谁」，不改任何排序口径与统计口径 —— 榜单自身仍然是纯 star 增量 / 发版数排序。
+    const noiseParam = params.get("noise");
+    const noiseFilter = noiseParam === "hide" || noiseParam === "only" ? noiseParam : "all";
+    const noiseMatched = allNodes.filter((n) => verdictOf(n) === "noise").length;
+    const nodes =
+      noiseFilter === "hide"
+        ? allNodes.filter((n) => verdictOf(n) !== "noise")
+        : noiseFilter === "only"
+          ? allNodes.filter((n) => verdictOf(n) === "noise")
+          : allNodes;
     const now = Date.now();
     const windowDays = Math.min(30, Math.max(1, Number(params.get("days") ?? 7) || 7));
     const limit = Math.min(RANKING_LIMIT, Math.max(1, Number(params.get("limit") ?? 20) || 20));
@@ -592,7 +618,9 @@ export function createApi({ root }) {
       category: n.category ?? null,
       categoryLabel: n.categoryLabel ?? null,
       pushedAt: n.pushedAt ?? null,
-      ...(wantAll ? { description: n.description ?? "", url: "https://github.com/" + n.id } : {}),
+      // 三档判定随行返回：榜单上要能标出「已判定噪声」，前端不必再拿 id 回查
+      verdict: verdictOf(n),
+      ...(wantAll ? { description: n.description ?? "", url: "https://github.com/" + n.id, reason: n.reason ?? null } : {}),
     });
 
     /* 榜一：周更新热榜（排除归档与复刻：档案馆与镜像刷推送不算「生态在动」）。
@@ -867,6 +895,7 @@ export function createApi({ root }) {
       limit,
       seriesDays,
       dataAgeHours: Number(((now - meshAt) / 3600000).toFixed(1)),
+      noise: { filter: noiseFilter, matched: noiseMatched },
       history: { points: points.map((p) => ({ at: p.at, repos: Object.keys(p.stars).length, source: p.source ?? "history" })), latestAt: newest?.at ?? null },
       releases: { cached: Object.keys(releasesIndex.repos).length, updatedAt: releasesIndex.updatedAt ?? null },
       starDaily: {
@@ -1206,9 +1235,9 @@ export function apiIndex(version) {
     endpoints: [
       { method: "GET", path: "/api", desc: "本清单" },
       { method: "GET", path: "/api/health", desc: "健康检查与数据概况（含 README 索引规模）" },
-      { method: "GET", path: "/api/ranking?days=7&limit=50&fields=all", desc: "榜单：周更新热榜（本周发过 release 的项目，最多 50 行，含 updates / updatesSource / releases）+ 周 star 热榜（星标历史增量，最多 50 行；历史不足时如实返回实际窗口）" },
+      { method: "GET", path: "/api/ranking?days=7&limit=50&fields=all&noise=all|hide|only", desc: "榜单：周更新热榜（本周发过 release 的项目，最多 50 行，含 updates / updatesSource / releases）+ 周 star 热榜（星标历史增量，最多 50 行；历史不足时如实返回实际窗口）。每行带 verdict（related/noise/manual）；noise=hide 排除已判定噪声，only 只看噪声，默认 all（只标注不过滤）" },
       { method: "GET", path: "/api/categories", desc: "扇区（功能分类）与细枝及各自数量" },
-      { method: "GET", path: "/api/repos?q=&category=&subcategory=&tag=&language=&minStars=&archived=&sort=stars|pushed|created|name&limit=&offset=&fields=all", desc: "检索仓库（默认 20 条，最多 100 条）" },
+      { method: "GET", path: "/api/repos?q=&category=&subcategory=&tag=&language=&minStars=&archived=&noise=&sort=stars|pushed|created|name&limit=&offset=&fields=all", desc: "检索仓库（默认 20 条，最多 100 条）。行带 verdict；noise=hide|only 按三档判定过滤，默认 all 只标注" },
       { method: "GET", path: "/api/search?q=&limit=", desc: "紧凑检索：只回命中 id 与计数（含 README 正文命中）" },
       { method: "GET", path: "/api/repos/:owner/:name", desc: "单个仓库详情，含同作者/主题共现连线" },
       { method: "GET", path: "/preview.svg?theme=dark|light&size=&sample=", desc: "README 预览图：按当前数据实时渲染的生态图；不带参数时 size=1400、sample=6000（也可走 /api/preview.svg）" },

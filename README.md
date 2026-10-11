@@ -3,7 +3,7 @@
 插件生态图是一个网页：把 GitHub 上带 `dsh` 系列标签的仓库，按功能画成一张可交互的关系图。圆心固定是官方仓库 `deepseek-ai/deepseek-harness`，往外分成 21 个功能扇区（扇区就是功能分区），数据每小时自动更新。
 
 [![在线访问](https://img.shields.io/badge/在线访问-www.moc--chen.cn-2f7df6?style=flat-square)](https://www.moc-chen.cn/)
-[![测试](https://img.shields.io/badge/tests-237%20JS%20%2B%20133%20Python-3fb8a8?style=flat-square)](#测试与-ci)
+[![测试](https://img.shields.io/badge/tests-241%20JS%20%2B%20133%20Python-3fb8a8?style=flat-square)](#测试与-ci)
 [![依赖](https://img.shields.io/badge/dependencies-0-57b894?style=flat-square)](#技术选型)
 [![版本](https://img.shields.io/badge/version-v0.5.2-9b8cf0?style=flat-square)]()
 
@@ -137,7 +137,7 @@ npm run serve                       # 然后访问 http://127.0.0.1:8788/<ADMIN_
 ## 测试与 CI
 
 ```bash
-npm test                           # 前端 + 后端（本机实测：前端 237 项、后端 133 项）
+npm test                           # 前端 + 后端（本机实测：前端 241 项、后端 133 项）
 npm run test:js                    # 只跑前端（node:test）
 npm run test:py                    # 只跑后端（unittest）
 npm run seed:fixture               # 用 data/sample-raw.json 生成夹具数据集（npm test 会自动调用）
@@ -195,9 +195,9 @@ docs/                    data-contract.md、admin.md、frontend-design.md 与预
 | GET | `/api` | 端点清单（自描述） |
 | GET | `/api/health` | 健康检查 + 数据概况（节点数、生成时间、README 索引规模） |
 | GET | `/api/categories` | 扇区（功能分类）与细枝及各自数量 |
-| GET | `/api/repos` | 检索仓库（过滤 / 排序 / 翻页），`q` 同时匹配 README 正文 |
+| GET | `/api/repos` | 检索仓库（过滤 / 排序 / 翻页），`q` 同时匹配 README 正文；行带 `verdict` |
 | GET | `/api/search?q=&limit=` | 紧凑检索：只回命中 id 与计数 |
-| GET | `/api/ranking?days=7&limit=50` | 两个榜单，含口径字段与数据新鲜度 |
+| GET | `/api/ranking?days=7&limit=50` | 两个榜单，含口径字段与数据新鲜度；行带 `verdict`，可传 `noise=hide|only` |
 
 ### 详情、卡片与统计
 
@@ -215,6 +215,7 @@ docs/                    data-contract.md、admin.md、frontend-design.md 与预
 BASE=https://www.moc-chen.cn
 
 curl -s "$BASE/api/repos?sort=stars&limit=5"                 # 星标最高的 5 个仓库
+curl -s "$BASE/api/repos?sort=stars&limit=10&noise=hide"     # 同上，但排除已判定噪声
 curl -s "$BASE/api/repos?q=皮肤&limit=3&fields=all"          # 搜关键词
 curl -s "$BASE/api/search?q=sidebar&limit=500"               # 检索（含 README 正文），只回 id 与计数
 curl -s "$BASE/api/ranking?limit=10" | jq '.boards.updated.items[] | {id, updates, pushedAt}'
@@ -231,6 +232,7 @@ curl -s "$BASE/api/ranking?limit=10" | jq '.boards.updated.items[] | {id, update
 | `language` | — | 主语言，如 `TypeScript` |
 | `minStars` | `0` | 最低星标数 |
 | `archived` | — | `hide` = 隐藏归档；`only` = 只看归档 |
+| `noise` | `all` | 相关性三档过滤：`all` = 不过滤（行里带 `verdict` 标注）；`hide` = 排除已判定噪声；`only` = 只看噪声 |
 
 | 参数 | 默认 | 说明 |
 |---|---|---|
@@ -238,6 +240,10 @@ curl -s "$BASE/api/ranking?limit=10" | jq '.boards.updated.items[] | {id, update
 | `limit` | `20` | 每页条数，上限 100（超出自动夹到 100） |
 | `offset` | `0` | 偏移量，用于翻页 |
 | `fields` | 精简 | 传 `all` 返回完整字段（描述、topics、许可证、主页、时间、归档与复核标记） |
+
+### 相关性三档（`verdict`）
+
+每个仓库带一个 `verdict`：`related`（确认相关）/ `noise`（确认噪声：与 DSH 生态无关、或挂了一堆 DSH 标签却没有任何插件线索的通用项目）/ `manual`（线索不足，待人工复核）。`/api/repos` 与 `/api/ranking` 的每一行都会带上它，默认**只标注、不过滤**——榜单的排序口径不因为噪声而改变；要过滤就显式传 `noise=hide`（或 `only`），响应里的 `noise.filter` 与 `noise.matched` 会如实说明当前口径和这批条件里一共有多少条噪声。判定规则在 `tools/relevance.mjs`（纯规则、零 AI），与前端球图的「隐藏确认噪声」是同一套结论。
 
 ### 限流（所有 `/api` 共用）
 

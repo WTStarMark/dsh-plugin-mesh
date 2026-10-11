@@ -85,6 +85,11 @@
         <button data-tab="updated" class="on">周更新热榜</button>
         <button data-tab="stars">周 star 热榜</button>
       </div>
+      <!-- 只隐藏不重排：名次是榜位，藏一行不会让后面的行往上顶。榜单里没有噪声行时整枚开关收起（src/ranking.js 的 syncNoise） -->
+      <label class="switch rank-noise" id="ranking-noise" hidden>
+        <input type="checkbox" id="ranking-noise-box">
+        <span id="ranking-noise-label">隐藏噪声</span>
+      </label>
       <button id="ranking-close" class="key" aria-label="关闭榜单">✕</button>
     </header>
     <div class="modal-body" id="ranking-body"></div>

@@ -36,14 +36,20 @@ export function timeAgo(iso, now = Date.now()) {
   return Math.floor(day / 30) + " 个月前";
 }
 
-/** opts：{ button, modal, tabs, body, close, fetcher, onPick }；fetcher 失败时如实显示「拿不到」，onPick 回调仓库 id */
-export function createRankingBoard({ button, modal, tabs, body, close, fetcher, onPick }) {
+/**
+ * opts：{ button, modal, tabs, body, close, fetcher, onPick, noiseToggle, noiseBox, noiseLabel }。
+ * fetcher 失败时如实显示「拿不到」，onPick 回调仓库 id；
+ * noiseToggle / noiseBox / noiseLabel = 弹窗头部那枚「隐藏噪声」开关（可选，没有就只标注不隐藏）。
+ */
+export function createRankingBoard({ button, modal, tabs, body, close, fetcher, onPick, noiseToggle, noiseBox, noiseLabel }) {
   let data = null;
   let loadedAt = 0;
   let tab = "updated";
   let open = false;
   let loading = false;
   let error = null;
+  // 只隐藏、不重排：被藏起来的行仍然占着它原来的名次，后面的行不会被顶上来（名次是榜位，不是显示序号）
+  let hideNoise = false;
 
   const STALE_MS = 5 * 60 * 1000;
 
@@ -123,6 +129,12 @@ export function createRankingBoard({ button, modal, tabs, body, close, fetcher, 
     const who = el("div", "who");
     const line = el("div", "line");
     line.append(el("b", null, item.name || item.id));
+    // 三档判定随接口返回（verdict）：noise 只标注，不隐藏、不降权 —— 隐藏要用户自己点开关
+    if (item.verdict === "noise") {
+      const chip = el("span", "noise", "噪声");
+      chip.title = item.reason ? "已判定为噪声：" + item.reason : "已判定为噪声（与 DSH 生态无关或蹭标签的通用项目）";
+      line.append(chip);
+    }
     // 版本（采集器单独抓的 releases）：最新一个做成小胶囊，其余在悬停里列全
     const versions = Array.isArray(item.releases) ? item.releases : [];
     if (versions.length) {
@@ -194,11 +206,26 @@ export function createRankingBoard({ button, modal, tabs, body, close, fetcher, 
       body.append(el("div", "rank-empty", "这个窗口里没有可上榜的仓库。"));
       return;
     }
-    items.forEach((item, i) => body.append(renderRow(item, i)));
+    // 名次按原榜算：隐藏一行不会让后面的行往上顶（名次是榜位，不是显示序号）
+    const shown = items.map((item, i) => ({ item, rank: i })).filter((x) => !(hideNoise && x.item.verdict === "noise"));
+    if (!shown.length) {
+      body.append(el("div", "rank-empty", "这个榜单里都是已判定噪声。想看得见上面「隐藏噪声」开关关掉。"));
+      return;
+    }
+    shown.forEach((x) => body.append(renderRow(x.item, x.rank)));
+  }
+
+  /** 开关状态与计数：没有噪声行时整枚开关收起（不占位置，也不给一个点了没反应的按钮） */
+  function syncNoise() {
+    const n = rowsOf().filter((it) => it.verdict === "noise").length;
+    if (noiseBox) noiseBox.checked = hideNoise;
+    if (noiseToggle) noiseToggle.hidden = n === 0;
+    if (noiseLabel) noiseLabel.textContent = n ? "隐藏噪声（" + n + " 条）" : "隐藏噪声";
   }
 
   function render() {
     syncTabs();
+    syncNoise();
     renderBody();
     // 前端不再展示任何口径解释（列表、标签页都不挂）：口径在接口字段里（updatesSource / window.days / dataAgeHours / seriesSource / note），文档里也写着。
   }
@@ -248,6 +275,12 @@ export function createRankingBoard({ button, modal, tabs, body, close, fetcher, 
     for (const btn of tabs.children ?? []) {
       btn.addEventListener?.("click", () => setTab(btn.dataset?.tab));
     }
+  }
+  if (noiseBox) {
+    noiseBox.addEventListener?.("change", () => {
+      hideNoise = !!noiseBox.checked;
+      render();
+    });
   }
   button?.addEventListener?.("click", (ev) => {
     ev?.stopPropagation?.();

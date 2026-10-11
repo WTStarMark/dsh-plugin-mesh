@@ -472,6 +472,107 @@ test("star 榜：台账为空时如实退回星标环，并在 note 里写明是
   }
 });
 
+test("噪声维度：默认只标注不过滤，noise=hide|only 才过滤（/api/repos）", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "mesh-noise-"));
+  try {
+    await mkdir(join(tmp, "data", "cache"), { recursive: true });
+    const node = (id, stars, extra) => ({
+      id, name: id.split("/")[1], owner: id.split("/")[0], stars,
+      description: "一个通用项目", topics: ["dsh-plugin"], matchedTags: ["dsh-plugin"],
+      category: "tools", categoryLabel: "工具命令", ...extra,
+    });
+    await writeFile(
+      join(tmp, "data", "mesh.json"),
+      JSON.stringify({
+        meta: { generatedAt: new Date().toISOString() },
+        nodes: [
+          node("big/borrowed", 9000, { verdict: "noise" }), // 蹭标签的通用大项目
+          node("small/real", 10, { verdict: "related" }),
+          node("mid/manual", 500, { verdict: "manual" }),
+          node("old/legacy", 50, { review: true }), // 老数据：没有 verdict，只有 review
+        ],
+        edges: [], clusters: [], hubs: [], tags: [],
+      }),
+    );
+    const local = createApi({ root: tmp });
+
+    const all = await local.search(new URLSearchParams("sort=stars"));
+    assert.equal(all.total, 4, "默认不过滤：噪声照常出现在结果里（只标注）");
+    assert.equal(all.noise.filter, "all");
+    assert.equal(all.noise.matched, 1, "要如实报出这批条件里有多少条噪声");
+    assert.equal(all.items[0].id, "big/borrowed", "默认排序口径不变：星标高的仍然在前");
+    assert.equal(all.items[0].verdict, "noise", "精简行也要带 verdict");
+    assert.equal(all.items.find((n) => n.id === "old/legacy").verdict, "manual", "老数据靠 review 兜底");
+
+    const hidden = await local.search(new URLSearchParams("noise=hide"));
+    assert.equal(hidden.total, 3, "hide 只去掉已判定噪声");
+    assert.ok(hidden.items.every((n) => n.verdict !== "noise"));
+    assert.equal(hidden.noise.matched, 1, "被藏掉多少条要如实报出来");
+
+    const only = await local.search(new URLSearchParams("noise=only"));
+    assert.equal(only.total, 1);
+    assert.equal(only.items[0].id, "big/borrowed");
+    assert.equal(only.noise.filter, "only");
+
+    const junk = await local.search(new URLSearchParams("noise=whatever"));
+    assert.equal(junk.total, 4, "未知取值回落到默认：不过滤");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("噪声维度：榜单行带 verdict，noise=hide 时已判定噪声不再进榜", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "mesh-rank-noise-"));
+  try {
+    await mkdir(join(tmp, "data", "cache"), { recursive: true });
+    const nowIso = new Date().toISOString();
+    const anchor = dayOf(Date.parse(nowIso));
+    const d0 = new Date(Date.parse(anchor + "T00:00:00Z") - 86400000).toISOString().slice(0, 10);
+    const node = (id, stars, verdict) => ({
+      id, name: id.split("/")[1], owner: id.split("/")[0], stars,
+      archived: false, fork: false, matchedTags: ["dsh"], topics: [], verdict,
+    });
+    await writeFile(
+      join(tmp, "data", "mesh.json"),
+      JSON.stringify({ meta: { generatedAt: nowIso }, nodes: [node("a/noisy", 50000, "noise"), node("a/real", 120, "related")], edges: [], clusters: [] }),
+    );
+    await writeFile(
+      join(tmp, "data", "cache", "star-daily.json"),
+      JSON.stringify({
+        updatedAt: nowIso,
+        lastRound: { at: nowIso, day: anchor, counted: 2, gained: 830, spans: 0, carried: 0, baseline: false },
+        seen: { "a/noisy": 50000, "a/real": 120 },
+        sampledDays: [d0, anchor],
+        days: { [d0]: { "a/noisy": 800 }, [anchor]: { "a/real": 30 } },
+        spans: [],
+        rounds: { [d0]: { first: nowIso, last: nowIso } },
+      }),
+    );
+    const local = createApi({ root: tmp });
+
+    const all = await local.ranking(new URLSearchParams("limit=10"));
+    assert.equal(all.noise.filter, "all");
+    assert.equal(all.noise.matched, 1, "要把数据里的噪声条数报出来");
+    const rowsAll = [...all.boards.stars.items, ...all.boards.updated.items];
+    assert.ok(all.boards.stars.items.length > 0, "夹具里应有可上榜的 star 行");
+    assert.ok(rowsAll.every((r) => typeof r.verdict === "string"), "每一行都要带 verdict");
+    assert.ok(all.boards.stars.items.some((r) => r.id === "a/noisy" && r.verdict === "noise"), "默认不过滤：噪声照常上榜（只标注）");
+
+    const hidden = await local.ranking(new URLSearchParams("limit=10&noise=hide"));
+    assert.equal(hidden.noise.filter, "hide");
+    const rowsHidden = [...hidden.boards.stars.items, ...hidden.boards.updated.items];
+    assert.ok(rowsHidden.length > 0, "hide 之后仍有正常行");
+    assert.ok(rowsHidden.every((r) => r.verdict !== "noise"), "hide 之后榜单里不该再有噪声行");
+    assert.ok(!hidden.boards.stars.items.some((r) => r.id === "a/noisy"));
+
+    const only = await local.ranking(new URLSearchParams("limit=10&noise=only"));
+    assert.equal(only.noise.filter, "only");
+    assert.ok(only.boards.stars.items.length > 0 && only.boards.stars.items.every((r) => r.verdict === "noise"), "only 只看噪声");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("dayOf：坏时间戳不许抛异常（曾经让 /api/ranking 挂死 30 秒）", () => {
   assert.equal(dayOf(1759886400000), "2025-10-08", "毫秒数要能吃");
   assert.equal(dayOf("2026-10-06T23:08:14Z"), "2026-10-07", "ISO 串按当地日界换算");
