@@ -26,6 +26,7 @@ data/cache/
 data/stats.json
 data/crawl.log
 data/noise-blacklist.json
+data/admin/
 data/renames.json
 data/*.bak-*.json
 docs/*.png

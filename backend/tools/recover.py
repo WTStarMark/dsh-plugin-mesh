@@ -1,8 +1,6 @@
 """恢复：把"队列里标记完成、但抓到的数据没落盘"的段重新排回待抓。
-
-背景：pm2 的 --watch 与采集器抢参数，导致每次落盘都被 SIGINT 打断，
-save() 里先写队列后写数据，于是队列说"抓完了"而 repos.json 没更新。
-离线判断依据：段的 fetchedAt 晚于 repos.json 最后一次成功落盘时间。
+背景：pm2 的 --watch 与采集器抢参数，落盘被 SIGINT 打断；save() 先写队列后写数据，
+于是队列说"抓完了"而 repos.json 没更新。判断依据：段的 fetchedAt 晚于 repos.json 最后落盘时间。
 """
 
 import json

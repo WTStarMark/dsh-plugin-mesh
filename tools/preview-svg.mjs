@@ -1,13 +1,8 @@
 /**
- * 预览图渲染（SVG）—— 离线生成与站点实时接口共用同一套代码。
- *
- * 两条数据来源：
- *   sceneFromCore(core)              读 data/mesh-core.json（预计算契约，已带 x/y/r 与扇区几何）→ 站点接口用
- *   sceneFromLayout(layout, prepared) 现场跑布局 → 离线工具用（保证与前端布局代码一致）
- *
- * 为什么要有站点接口：README 里的预览图如果是提交进仓库的静态文件，
- * 数据一变就过期（上次就是这么变成"没画面"的）。改由站点按当前数据实时渲染，
- * 每次采集之后图自己就更新了。
+ * 预览图渲染（SVG）—— 离线生成与站点实时接口共用同一套代码：
+ *   sceneFromCore(core)   读 data/mesh-core.json（站点接口用，不跑布局）
+ *   sceneFromLayout(...)  现场跑布局（离线工具用，保证与前端布局代码一致）
+ * README 用站点实时接口而非提交静态图：静态图数据一变就过期（曾变成「没画面」）。
  */
 import { groupColor } from "../src/mesh-data.js";
 import { PALETTES } from "../src/palettes.js";
@@ -46,7 +41,6 @@ export function sceneFromCore(core) {
   };
 }
 
-/** 现场布局 → 场景（离线路径） */
 export function sceneFromLayout(layout, prepared, links) {
   const nodes = [];
   for (let i = 0; i < layout.size; i++) {
@@ -101,10 +95,7 @@ export function pickSample(nodes, sample) {
   return top;
 }
 
-/**
- * 渲染预览 SVG。
- * scene：{ nodes, arms, total, generatedAt, hubId?, edges? }
- */
+/** 渲染预览 SVG；scene：{ nodes, arms, total, generatedAt, hubId?, edges? } */
 /** 场景 → 画布坐标变换（渲染与"核对图"共用，保证两者完全一致） */
 export function previewView(scene, size = 1400, pad = 96) {
   let minX = Infinity;
@@ -162,7 +153,6 @@ export function renderPreviewSvg(scene, { theme: themeMode = "dark", size = 1400
   );
   parts.push('<rect width="' + size + '" height="' + size + '" fill="' + canvas.bg + '"/>');
 
-  // 扇区柔光
   for (const a of scene.arms) {
     if (!a.count) continue;
     const color = armColor(a.id);
@@ -210,7 +200,6 @@ export function renderPreviewSvg(scene, { theme: themeMode = "dark", size = 1400
     parts.push('<text x="' + hx.toFixed(1) + '" y="' + (hy + 42).toFixed(1) + '" text-anchor="middle" font-family="' + FONT + '" font-size="17" font-weight="600" fill="' + canvas.text + '">' + esc(hub.id) + "</text>");
   }
 
-  // 扇区标签（沿中轴朝外）
   const fontSize = 21;
   parts.push('<g font-family="' + FONT + '" text-anchor="middle">');
   for (const a of scene.arms) {

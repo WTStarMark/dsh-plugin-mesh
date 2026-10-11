@@ -1,13 +1,8 @@
 /**
- * 头像加载器：带并发上限、按【当前可见性】排序、工作集有上限。
- *
- * 为什么要限制：图上 1.7 万个节点、1.1 万个不同作者，用户一路缩放平移下来会累计
- * 上千张头像 —— 每张都解码成位图常驻内存（460×460 原图约 850KB/张）。
- * 规则：
- *   1. 每帧由绘制方声明"这一帧想要的"（want），并给出优先级（屏幕上越大越优先）；
- *   2. 队列按优先级排序，并发 6 张；
- *   3. 工作集上限 maxActive（默认 500）：超出时淘汰"这一帧不想要、优先级最低"的那些；
- *   4. 同一 URL 只请求一次；失败不重试。
+ * 头像加载器：按当前可见性排序、并发有上限、工作集有上限。
+ * 必须限流——上万张头像解码后常驻内存（460×460 原图约 850KB/张），一路缩放平移会撑爆。
+ * 每帧由绘制方声明 want 与优先级（屏幕上越大越优先）；并发 6；工作集上限 500，
+ * 超出则淘汰「这一帧不想要、优先级最低」的；同一 URL 只请求一次，失败不重试。
  */
 
 export function createAvatarStore(options = {}) {
@@ -90,13 +85,11 @@ export function createAvatarStore(options = {}) {
     for (const [url, e] of [...entries]) {
       if (keep.has(url)) continue;
       if (e.state === "loading") {
-        // 在途的也要取消，否则"这一帧要了 150 个"就会把上限撑破；
-        // 取消 = 清掉 src 并标记，等它的回调回来时不再记账。
+        // 在途的也要取消，否则「这一帧要了 150 个」会撑破上限；取消 = 清 src，回调回来时不再记账。
         e.cancelled = true;
         try {
           e.img.src = "";
         } catch {
-          /* 忽略 */
         }
         active = Math.max(0, active - 1);
       }
@@ -106,11 +99,10 @@ export function createAvatarStore(options = {}) {
   }
 
   return {
-    /** 一帧开始：之后调用的 want/ready 都按这一帧记账 */
     beginFrame() {
       frame += 1;
     },
-    /** 这一帧想画这张头像；priority 越大越先加载（一般传屏幕半径） */
+    /** priority 越大越先加载（一般传屏幕半径） */
     want(url, priority = 0) {
       if (!url) return null;
       const e = entryOf(url);
@@ -120,15 +112,14 @@ export function createAvatarStore(options = {}) {
       if (e.state === "idle") pump();
       return null;
     },
-    /** 一帧结束：把超出的部分淘汰掉 */
     endFrame() {
       evict();
     },
-    /** 兼容旧调用：等价于 want()（不参与帧记账时按当前帧算） */
+    /** 兼容旧调用：等价于 want() */
     ready(url, priority = 0) {
       return this.want(url, priority);
     },
-    /** 统计（保留旧字段名 loaded/failed/active，老调用方与测试照常可用） */
+    /** 保留旧字段名 loaded/failed/active，老调用方与测试照常可用 */
     get stats() {
       let ready = 0;
       let queued = 0;

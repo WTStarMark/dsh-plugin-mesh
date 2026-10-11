@@ -1,16 +1,8 @@
 #!/usr/bin/env node
 /**
- * 生成 README 用的预览图（离线副本）。
- *
- * 现在 README 默认用站点实时接口 https://www.moc-chen.cn/preview.svg（每次采集后自动更新），
- * 本工具用于两种场景：
- *   1. 生成仓库内的静态副本 docs/preview*.svg（断网/接口挂了也能看，且随版本留档）
- *   2. 本地核对：--png 自己 rasterize 一张，在没有浏览器/rsvg 的机器上也能"肉眼看图"
- *
- * 用法：
- *   node tools/snapshot-svg.mjs --out docs/preview.svg       --theme dark
- *   node tools/snapshot-svg.mjs --out docs/preview-light.svg --theme light
- *   node tools/snapshot-svg.mjs --layout --png dist/check.png   # 现场跑布局（mesh-core 不存在时）
+ * 生成 README 用的预览图（离线副本）：产出 docs/preview*.svg，断网/接口挂了也能看，且随版本留档；
+ * --png 自己 rasterize 一张，供没有浏览器/rsvg 的机器肉眼核对。
+ * 用法：node tools/snapshot-svg.mjs --out docs/preview.svg --theme dark [--layout] [--png dist/check.png]
  */
 
 import { readFile, writeFile, mkdir } from "node:fs/promises";
@@ -67,7 +59,6 @@ console.log(
     " · 画了 " + (svg.match(/<use /g) ?? []).length + " 个球 · " + (svg.length / 1024).toFixed(0) + " KB",
 );
 
-// ---- 可选：自己 rasterize 一张 PNG，供无浏览器环境肉眼核对 ----
 if (PNG) {
   const W = Number(argOf("--png-size", "900"));
   const canvas = (PALETTES.fresh[THEME] ?? PALETTES.fresh.dark).canvas;
@@ -83,7 +74,6 @@ if (PNG) {
   const k = W / SIZE;
   const { groupColor } = await import("../src/mesh-data.js");
   const armColor = (id) => hex2rgb(groupColor(id, scene.arms.findIndex((a) => a.id === id)));
-  // 扇区
   for (const a of scene.arms) {
     if (!a.count) continue;
     const c = armColor(a.id);

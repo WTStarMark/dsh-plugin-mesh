@@ -1,18 +1,15 @@
 /**
- * 相关性判定（纯规则，零 AI）—— 把"疑似噪声"拆成三档**结论**：
- *
- *   related  名字/描述/主题里有 DSH 专有线索 → 直接算相关，退出复核队列
- *   noise    与 DSH 无关 / 空壳 / 堆标签     → 判为噪声，可一键隐藏
- *   manual   线索不足                       → 才是真正需要人工看的那批
- *
- * 为什么要拆：老版本只有 review = (相关度 <= 2)，一次把上千个仓库丢进"待复核"，
- * 其中一大半一眼就能定性（要么明说 DSH，要么是别的生态来蹭标签的流行项目）。
- *
- * 输出与 backend/dsh_mesh/build.py 的 analyze_relevance 逐条一致（两份实现互为镜像，
- * 差异会被跨语言一致性校验之外的人工核对发现；改动请同时改两边）。
+ * 相关性判定（纯规则，零 AI）—— 把「疑似噪声」拆成三档结论：
+ *   related 名字/描述/主题里有 DSH 专有线索 → 直接算相关；noise 与 DSH 无关/空壳/堆标签 → 可一键隐藏；
+ *   manual 线索不足 → 才是真正需要人工看的那批（旧版只有一个阈值，一次把上千个仓库丢进「待复核」）。
+ * 输出与 backend/dsh_mesh/build.py 的 analyze_relevance 逐条一致（两份实现互为镜像）；
+ * 改动请同时改两边。
  */
 
-export const WHITELIST = ["dsh-plugin-desktop", "dsh-desktop", "dsh-plugin-market", "dsh-plugins", "dsh-plugin", "dsh"];
+import { loadAdminConfig, whitelistTagsOf } from "./admin-config.mjs";
+
+/** 捕获标签白名单：与 tools/categories.mjs、backend/dsh_mesh/config.py 同源（data/admin/config.json） */
+export const WHITELIST = whitelistTagsOf(loadAdminConfig());
 
 /** DSH 专有线索：dsh 词元 / DeepSeek Harness / Cordis */
 const DSH_NAME = /(^|[^a-z0-9])dsh([^a-z0-9]|$)|dsh[-_]|deepseek[\s-]?harness|cordis/i;
@@ -36,7 +33,7 @@ export function relevanceScore(repo) {
   if (topics.includes("deepseek-harness")) s += 1;
   if (topics.filter((t) => WHITELIST.includes(t)).length >= 2) s += 1;
   if (/cordis/i.test(repo.description ?? "") || topics.includes("cordis")) s += 1;
-  return s; // 0..8
+  return s;
 }
 
 /** 三档结论。返回 { relevance, review, verdict, reason }（review=true 即仍需人工） */

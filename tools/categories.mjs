@@ -1,38 +1,26 @@
 /**
- * 功能分类器（纯规则，零 AI）
- *
- * 为什么不能用 AI 分类：500+ 个仓库逐个让模型读一遍就是烧 token，
- * 而且每次结果不稳定、无法 diff。规则表 + 打分是可审计、可复跑、可手改的。
- *
- * 信号来源：仓库名（权重 ×2）+ 描述 + 非白名单 topic。
- * 关键点：白名单标签本身（dsh / dsh-plugin / dsh-desktop ...）**不作为**分类证据，
- * 否则所有仓库都会被"标签"带偏 —— 这正是需求里说的"不要按标签区分"。
- *
- * 匹配规则（v0.4 起）：
- *   - 英文词按【词边界】匹配（允许简单复数），不再裸子串匹配。
- *     修掉的典型误命中：ui←build、cli←client、hub←github、store←restore、rag←storage、api←rapid。
- *   - 中文词仍按子串匹配（中文没有词边界）。
- *   - 分类可声明 gate（准入门槛）/ exclude（排除条件）/ override（自述救回），用来处理歧义分类。
+ * 功能分类器（纯规则，零 AI）：规则表 + 打分，可审计、可复跑、可手改 ——
+ * 500+ 个仓库逐个让模型读一遍就是烧 token，而且每次结果不稳定、无法 diff。
+ * 信号：仓库名（权重 ×2）+ 描述 + 非白名单 topic。关键点：白名单标签本身（dsh / dsh-plugin …）
+ * 不作为分类证据，否则所有仓库都会被「标签」带偏 —— 这正是需求里「不要按标签区分」的意思。
+ * 英文词按【词边界】匹配（允许简单复数），修掉过 ui←build、cli←client、hub←github、store←restore、rag←storage 等误命中；中文词仍按子串。
+ * 分类可声明 gate（准入门槛）/ exclude（排除条件）/ override（自述救回），用来处理歧义分类。
  */
 
-export const WHITELIST_TAGS = [
-  "dsh-plugin-desktop",
-  "dsh-desktop",
-  "dsh-plugin-market",
-  "dsh-plugins",
-  "dsh-plugin",
-  "dsh",
-];
+import { loadAdminConfig, whitelistTagsOf } from "./admin-config.mjs";
 
-/** 未归类 / 长尾合并后的桶 */
+/**
+ * 捕获标签白名单：以 data/admin/config.json 为准（管理后台里可改），文件不存在/损坏时回退默认值。
+ * Python 侧 backend/dsh_mesh/config.py 读同一份数据，后台改一次两边同时变，不会再出现「只改了一处」的分叉。
+ */
+export const WHITELIST_TAGS = whitelistTagsOf(loadAdminConfig());
+
 export const OTHER = { id: "other", label: "其他" };
 
 /**
- * 非插件语境排除：这些仓库确实挂着 dsh 标签，但 DSH 在它们那里是【别的意思】。
- * 典型：DeepHash-pytorch 的 DSH 是 Deep Supervised Hashing（深度哈希算法），
- * 与 DeepSeek Harness 毫无关系。这类仓库不进索引、不进前端。
- * 判据刻意写窄：只认"另一个 DSH 全称"的直接证据（哈希/检索/信号处理…），
- * 不靠"看起来不像插件"这种模糊感觉，免得误伤描述写得少的真插件。
+ * 非插件语境排除：这些仓库确实挂着 dsh 标签，但 DSH 在它们那里是【别的意思】
+ * （典型：DeepHash-pytorch 的 DSH = Deep Supervised Hashing），这类不进索引、不进前端。
+ * 判据刻意写窄：只认「另一个 DSH 全称」的直接证据，不靠「看起来不像插件」，免得误伤描述写得少的真插件。
  */
 export const NOT_PLUGIN_PATTERNS = [
   { re: /deep\s*hash|deephash|deep hashing|深度哈希|哈希算法|image retrieval|检索演示/i, why: "深度哈希类：这里的 DSH 是 Deep Supervised Hashing，不是 DeepSeek Harness" },
@@ -55,9 +43,8 @@ function escapeRegExp(text) {
 }
 
 /**
- * 造一个词频计数器：
- *   英文 → 词边界 + 允许 s/es 复数（注意 marketplace 不会命中 market，需要另列词条）
- *   中文 → 子串计数
+ * 造一个词频计数器：英文按词边界 + 允许 s/es 复数（注意 marketplace 不会命中 market，需要另列词条）；
+ * 中文按子串计数。
  */
 export function makeCounter(term) {
   if (!ASCII_WORD.test(term)) {
@@ -78,26 +65,23 @@ export function makeCounter(term) {
 
 /**
  * 「基座」自述：基座/底座/框架/脚手架… 紧邻插件生态词（插件/扩展/皮肤/面板/侧边栏/工作台…）。
- * 刻意要求"相邻"：单说 framework 的仓库满大街都是，只有"给插件生态当底座"的自述才算数。
+ * 刻意要求「相邻」：单说 framework 的仓库满大街都是，只有「给插件生态当底座」的自述才算数。
  */
 const BASE_WORDS = "底座|基座|脚手架|基础设施|框架|foundation|framework|scaffold|infrastructure";
 const ECO_WORDS = "插件|扩展|拓展|生态|三方|宿主|皮肤|面板|侧边栏|工作台|工具链|plugin|extension|ecosystem|host";
-// 中间最多 4 个字符，且不能跨标点 —— 否则"插件：10 条内置思维框架""框架逻辑可测试。dsh-plugin"
-// 这种跨小句的巧合也会算成"基座自述"
+// 中间最多 4 个字符，且不能跨标点 —— 否则「插件：10 条内置思维框架」「框架逻辑可测试。dsh-plugin」这种跨小句的巧合也会算成「基座自述」。
 const GAP = "[^，。；：、,.;:!?|()（）\\n]{0,4}";
 const BASE_SELF_SRC = "(" + BASE_WORDS + ")" + GAP + "(" + ECO_WORDS + ")|(" + ECO_WORDS + ")" + GAP + "(" + BASE_WORDS + ")";
 const BASE_SELF_DESC = new RegExp(BASE_SELF_SRC, "i");
 
-/** 「协议/规范」自述（原来的公约协议判据，原样保留） */
+/** 「协议/规范」自述判据 */
 const SPEC_SELF_SRC =
   "(插件|生态|社区)[^\\n]{0,10}(规范|标准|公约|共识|契约|协议)|互操作|元协议|meta[- ]protocol|plugin[- ](standard|spec|specification|convention|contract|schema|manifest)|ecosystem[- ](standard|spec|specification|convention)|community[- ](standard|spec|consensus|convention)|conventions every plugin|(standard|specification|protocol)\\s+for\\s+(dsh|deepseek|plugins?)";
 
 /**
  * 桌宠扇区的「自述」判据（与 backend/dsh_mesh/classify.py 逐字对齐）：
- *   PET_SKIN_SELF — 仓库自述是皮肤/主题/壁纸……说的是"长什么样"；
- *   PET_SELF      — 仓库自述是宠物/陪伴/角色玩法……说的才是"陪着你的角色"。
- * 「鲸鱼娘/小鲸鱼」只说明角色长相，不等于陪伴玩法：一个自称"皮肤系列"的仓库
- * 不该被它拉进桌宠扇区（Small-tailqwq/dsh-deep-whale 的"鲸鱼娘系列皮肤"就是这样被抢走的）。
+ * PET_SKIN_SELF 说的是「长什么样」，PET_SELF 说的才是「陪着你的角色」——「鲸鱼娘/小鲸鱼」只说明角色长相，
+ * 自称「皮肤系列」的仓库不该被它拉进桌宠扇区。
  */
 const PET_SKIN_SELF = /皮肤|主题|壁纸|外观|美化|配色|skin|theme|wallpaper|appearance/i;
 const PET_SELF = /\bpet\b|\bpets\b|桌宠|宠物|养成|pokemon|live2d|mascot|吉祥物|陪伴|看板娘|小鲸鱼/i;
@@ -120,17 +104,13 @@ export const CATEGORY_RULES = [
     id: "market",
     label: "插件市场",
     priority: 3,
-    // 只有"自述是汇集插件的汇总"才算市场：
-    // 名字带市场/商店/索引/合集/导航/清单，或描述明确说要收录、汇集、汇总插件。
-    // 单纯在描述里提一句 market/store 的插件不算。
-    // 名字必须【本身就是汇总】：末段/首段是汇总词，或中文名以汇总词结尾。
-    // 名字里只是"提到"市场不算（例如 dsh-market-button 是给市场加按钮的插件）。
+    // 只有「自述是汇集插件的汇总」才算市场：名字带市场/商店/索引/合集/导航/清单，或描述明确说要收录、汇集、汇总插件；
+// 名字里只是「提到」市场不算（例如 dsh-market-button 是给市场加按钮的插件）。
     gate: {
       name: /((^|[-_ ])(market|marketplace|store|registry|directory|catalog|collection|index|hub)s?$)|(^(awesome|market|marketplace|registry|store|directory|collection|index)[-_ ])|((市场|商店|集市|商城|合集|汇总|导航|索引|大全|清单|目录)$)/,
       desc: /(收录|汇集|汇总|聚合|收集|整理|精选|导航|合集|大全|清单|目录|索引|awesome\s+list|curated|collection\s+of|a\s+list\s+of|list\s+of\s+plugins|index\s+of|directory\s+of|registry\s+of|marketplace|plugin\s+(store|market|registry|directory|index|catalog))/,
     },
-    // 门槛已经足够严（名字必须本身就是汇总），不再另设排除规则，
-    // 否则像「插件市场」这种名字里天然带"插件"的汇总站会被误伤。
+    // 门槛已经足够严（名字必须本身就是汇总），不再另设排除规则，否则「插件市场」这种名字里天然带「插件」的汇总站会被误伤。
     terms: [["market", 3], ["marketplace", 3], ["registry", 3], ["store", 2], ["awesome", 2], ["directory", 2], ["catalog", 2], ["collection", 1], ["hub", 1], ["市场", 3], ["商店", 3], ["集市", 3], ["商城", 3], ["索引", 2], ["合集", 3], ["汇总", 3], ["收录", 2], ["导航", 2]],
   },
   {
@@ -235,10 +215,8 @@ export const CATEGORY_RULES = [
     id: "pet",
     label: "桌宠娱乐",
     priority: 19,
-    // "鲸鱼娘/小鲸鱼/看板娘" 是 DSH 桌宠的通用说法（官方吉祥物是鲸鱼），
-    // 但权重给得克制：只有当它确实是"陪着你的角色"时才压得过别的扇区分数。
-    // 补充（2026-10）：这些词说的仍是"角色长相"，所以自述是皮肤/主题/壁纸的仓库
-    // 先被排除，只有同时自述了宠物/陪伴玩法（或作者自打 pet 标签）才救回。
+    // 「鲸鱼娘/小鲸鱼/看板娘」是 DSH 桌宠的通用说法，但权重给得克制：只有确实是「陪着你的角色」时才压得过别的扇区分数。
+// 这些词说的仍是角色长相，所以自述是皮肤/主题/壁纸的仓库先被排除，只有同时自述宠物/陪伴玩法（或作者自打 pet 标签）才救回。
     exclude: { name: PET_SKIN_SELF, desc: PET_SKIN_SELF },
     override: { name: PET_SELF, desc: PET_SELF, topics: PET_SELF },
     terms: [
@@ -251,12 +229,8 @@ export const CATEGORY_RULES = [
     id: "spec",
     label: "协议基座",
     priority: 20,
-    // 两件事合起来回答"这个生态的规则与地基由谁定"：
-    //   1) 协议/规范/标准：dsh-std、插件互操作元协议、社区共识、接口契约…
-    //   2) 基座/框架：侧边栏底座、皮肤框架、工作台基座…（别的插件往上长的那种）
-    // 坑一："标准/协议/公约"全是泛词（最大公约数、标准差、身高标准、HTTP 协议、RFC 文档阅读）；
-    // 坑二："framework/infrastructure" 也满大街（NocoBase、各种 AI 基础设施）。
-    // 所以 gate 要求【生态语境】或【基座自述】，strong 让"底座/基座/皮肤框架"这类自述直接胜出。
+    // gate 回答「这个生态的规则与地基由谁定」：① 协议/规范/标准（dsh-std、插件互操作元协议、接口契约…）② 基座/框架（侧边栏底座、皮肤框架、工作台基座…）。
+// 「标准/协议/公约」「framework/infrastructure」都是泛词（最大公约数、HTTP 协议、各种 AI 基础设施），所以 gate 要求【生态语境】或【基座自述】，strong 让「底座/基座/皮肤框架」直接胜出。
     gate: {
       name: /((^|[-_])(std|spec|specs|convention|conventions|covenant|charter)([-_]|$))|((插件|生态)(规范|标准|公约|契约|协议))|(meta[-_]protocol)|(基座|底座)/,
       // 两路取"或"：协议/规范自述，或"给插件生态当基座"的自述
@@ -274,11 +248,7 @@ export const CATEGORY_RULES = [
   },
 ];
 
-/**
- * 细枝分类：每个大扇区内部再分一层。
- * 只在"选中某个扇区"时用来铺满整个圆（大扇区当整圆、细枝当扇区），
- * 命中规则与主分类同一套（词边界 + 权重），所以是"配合精确命中"而不是另起一套。
- */
+/** 细枝分类：每个大扇区内部再分一层，只在选中某个扇区时用来铺满整个圆；命中规则与主分类同一套（词边界 + 权重）。 */
 export const SUBCATEGORY_RULES = {
   spec: [
     { id: "spec-interop", label: "互操作协议", terms: [["interop", 3], ["interoperability", 3], ["interoperable", 3], ["互操作", 3], ["元协议", 3], ["meta-protocol", 3], ["protocol", 2], ["协议", 2]] },
@@ -403,9 +373,8 @@ export const SUBCATEGORY_RULES = {
 
 /**
  * 生产参数：少于 minCount 的并入「其他」，最多保留 maxSectors 个扇区。
- * keepIds：语义上必须独立成扇区的分类，不因样本少被并掉 ——
- * 「公约协议」天然是小样本（一个生态里定规矩的仓库就那么几个），
- * 但它回答的是"这个生态的规则由谁定"，不该沉进「其他」。
+ * keepIds 是不因样本少被并掉的分类：「公约协议」天然是小样本（定规矩的仓库就那么几个），
+ * 但它回答的是「这个生态的规则由谁定」，不该沉进「其他」。
  */
 export const DEFAULT_OPTIONS = { minCount: 10, maxSectors: 20, keepIds: ["spec"] };
 
@@ -421,10 +390,7 @@ function lastSegment(name) {
   return parts.length ? parts[parts.length - 1] : "";
 }
 
-/**
- * 统一算分：名称 ×2、名称末段额外 +1（末段命中即 ×3）、描述 ×1、topic ×1.5。
- * topic 是作者自己标的，比描述里的客套话可信；名称末段是仓库自称的功能词。
- */
+/** 统一算分：名称 ×2、名称末段额外 +1（末段命中即 ×3）、描述 ×1、topic ×1.5 —— topic 是作者自己标的，比描述里的客套话可信。 */
 function scoreOf(counter, sig, weight) {
   const inName = counter(sig.name);
   const inLast = counter(sig.last);
@@ -475,10 +441,8 @@ function isExcluded(rule, sig) {
 }
 
 /**
- * 强命中判定：规则可声明 strong（name/desc/topics 三个正则）。
- * 命中即【直接胜出】，不再比分数 —— 只给语义无歧义的"自述"用，
- * 例如「侧边栏底座」「皮肤框架」：这类仓库的定位就是生态基座，
- * 不该因为正文里同时出现 sidebar/皮肤 等词就被分流去界面面板或皮肤美化。
+ * 强命中：规则可声明 strong（name/desc/topics 三个正则），命中即【直接胜出】、不再比分数。
+ * 只给语义无歧义的「自述」用（如「侧边栏底座」「皮肤框架」），否则会被正文里的 sidebar/皮肤 分流去界面面板或皮肤美化。
  */
 function strongHit(rule, sig) {
   const strong = rule.strong;
@@ -516,7 +480,7 @@ export function classifyNode(node) {
     }
     if (strongHit(rule, sig)) {
       best = { id: rule.id, label: rule.label, score, hits: hits.slice(0, 3), strong: true };
-      break; // 强命中：直接胜出
+      break;
     }
     if (!best || score > best.score) best = { id: rule.id, label: rule.label, score, hits: hits.slice(0, 4) };
   }
@@ -527,7 +491,6 @@ export function classifyNode(node) {
   }
   if (!best) return { id: OTHER.id, label: OTHER.label, score: 0, hits: [], sub: null, blocked };
 
-  // 细枝：在同一套词边界规则下，挑该扇区内部得分最高的细枝
   const subs = SUBCATEGORY_RULES[best.id];
   let sub = null;
   if (subs) {
@@ -554,19 +517,13 @@ export function classifyNode(node) {
   return { ...best, sub };
 }
 
-/**
- * 全量归类 + 长尾合并。
- * minCount: 少于这个数量的类别并入「其他」，避免出现一堆只有两三个仓库的扇区。
- * maxSectors: 扇区上限（超过则把最小的并入「其他」）。
- */
+/** 全量归类 + 长尾合并：少于 minCount 的类别并入「其他」，超过 maxSectors 时把最小的并入「其他」。 */
 export function applyCategories(nodes, options = {}) {
   const minCount = options.minCount ?? DEFAULT_OPTIONS.minCount;
   const maxSectors = options.maxSectors ?? DEFAULT_OPTIONS.maxSectors; // 20 个扇区：上限要够，否则新的小类会被并进「其他」
   const keepIds = new Set(options.keepIds ?? DEFAULT_OPTIONS.keepIds ?? []);
-  // 策展认定的生态基座（tools/ecosystem.json 的 bases）直接归入协议基座：
-  // 它们是"别人长在上面"的那批（侧边栏底座 / TUI 基座 / 互操作元协议…），
-  // 但正文未必写着"基座"二字（例如 TUI 基座的描述只说自己是官方首推插件），
-  // 靠人工策展 + README 证据认定，比硬编码某个仓库名可审计。
+  // 策展认定的生态基座（tools/ecosystem.json 的 bases）直接归入协议基座：它们是「别人长在上面」的那批
+// （侧边栏底座 / TUI 基座 / 互操作元协议…），正文未必写着「基座」二字，靠人工策展 + README 证据认定，比硬编码仓库名可审计。
   const baseIds = new Set(options.baseIds ?? []);
   const specRule = CATEGORY_RULES.find((r) => r.id === "spec");
   const raw = new Map();

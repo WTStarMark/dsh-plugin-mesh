@@ -1,10 +1,7 @@
 /**
- * 浏览器侧缓存：优先 IndexedDB，不可用时退化为内存 Map。
- *
- * 用途：
- *   - 缓存 data/mesh.json（几 MB 的索引），二次访问先秒开、再后台校验
- *   - 缓存头像 blob（避免每次刷新都重新下载几百张图）
- * IndexedDB 在 http 局域网地址下也可用（不像 Cache Storage 需要安全上下文）。
+ * 浏览器侧缓存：优先 IndexedDB，不可用则退化为内存 Map。
+ * 缓存 data/mesh.json 与头像 blob；IndexedDB 在 http 局域网地址下也可用
+ * （不像 Cache Storage 需要安全上下文）。
  */
 
 const DB_NAME = "dsh-plugin-mesh";
@@ -58,7 +55,7 @@ function withStore(db, mode, run) {
   });
 }
 
-/** 打开缓存；任何异常都退化为内存版，绝不让缓存问题影响页面 */
+/** 任何异常都退化为内存版：缓存问题不能影响页面 */
 export async function createStore(name = DB_NAME) {
   try {
     const db = await openDatabase(name);
@@ -82,7 +79,6 @@ export async function createStore(name = DB_NAME) {
         try {
           await withStore(db, "readwrite", (s) => s.delete(key));
         } catch {
-          /* 忽略 */
         }
       },
     };

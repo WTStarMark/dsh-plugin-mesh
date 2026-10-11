@@ -1,6 +1,6 @@
 /**
  * 面板层：左栏（总览 / 划分依据 / 捕获标签 / 筛选 / 功能扇区 / 高频标签）、
- * 右栏（仓库档案 / 命中标签 / 仓库主题 / 关联）、悬浮提示、连线开关。
+ * 右栏（仓库档案 / 命中标签 / 仓库主题 / 关联）、悬浮提示、连线图例。
  * 界面文案一律使用规范中文；专有名词（GitHub、DSH、仓库 id）保持原样。
  */
 import { colorOfTag, countReposByOwner, starPercentile, starThreshold, EDGE_STYLES, formatStars, formatDate, ownerSiblings, isConfirmedNoise, NOISE_OWNER_MIN_REPOS, NOISE_OWNER_MAX_STARS } from "./mesh-data.js";
@@ -35,12 +35,10 @@ function appendAll(node, children) {
   }
 }
 
-/** 分区：一条发丝线 + 中文小标题 */
 function sec(title, children) {
   return el("section", { class: "sec" }, [el("h3", { class: "sec-h", text: title }), ...[].concat(children)]);
 }
 
-/** 过滤项：标签在上、控件独占一行，侧栏再窄也不会溢出 */
 function field(label, control, value) {
   return el("div", { class: "field" }, [el("label", { text: label }), el("div", { class: "ctl" }, [control, value ?? null])]);
 }
@@ -101,13 +99,11 @@ export function renderRail(root, prepared, state, actions, view = {}) {
         const pct = Number(ev.target.value);
         ev.target.style?.setProperty?.("--fill", pct + "%");
         actions.setMinStarsPct(pct);
-        // 回写数值框：滑块拖到哪，数值框就显示对应星标（双向同步）
         if (starNum) starNum.value = String(starThreshold(pct, prepared.maxStars));
       },
     },
   });
   slider.style.setProperty("--fill", pct + "%");
-  // 星标下限也可以直接输入数值（滑块按分位，输入框按绝对值）
   const starNum = el("input", {
     type: "number",
     class: "num-in",
@@ -145,7 +141,6 @@ export function renderRail(root, prepared, state, actions, view = {}) {
     el("option", { value: "only", text: "仅看已归档", selected: state.archived === "only" }),
   ]);
 
-  // 单扇区放大时：扇区行改为列「细枝分类」
   const subRows = (view.arms ?? []).map((arm) =>
     el(
       "div",
@@ -242,7 +237,6 @@ export function renderRail(root, prepared, state, actions, view = {}) {
       tagRows,
       el("div", { class: "note", text: "仓库需同时具备所有已开启的标签才会高亮；关掉某个标签即可筛掉带它的仓库。" }),
     ]);
-  // 作者仓库数区间：一条双滑块（上下限都能拖，也能直接输入数值）
   const ownerCounts = countReposByOwner(prepared.nodes);
   // 轴上限固定 300：定位批量发布的作者，300 以上都归到轴顶（= 不限上限）
   const AXIS_MAX = 300;
@@ -273,7 +267,6 @@ export function renderRail(root, prepared, state, actions, view = {}) {
   const pctOf = (v) => (maxOwnerRepos > 0 ? Math.round((v / maxOwnerRepos) * 100) : 0);
   const ownerLoNum = el("input", { type: "number", class: "num-in", min: "0", max: String(maxOwnerRepos), step: "1" });
   const ownerHiNum = el("input", { type: "number", class: "num-in", min: "0", max: String(maxOwnerRepos), step: "1" });
-  // 轴与两个数值框实时双向同步：拖轴改数值框，改数值框改轴
   const syncAxis = () => {
     const a = Number(ownerLo.value);
     const b = Number(ownerHi.value);
@@ -347,8 +340,6 @@ export function renderRail(root, prepared, state, actions, view = {}) {
       ])
     : null;
 
-  // 左栏顺序（v0.4.3 用户指定）：总览 → 功能扇区 → 筛选 → 其余照常
-  // （其余 = 扇区划分依据 / 捕获标签 / 高频共享标签，保持它们原本的相对顺序）
   root.replaceChildren(...[focusBanner, centerBanner, overviewSec, sectorsSec, filterSec, basisSec, tagsSec, hubsSec].filter(Boolean));
 }
 
@@ -357,7 +348,6 @@ export function renderInspector(root, prepared, state, actions, view = {}) {
   const arm = view.armOf && node ? view.armOf.get(node.id) : null;
   const counts = view.linkCounts ?? {};
 
-  // 右栏固定的前两段（v0.4.3 用户指定）：1. 图例  2. 操作提示；其余小节照旧排在它们后面
   const legendSec = sec("图例", [
       el(
         "div",
@@ -411,8 +401,7 @@ export function renderInspector(root, prepared, state, actions, view = {}) {
     if (!byType.has(nb.type)) byType.set(nb.type, []);
     byType.get(nb.type).push(nb);
   }
-  // 同作者（v0.4.2）：以 owner 索引为准。数据层对大作者只存星形拓扑，
-  // 只看存边会让大部分兄弟"消失"（画布上也是同一个毛病）。
+  // 同作者以 owner 索引为准：数据层对大作者只存星形拓扑，只看存边会让大部分兄弟「消失」（画布上也是同一个毛病）。
   const ownerIds = ownerSiblings(prepared, node.id);
   if (ownerIds.length > 0) byType.set("owner", ownerIds.map((id) => ({ id, type: "owner", weight: 1, via: [] })));
   const relatedCount = [...byType.values()].reduce((sum, list) => sum + list.length, 0);
@@ -504,7 +493,6 @@ export function renderInspector(root, prepared, state, actions, view = {}) {
         list.length > 14 ? el("div", { class: "note", text: "以上按星标取前 14 个，共 " + list.length + " 个" }) : null,
       ]),
     ),
-    // 展示仓库档案时，图例与操作提示排在最后（未选中时才在最前）
     legendSec,
     hintsSec,
   );
@@ -538,13 +526,9 @@ export function renderTooltip(tooltipEl, node, pos, stageRect) {
   tooltipEl.style.top = Math.max(8, y) + "px";
 }
 
-/**
- * 连线图例（v0.4.1 取代原来的连线开关）：
- * 连线不再常驻，只有点选某个仓库时才画出它自己的两类关系，所以这里只做"说明 + 计数"。
- */
+/** 连线图例（取代原来的连线开关）：连线只在点选某个仓库时画出，所以这里只做「说明 + 计数」 */
 export function renderLinkLegend(root, prepared, state, actions, view = {}) {
   // 实时计数：跟随当前悬停的项目，没悬停就跟随选中项；都没有就是 0。
-  // 不再显示提示语 —— 计数本身就在说明：点选后会画出这些连线。
   const id = view.activeId ?? state.selectedId ?? null;
   const row = (color, dash, label, count) =>
     el("span", { class: "edge-chip on" }, [

@@ -1,13 +1,8 @@
-"""功能分类器：与前端 tools/categories.mjs **逐条对齐**的 Python 实现。
+"""功能分类器：与前端 tools/categories.mjs 逐条对齐的 Python 实现（改一边要改两边）。
 
-为什么不能用模型分类：500+ 个仓库让模型读一遍就是烧 token，而且每次结果不稳定。
-规则表 + 打分可审计、可复跑、可手改；verify_parity.py 会拿 JS 的产物做一致性校验。
-
-匹配规则（v0.4 起，与 JS 端一致）：
-  - 英文词按【词边界】匹配（允许 s/es 复数），不再裸子串匹配；
-    修掉的典型误命中：ui←build、cli←client、hub←github、store←restore、rag←storage、api←rapid。
-  - 中文词仍按子串匹配。
-  - 分类可声明 gate（准入门槛）/ exclude（排除）/ override（自述救回），处理歧义分类。
+不用模型分类：500+ 仓库每次跑模型烧 token 且结果不稳定；规则表 + 打分可审计、可复跑，
+verify_parity.py 拿 JS 产物做一致性校验。英文词按词边界匹配并可带 s/es（修掉 ui←build、
+cli←client、hub←github 等裸子串误命中），中文词按子串；分类可声明 gate/exclude/override。
 """
 
 from __future__ import annotations
@@ -26,7 +21,6 @@ NOT_PLUGIN_PATTERNS = [
 
 
 def non_plugin_reason(node: dict) -> str | None:
-    """命中即"不是 DSH 插件"，返回原因；没命中返回 None。"""
     text = " ".join([
         str(node.get("name") or ""),
         str(node.get("description") or ""),
@@ -72,11 +66,9 @@ SPEC_SELF_SRC = (
     r"conventions every plugin|(standard|specification|protocol)\s+for\s+(dsh|deepseek|plugins?)"
 )
 
-# 桌宠扇区的「自述」判据（与 tools/categories.mjs 的 PET_SKIN_SELF / PET_SELF 逐字对齐）：
-#   _PET_SKIN_SELF — 仓库自述是皮肤/主题/壁纸……说的是"长什么样"；
-#   _PET_SELF      — 仓库自述是宠物/陪伴/角色玩法……说的才是"陪着你的角色"。
-# 「鲸鱼娘/小鲸鱼」只说明角色长相，不等于陪伴玩法：一个自称"皮肤系列"的仓库
-# 不该被它拉进桌宠扇区（Small-tailqwq/dsh-deep-whale 的"鲸鱼娘系列皮肤"就是这样被抢走的）。
+# 桌宠扇区自述判据（与 tools/categories.mjs 的 PET_SKIN_SELF / PET_SELF 逐字对齐）：
+# 皮肤/主题/壁纸说的是"长什么样"，宠物/陪伴说的是"陪着你的角色"——只有后者能救回；
+# 自称"皮肤系列"的仓库不该被"鲸鱼娘/小鲸鱼"拉进桌宠扇区。
 _PET_SKIN_SELF = re.compile(r"皮肤|主题|壁纸|外观|美化|配色|skin|theme|wallpaper|appearance", re.I)
 _PET_SELF = re.compile(r"(\bpet\b|\bpets\b|桌宠|宠物|养成|pokemon|live2d|mascot|吉祥物|陪伴|看板娘|小鲸鱼)", re.I | re.ASCII)
 
@@ -178,10 +170,8 @@ CATEGORY_RULES = [
     {"id": "file", "label": "文件管理", "priority": 18, "terms": [
         ("folder", 3), ("drag", 2), ("drop", 1), ("file", 1), ("文件", 1), ("目录", 1),
         ("拖拽", 3), ("网盘", 3), ("附件", 1), ("备份", 2)]},
-    # "鲸鱼娘/小鲸鱼/看板娘" 是 DSH 桌宠的通用说法（官方吉祥物是鲸鱼）；
-    # 「娘」在这批语料里就是"角色/看板娘"的标记，不是"姑娘"那种泛用。
-    # 补充（2026-10）：这些词说的仍是"角色长相"，所以自述是皮肤/主题/壁纸的仓库
-    # 先被排除，只有同时自述了宠物/陪伴玩法（或作者自打 pet 标签）才救回。
+    # "鲸鱼娘/小鲸鱼/看板娘"是 DSH 桌宠的通用说法（官方吉祥物是鲸鱼），这里的「娘」指"角色"；
+    # 但这些词只说明长相：自述皮肤/主题的仓库先排除，只有自述宠物/陪伴玩法才由 override 救回。
     {"id": "pet", "label": "桌宠娱乐", "priority": 19,
      "exclude": {"name": _PET_SKIN_SELF, "desc": _PET_SKIN_SELF},
      "override": {"name": _PET_SELF, "desc": _PET_SELF, "topics": _PET_SELF},
@@ -189,11 +179,8 @@ CATEGORY_RULES = [
         ("pet", 3), ("pokemon", 3), ("live2d", 3), ("game", 2), ("桌宠", 3), ("宠物", 3),
         ("养成", 3), ("游戏", 2), ("虚拟形象", 3),
         ("小鲸鱼", 6), ("鲸鱼娘", 5), ("娘", 3), ("看板娘", 3), ("mascot", 3), ("吉祥物", 3), ("陪伴", 2)]},
-    # 两件事合起来回答"这个生态的规则与地基由谁定"：
-    #   1) 协议/规范/标准：dsh-std、插件互操作元协议、社区共识、接口契约…
-    #   2) 基座/框架：侧边栏底座、皮肤框架、工作台基座…（别的插件往上长的那种）
-    # 坑一："标准/协议/公约"全是泛词；坑二："framework/infrastructure" 也满大街。
-    # 所以 gate 要求【生态语境】或【基座自述】，strong 让"底座/基座/皮肤框架"这类自述直接胜出。
+    # 回答"生态规则与地基由谁定"：协议/规范/标准 + 基座/框架。标准、协议、framework 都是泛词，
+    # 所以 gate 要求生态语境或基座自述，strong 让"底座/基座/皮肤框架"这类自述直接胜出。
     {"id": "spec", "label": "协议基座", "priority": 20,
      "gate": {
          "name": re.compile(r"((^|[-_])(std|spec|specs|convention|conventions|covenant|charter)([-_]|$))|((插件|生态)(规范|标准|公约|契约|协议))|(meta[-_]protocol)|(基座|底座)"),
@@ -403,10 +390,7 @@ def _is_excluded(rule: dict, sig: dict) -> bool:
 
 def _strong_hit(rule: dict, sig: dict) -> bool:
     """强命中：规则声明 strong（name/desc/topics 三个正则）时，命中即直接胜出，不再比分数。
-
-    只给语义无歧义的"自述"用，例如「侧边栏底座」「皮肤框架」——
-    这类仓库的定位就是生态基座，不该因为正文里同时出现 sidebar/皮肤 等词被分流。
-    """
+    只给语义无歧义的"自述"用（如「侧边栏底座」「皮肤框架」），否则会被正文里的 sidebar/皮肤 分流。"""
     strong = rule.get("strong")
     if not strong:
         return False
@@ -436,7 +420,7 @@ def classify_node(node: dict) -> dict:
             continue
         if _strong_hit(rule, sig):
             best = {"id": rule["id"], "label": rule["label"], "score": score, "hits": hits[:3], "strong": True}
-            break  # 强命中：直接胜出
+            break
         if best is None or score > best["score"]:
             best = {"id": rule["id"], "label": rule["label"], "score": score, "hits": hits[:4]}
     # 最低置信分：只有一个很弱的描述命中时不硬塞进扇区，留给「其他」
@@ -468,8 +452,7 @@ def classify_node(node: dict) -> dict:
     return {**best, "sub": sub}
 
 
-# 语义上必须独立成扇区的分类：样本少也不并进「其他」
-# （「公约协议」天然是小样本，但它回答的是"这个生态的规则由谁定"）
+# 语义上必须独立成扇区的分类：样本少也不并进「其他」（「公约协议」回答"生态规则由谁定"）。
 KEEP_ALWAYS = ("spec",)
 
 
@@ -481,10 +464,7 @@ def apply_categories(
     base_ids=(),
 ) -> dict:
     """全量归类 + 长尾合并，语义与 JS 的 applyCategories 一致。
-
-    base_ids：策展认定的生态基座（tools/ecosystem.json 的 bases）直接归入协议基座 ——
-    它们是"别人长在上面"的那批，但正文未必写着"基座"二字。
-    """
+    base_ids：策展认定的生态基座直接归入协议基座 —— 它们"别人长在上面"，但正文未必写"基座"。"""
     curated = set(base_ids or ())
     spec_label = LABELS.get("spec", "协议基座")
     raw = {

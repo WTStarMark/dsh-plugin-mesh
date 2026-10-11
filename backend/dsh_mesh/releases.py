@@ -1,12 +1,7 @@
 """版本（releases）采集：按仓库单独取，1 个仓库 = 1 次 core 配额请求。
-
-盘上原本没有任何版本数据（搜索接口不返回 releases），而 issue #1 要"列出版本及对应信息"。
-
-配额现实（本机实测）：主配额按【认证身份】算一个桶，同一账号的多个令牌共享 —— 堆令牌不扩容，
-所以只有两条路：**限量**（每轮预算）与**排优先级**（先抓最可能发版的仓库）。
-
-存法：`data/cache/releases.json`，每个仓库只留最近 keep 个版本的四个字段
-（tag / 名称 / 发布时间 / 是否预发布）。原始响应 60~95KB/仓库，精简后约 560B。
+搜索接口不返回 releases。配额按【认证身份】算一个桶（同账号多令牌共享，堆令牌不扩容），
+所以只能**限量** + **排优先级**。存 data/cache/releases.json，每个仓库只留最近 keep 个版本的
+四个字段（tag / 名称 / 发布时间 / 是否预发布）；原始响应 60~95KB/仓库，精简后约 560B。
 """
 
 from __future__ import annotations
@@ -20,16 +15,12 @@ from pathlib import Path
 from .build import utcnow
 from .config import DAY_TZ_OFFSET_HOURS
 
-# 每个仓库留几个版本。周更新热榜按"窗口内发布的版本数"排，高频项目一周发几十个版本
-# （实测榜首有连着几十个的），留 20 会把它们截在 20 —— 所以上限放到 200。
-# 代价是拉取体积：per_page=100（GitHub 单页上限）时，单个"发版很多"的仓库一页就有几百 KB
-# （release 说明很长），要 200 个版本得翻两页；绝大多数仓库第一页就抓完了，仍是一次请求。
-# 嫌带宽大就调小 --releases-budget，别调小这个上限（否则周榜计数又会被截）。
+# 每个仓库留几个版本：周榜按"窗口内发布的版本数"排，高频项目一周几十个版本，留 20 会把它们截断，
+# 所以放到 200；代价是抓取体积（per_page=100 时单页可达几百 KB）。嫌带宽大就调 --releases-budget。
 RELEASES_KEEP = 200
 RELEASES_PAGE = 100  # GitHub 的 per_page 上限：要 200 个版本必须翻页
-# 刷新策略（2026-10-09 修）：旧口径只有"REFRESH_DAYS 之内不重抓"，于是抓过一次的仓库
-# 会被硬压 3 天 —— 一天发好几个版本的高频项目（周更新热榜的主力）因此长期少算，
-# 线上实例：xling001/dsh-reading-companion 10-08 发了 4 个版本，榜单却停在 10-07。
+# 刷新策略：只按"几天内不重抓"会把一天发多版的高频项目硬压 3 天，周榜长期少算，
+# 所以活跃发版仓库（近 7 天有版本）另用 ACTIVE_REFRESH_HOURS 放宽。
 REFRESH_DAYS = 3.0  # 冷仓库（近 RECENT_RELEASE_DAYS 天没有版本）：抓过这么久才重抓
 ACTIVE_REFRESH_HOURS = 6.0  # 活跃发版仓库（缓存里近 7 天有版本）：至多放这么久
 RECENT_RELEASE_DAYS = 7.0  # "还在发版"的判定窗口，与周榜窗口同量级
@@ -70,12 +61,7 @@ def save_releases(payload: dict, path: Path) -> int:
 
 def local_day(iso: str | None) -> str:
     """published_at（UTC）→ 当地日历日，与星标环 / 更新日志 / 榜单横轴同一条日界线。
-
-    坑：直接取 published_at[:10] 拿到的是 **UTC 日**，而榜单横轴是北京时间日 ——
-    北京时间 00:00~08:00（= UTC 前一天 16:00~24:00）发的版本会被记到前一天。
-    线上实例：hol-guard v3.38.0 发布于 UTC 10-09 20:20 = 北京 10-10 04:20，
-    榜单却把它算进 10-09，当天(10-10)计数是 0。
-    """
+    直接取 [:10] 是 UTC 日，北京时间 00:00~08:00 发的版本会被记到前一天（曾因此让当天计数为 0）。"""
     try:
         ts = calendar.timegm(time.strptime(str(iso)[:19], "%Y-%m-%dT%H:%M:%S"))
     except (ValueError, TypeError):
@@ -85,10 +71,7 @@ def local_day(iso: str | None) -> str:
 
 def slim_releases(payload, keep: int = RELEASES_KEEP) -> list[dict]:
     """把 GitHub 的 releases 响应裁成"版本列表"要用的最小字段。
-
-    draft 直接丢掉：草稿只有仓库有权者能看到，公开抓取本来也拿不到。
-    日期按 local_day() 转成当地日历日（不是 UTC 日），否则周榜的逐日柱会错位一天。
-    """
+    draft 直接丢掉（公开抓取本来就看不到）；日期走 local_day() 转当地日，否则周榜逐日柱错位一天。"""
     out = []
     for item in payload or []:
         if not isinstance(item, dict) or item.get("draft"):
@@ -156,15 +139,9 @@ def pick_candidates(
     discovery_share: float = DISCOVERY_SHARE,
 ) -> list[str]:
     """挑这一轮该抓哪些仓库（按优先级排序，最多 limit 个）。
-
-    优先级（同一档内先按"缓存里近 7 天的版本数"降序 —— 周榜就是照它排的，
-    再按最近一次推送的新鲜度、星标降序）：
-      4) 上次抓取之后仓库又推过，且缓存里近 7 天有版本 —— 板上竞品，且已知有新动静
-      3) 上次抓取之后又推过 —— 很可能刚发了新版
-      2) 近 7 天发过版、缓存已超过 active_hours —— 高频发版仓库不能压满 refresh_days
-      1) 冷仓库（近 7 天没有版本）且缓存超过 refresh_days
-      0) 从没抓过 —— 单独留 discovery_share 的预算，否则永远排在有缓存的仓库后面
-    归档仓库直接跳过（不会发新版）。
+    档位：4) 抓取后又推过且近 7 天有版本；3) 抓取后又推过；2) 近 7 天发过版且缓存超 active_hours；
+    1) 冷仓库且缓存超 refresh_days；0) 从没抓过（单独留 discovery_share，否则永远排在缓存后面）。
+    同档内按近 7 天版本数 → 推送新鲜度 → 星标排序；归档仓库跳过。
     """
     now_ts = now_ts if now_ts is not None else time.time()
     repos = payload.get("repos") or {}

@@ -1,12 +1,8 @@
 #!/usr/bin/env node
 /**
- * dsh-tokens —— 从本机安装的 DSH 里解析真实设计令牌（--dsw-*）。
- *
- * 为什么要这么做：需求是"跟 DSH 一样的风格"。凭感觉调色一定会走样，
- * 所以这里直接读 DSH 主题包（body 是亮色别名、body[data-ds-dark-theme] 是暗色覆盖、
- * --dsw-static-* 是原始色值），顺着 var() 引用解析成具体值，落成 data/dsh-tokens.json。
+ * dsh-tokens —— 从本机安装的 DSH 里解析真实设计令牌（--dsw-*），落成 data/dsh-tokens.json。
+ * 需求是「跟 DSH 一样的风格」，凭感觉调色一定走样，所以直接读 DSH 主题包并顺着 var() 引用求值。
  * DSH 升级后重跑本脚本即可同步；tests/dsh-theme.test.mjs 会用本机现值校验快照是否漂移。
- *
  * 用法：node tools/dsh-tokens.mjs [--print]
  */
 import fs from "node:fs";
@@ -16,7 +12,6 @@ import { fileURLToPath } from "node:url";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const DSH_ROOT = process.env.DSH_ROOT ?? "/opt/dsh-web";
 
-/** 把一段声明块拆成自定义属性表 */
 function declarations(text) {
   const out = {};
   for (const part of text.split(";")) {
@@ -28,7 +23,6 @@ function declarations(text) {
   return out;
 }
 
-/** 找出所有声明了 --dsw-* 的一级块 */
 function blocks(css) {
   const out = [];
   for (let i = 0; i < css.length; i++) {
@@ -48,7 +42,6 @@ function blocks(css) {
   return out;
 }
 
-/** 定位已安装的 DSH 主题包与其样式文本 */
 export function findThemeCss(root = DSH_ROOT) {
   const store = path.join(root, "node_modules", ".pnpm");
   if (!fs.existsSync(store)) return null;
@@ -64,14 +57,13 @@ export function findThemeCss(root = DSH_ROOT) {
   return null;
 }
 
-/** 解析出亮/暗两套已求值的令牌表 */
 export function readDshTokens(root = DSH_ROOT) {
   const found = findThemeCss(root);
   if (found === null) return null;
-  const statics = {};   // --dsw-static-*：原始色值
-  const roots = {};     // :root：基准层（圆角、字族、字号等）
-  const light = {};     // body：亮色别名
-  const dark = {};      // body[data-ds-dark-theme]：暗色覆盖
+  const statics = {};   // 层叠来源：--dsw-* 原始/别名；:root 基准层（圆角、字族、字号）；body 亮色别名；body[data-ds-dark-theme] 暗色覆盖
+  const roots = {};
+  const light = {};
+  const dark = {};
   for (const block of blocks(found.css)) {
     const declared = declarations(block.body);
     const sel = block.selector;
@@ -90,7 +82,6 @@ export function readDshTokens(root = DSH_ROOT) {
     return resolve(statics[m[1]] ?? "", depth + 1);
   };
   const all = (map) => Object.fromEntries(Object.entries(map).map(([k, v]) => [k, resolve(v)]));
-  // 层叠：:root 打底，body 覆盖，暗色主题再覆盖
   const lightAll = all({ ...roots, ...light });
   const darkAll = all({ ...roots, ...light, ...dark });
   return { pkg: found.pkg, light: lightAll, dark: darkAll, statics };

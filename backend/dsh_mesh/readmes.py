@@ -1,19 +1,8 @@
 """README 文本索引：支撑「搜索仓库 README 内容」。
-
-前端搜索原本只能查 id / 描述 / topics（这些在 mesh.json 里）。README 正文太大，
-不可能塞进前端契约，所以分两步：
-
-  1. 采集器每轮抓一小批 README（预算可控、可断点续跑），截断后落盘 data/cache/readmes.json
-  2. 站点 API（tools/api.mjs）读同一个文件做子串检索，浏览器只拿命中 id 去高亮
-
-体积控制（实测：19k 仓库的 README 原文约 76MB，直接存太久）——三层压缩：
-  1. 只留【检索摘要】：去掉徽章/图片/链接 URL/HTML 标签/markdown 记号，压掉多余空白。
-     实测每篇从 ~3.9KB 降到 ~1.6KB，而且匹配质量更好（不会因为 URL、徽章里的随机串误命中）。
-  2. 截断到 MAX_CHARS（默认 2000）：README 的关键信息（简介、安装、用法）都在前半段。
-  3. 落盘用 gzip：磁盘上再省约 3.5 倍 → 19k 仓库约 10MB。
-  仍然嫌大的话：--readme-min-stars 1 可以跳过 0 星长尾；--readme-budget 0 则完全不采。
-  - 抓不到的仓库记成【空串】：表示"已抓过、没有 README"，否则每轮都会重复试探同一批 404。
-  - 两段队列：先补"从没抓过"的（按星标降序，重要的先有），再刷"过期的"（按抓取时间升序）。
+README 正文太大，塞不进前端契约：采集器每轮按预算抓一小批（可断点续跑），截断后落盘
+data/cache/readmes.json.gz，站点 API（tools/api.mjs）读同一文件做子串检索，浏览器只拿命中 id 去高亮。
+体积三层压缩：只留检索摘要（去徽章/URL/HTML/markdown 记号，实测 ~3.9KB→~1.6KB 且匹配更准）、
+截断到 MAX_CHARS（关键信息在前半段）、gzip 落盘（19k 仓库约 10MB）。抓不到的记空串，避免每轮重试 404。
 """
 
 from __future__ import annotations
@@ -139,10 +128,7 @@ class ReadmeIndex:
 
     def count_in(self, ids) -> int:
         """这些 id 里有多少个已经有 README。
-
-        状态面板要的是"可索引的仓库里索引了多少"，而不是缓存总量 —— 缓存会留早期抓过、
-        现在已经不达标的仓库，于是出现 14513 / 14490 这种"分子大于分母"的怪值。
-        """
+        面板分子只算可索引池；缓存总量含早期抓过、现已不达标的仓库，直接用会出 14513/14490 这种怪值。"""
         return sum(1 for rid in ids if str(rid) in self.docs)
 
     def stats(self) -> dict:
@@ -159,9 +145,8 @@ def fetch_batch(client, index: ReadmeIndex, repos: list[dict], budget: int, log=
         return {"requested": 0, "fetched": 0, "empty": 0, "indexed": index.stats()["count"]}
     fetched = 0
     empty = 0
-    # 注意：这里**不**吞异常 —— 单个仓库失败就让整批抛给 collect.py 的护栏
-    # （README 索引是加分项，护栏会记一行"本轮失败"并继续跑完这一轮）。
-    # 既有测试 test_readme_fetch_failure_does_not_break_collector 钉住了这个契约。
+    # 这里**不**吞异常：单个失败让整批抛给 collect.py 的护栏（记一行"本轮失败"后继续跑），
+    # 测试 test_readme_fetch_failure_does_not_break_collector 钉住了这个契约。
     for i, repo in enumerate(todo, 1):
         text = client.readme(str(repo["id"]))
         if text:

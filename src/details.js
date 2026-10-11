@@ -1,10 +1,7 @@
 /**
- * 详情分片加载器：右栏要看的字段不跟首屏一起下，而是按需拉取。
- *
- * 策略：
- *   1. 点开某个仓库时，只拉它所在的那一片（默认 8 片，单片几百 KB 以内）
- *   2. 空闲时后台把剩下的分片预取完，之后搜索描述、看详情都是瞬时的
- *   3. 拉不到就当没有详情，界面照常（详情不是必需资源）
+ * 详情分片加载器：右栏要看的字段不跟首屏一起下，点开时只拉所在的那一片
+ * （默认 8 片、单片几百 KB 以内），空闲时预取其余分片。
+ * 拉不到就当没有详情，界面照常——详情不是必需资源。
  */
 
 const cache = new Map();
@@ -36,19 +33,17 @@ export function createDetailStore(meta = {}) {
 
   return {
     chunks,
-    /** 某个 id 的详情；未加载返回 null（调用方自己决定要不要 await） */
+    /** 未加载返回 null，调用方自行决定是否 await */
     get(id, index) {
       const bucket = cache.get(((index % chunks) + chunks) % chunks);
       return bucket ? (bucket[id] ?? null) : null;
     },
-    /** 按需加载：拿到详情后调用 onReady 重绘 */
     async ensure(id, index, onReady) {
       const bucket = await loadChunk(((index % chunks) + chunks) % chunks);
       const detail = bucket[id] ?? null;
       if (detail && onReady && cache.size >= 1) onReady(detail);
       return detail;
     },
-    /** 空闲时把全部分片预取完（搜索描述、随意点选都不再等）；每拉到一片就回调一次 */
     prefetch(onChunk) {
       let i = 0;
       const step = () => {

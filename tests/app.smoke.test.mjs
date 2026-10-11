@@ -103,7 +103,7 @@ class FakeNode {
   filter(pred) { return this.all.filter(pred); }
 }
 
-const ids = ["rail", "inspector", "snapshot", "loading", "tooltip", "hint", "telemetry", "lamp", "edge-types", "search", "search-clear", "theme", "palette", "toggle-rail", "toggle-dossier", "stage", "graph", "status", "status-panel", "trophy", "ranking", "ranking-tabs", "ranking-body", "ranking-foot", "ranking-close"];
+const ids = ["rail", "inspector", "snapshot", "loading", "tooltip", "hint", "telemetry", "lamp", "edge-types", "search", "search-clear", "palette", "toggle-rail", "toggle-dossier", "stage", "graph", "trophy", "ranking", "ranking-tabs", "ranking-body", "ranking-foot", "ranking-close"];
 const registry = new Map(ids.map((id) => [id, new FakeNode(id === "graph" ? "canvas" : "div", id)]));
 // 榜单弹窗：真实的 tab / 遮罩是 HTML 里的子节点，桩里手动补上（否则点不到、渲染不出）
 const rankingTabs = [
@@ -112,9 +112,6 @@ const rankingTabs = [
 ];
 registry.get("ranking-tabs").append(...rankingTabs);
 registry.get("ranking").append(Object.assign(new FakeNode("div"), { dataset: { close: "1" } }));
-// 状态圆环：真实 HTML 里环是 SVG <circle>，桩里给它一个可断言的子节点
-const ringFill = new FakeNode("circle");
-registry.get("status").querySelector = (sel) => (sel === ".ring-fill" ? ringFill : null);
 
 // 桩必须尊重真实 HTML 的 hidden 属性与 class，否则测的就不是真页面
 const indexHtml = await readFile(resolve(ROOT, "index.html"), "utf8");
@@ -221,35 +218,6 @@ globalThis.fetch = async (url) => {
             note: "增量 = 两个时间点的星标之差（真实观测，非估算）。",
             items: starRows,
           },
-        },
-      }),
-    };
-  }
-  if (target.includes("/api/status")) {
-    const iso = (offsetMs) => new Date(Date.now() + offsetMs).toISOString();
-    return {
-      ok: true,
-      status: 200,
-      headers: { get: () => null },
-      json: async () => ({
-        serverTime: iso(0),
-        data: { nodes: mesh.nodes.length, generatedAt: mesh.meta?.generatedAt ?? null },
-        readme: { indexed: 40, diskKB: 90 },
-        status: {
-          state: "crawling",
-          phase: "segments",
-          roundStartedAt: iso(-600000),
-          roundSeconds: 3600,
-          nextRunAt: iso(1800000), // 还剩一半 → 环应停在半格
-          segments: { total: 313, done: 282, pending: 0 },
-          indexed: mesh.nodes.length,
-          fetched: 339,
-          added: 7,
-          requests: 750,
-          budget: 600,
-          quotaRemaining: 4213,
-          readme: { indexed: 1200, target: 9826, thisRound: 150 },
-          lastRound: { startedAt: iso(-3600000), finishedAt: iso(-3400000), seconds: 200.4, state: "ok" },
         },
       }),
     };
@@ -479,13 +447,20 @@ test("配色切换：点一下真的换掉整套 CSS 变量，再点回得来", 
   assert.equal(root.style["--bg-base"], freshBg, "应完全还原清爽的变量");
 });
 
-test("明暗切换：mode 与 dataset 同步", () => {
-  const btn = registry.get("theme");
-  const before = document.documentElement.dataset.theme;
+test("回归：前台已无明暗开关，切配色时 dataset.theme 恒为浅色", () => {
+  // 用户不该再看到明暗选项：index.html 里不允许存在 id="theme" 的按钮
+  assert.ok(!indexHtml.includes('id="theme"'), 'index.html 不该再有 id="theme" 的明暗开关');
+  const root = document.documentElement;
+  assert.equal(root.dataset.theme, "light", "明暗必须固定为浅色");
+  // 配色切换保留：清爽 ↔ 粉黛，且不该顺带改动明暗
+  const btn = registry.get("palette");
+  assert.ok(btn.listeners.click, "配色按钮应仍挂上监听");
   btn.fire("click");
-  assert.notEqual(document.documentElement.dataset.theme, before);
+  assert.equal(root.dataset.palette, "rouge", "应切到粉黛");
+  assert.equal(root.dataset.theme, "light", "切配色不该改变明暗");
   btn.fire("click");
-  assert.equal(document.documentElement.dataset.theme, before);
+  assert.equal(root.dataset.palette, "fresh", "应切回清爽");
+  assert.equal(root.dataset.theme, "light", "明暗必须始终为浅色");
 });
 
 test("头像：球够大时会请求头像，加载完成后真的画到球上", () => {
@@ -952,41 +927,19 @@ test("v0.4.6 搜索：命中超过 100 个只做高亮、不画放射线（避�
   pump(10);
 });
 
-test("v0.4.7 状态圆环：倒计时环 + 点开浮窗看采集进度，Esc / 点画布关闭", async () => {
-  const chip = registry.get("status");
-  const panel = registry.get("status-panel");
-  assert.equal(panel.hidden, true, "默认不该显示浮窗");
-  assert.ok(chip.className.includes("status-chip"), "圆环应挂在顶栏状态按钮上：" + chip.className);
-  assert.match(chip.title ?? "", /采集状态/, "圆环应带状态提示，实际：" + chip.title);
+test("v0.5.2 采集状态已迁出公开页：顶栏不留圆环，也不再有 /api/status 请求", async () => {
+  const html = await readFile(resolve(ROOT, "index.html"), "utf8");
+  assert.ok(!html.includes("status-chip"), "公开页不该再有状态圆环");
+  assert.ok(!html.includes("status-panel"), "公开页不该再有状态浮窗");
+  assert.ok(!html.includes('id="status"'), "公开页不该再有 status 容器");
+  const app = await readFile(resolve(ROOT, "src/app.js"), "utf8");
+  assert.ok(!app.includes("/api/status"), "公开页脚本不该再拉采集状态接口");
+  assert.ok(!app.includes("createStatusWidget"), "公开页脚本不该再装配状态组件");
 
-  // 环：等一次 /api/status 回来（剩一半 → dashoffset 应约为半格）
-  await new Promise((r) => setTimeout(r, 30));
-  const LEN = 2 * Math.PI * 15.5;
-  const offset = Number(ringFill.style?.strokeDashoffset);
-  assert.ok(Number.isFinite(offset), "环应被写入 dashoffset，实际：" + ringFill.style?.strokeDashoffset);
-  assert.ok(Math.abs(offset - LEN / 2) < 4, "剩一半时间时环应停在半格，实际 offset " + offset.toFixed(1) + "（整圈 " + LEN.toFixed(1) + "）");
-  assert.ok(chip.classList.contains("crawling"), "采集中时圆环应带爬取态（转起来）");
-
-  chip.fire("click");
-  assert.equal(panel.hidden, false, "点击状态后浮窗应打开");
-  assert.equal(chip.attrs["aria-expanded"], "true", "浮窗打开时应同步 aria-expanded");
-  const text = [panel, ...panel.all].map((n) => n.textContent ?? "").join(" ");
-  assert.match(text, /采集状态/, "浮窗应有标题，实际：" + text);
-  assert.match(text, /采集中/, "浮窗应显示后端状态，实际：" + text);
-  assert.match(text, /已抓 282 \/ 313/, "浮窗应显示分段进度，实际：" + text);
-  assert.match(text, /1200 \/ 9826/, "浮窗应显示 README 索引进度，实际：" + text);
-  assert.match(text, /750 \/ 预算 600/, "浮窗应显示请求与预算，实际：" + text);
-
-  // Esc 关闭（app.js 把状态浮窗排在放大退回之前）
-  for (const fn of windowListeners.keydown ?? []) fn({ key: "Escape", target: {} });
-  assert.equal(panel.hidden, true, "Esc 应关闭浮窗");
-
-  // 点画布空白处关闭
-  chip.fire("click");
-  assert.equal(panel.hidden, false, "再点应重新打开");
-  registry.get("stage").fire("pointerdown", {});
-  assert.equal(panel.hidden, true, "点画布应关闭浮窗");
-  assert.equal(chip.attrs["aria-expanded"], "false");
+  // 组件本体搬到后台继续用（公开页删掉的是入口，不是能力）
+  const adminStatus = await readFile(resolve(ROOT, "admin/status.js"), "utf8").catch(() => null);
+  assert.ok(adminStatus, "admin/status.js 应存在：采集状态组件迁到管理后台");
+  assert.match(adminStatus, /api\/status|状态/, "后台状态组件应仍然读状态接口");
 });
 
 test("v0.4.2 搜索：从圆心放射出指向命中仓库的直线，清空后消失", () => {

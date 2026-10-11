@@ -1,24 +1,9 @@
 /**
  * 二进制契约 mesh-core.bin（v0.4.8）：把预计算的绘图契约从 12MB JSON 压到几百 KB。
- *
- * 为什么能压这么多：JSON 里每个节点要重复 25 个键名、重复的标签/分类/理由文本
- * （实测 reason 只有 9 种取值、subcategory 80 种、category 21 种），
- * 而 id 里的 owner 前缀也和 owner 字段重复。二进制契约改成：
- *
- *   1. 【字典化】语言 / 分类 / 细枝 / 判定 / 理由 / 标签组合 / 命中词 各存一份表，节点里只放索引；
- *   2. 【数值化】坐标定点 Int16、半径 Uint8、推送时间压成"天数"Uint16；
- *   3. 【推导】name、owner 从 id 拆出来，categoryLabel 从字典取，avatar 只存数字 id；
- *   4. 【字符串池】id 连成一个池子（长度前缀），交给 Brotli 去压重复片段。
- *
- * 文件结构：
- *   [0..7]  "MESHCORE"           魔数
- *   [8..9]  version              Uint16
- *   [10..13] headerLength        Uint32
- *   [14..]  header JSON（UTF-8） 元信息 + 字典 + 各段的偏移/长度/标定
- *   [...]   各段二进制（Int16/Uint8/Uint32 小端）
- *
- * 编码器给 Node 工具用（tools/precompute-layout.mjs），解码器给浏览器用，
- * 两边共用本文件的格式定义，避免格式漂移。
+ * 手法：字典化（语言/分类/理由/标签各存一份表，节点只放索引）、数值化（定点坐标、天数）、
+ * 从 id 推导 name/owner、字符串池交给 Brotli 压重复；文件 = 魔数 + version + headerLength
+ * + header JSON（元信息与字典）+ 各段小端二进制。
+ * 编码器（tools/precompute-layout.mjs）与浏览器解码器共用本文件的格式定义，避免格式漂移。
  */
 
 export const CORE_BIN_MAGIC = "MESHCORE";
@@ -26,10 +11,7 @@ export const CORE_BIN_VERSION = 1;
 /** 头像尺寸：与 backend/dsh_mesh/build.py 的 AVATAR_SIZE 保持一致 */
 export const AVATAR_SIZE = 64;
 
-/**
- * 契约里认得的节点字段。编码时若出现清单外的字段，直接抛错 ——
- * 悄悄丢字段比构建失败更可怕（图上看不出来，但筛选/详情会莫名失效）。
- */
+/** 契约认得的节点字段；清单外的字段抛错——悄悄丢字段比构建失败更可怕（图上看不出，筛选/详情却会莫名失效） */
 const KNOWN_NODE_FIELDS = new Set([
   "id", "name", "owner", "ownerType", "avatar", "stars", "forks", "pushedAt", "language",
   "archived", "fork", "matchedTags", "primaryTag", "relevance", "noise", "review", "verdict",
@@ -44,8 +26,6 @@ const DAY_MS = 86400000;
 const EMPTY_LIST = Object.freeze([]);
 const enc = new TextEncoder();
 const dec = new TextDecoder();
-
-/* ---------------- 小工具 ---------------- */
 
 function makeDict(values) {
   const list = [...new Set(values)].sort();
@@ -165,11 +145,8 @@ export function encodeCore(core, options = {}) {
     flags: new Uint8Array(n),
   };
 
-  // 未知字段的处理策略（v0.5.0 改）：
-  //   默认 —— 跳过该字段 + 收集名字 + 最后告警一次，绝不中断编码。
-  //   原因：抛错会让预计算在【写完 mesh-core.json、还没写 mesh-core.bin】时崩掉，
-  //   二进制契约从此不再刷新，而采集器又把退出码 1 当成"产物已更新"——契约被静默冻结。
-  //   strict: true（CI / 单测用）仍然直接抛错，保证字段不会在无人察觉的情况下丢掉。
+  // 未知字段默认「跳过 + 收集名字 + 最后告警」而非抛错：编码中途抛错会冻结二进制契约，
+// 而采集器把退出码 1 当成「产物已更新」；strict: true（CI / 单测）仍直接抛错。
   const dropped = new Set();
   for (let i = 0; i < n; i++) {
     const node = nodes[i];
@@ -291,9 +268,8 @@ export function encodeCore(core, options = {}) {
     sections: [],
   };
 
-  // header 里要写各段偏移，而偏移本身会改变 header 的长度 —— 迭代到"长度自洽"为止，
-  // 最后按定长补空格（JSON.parse 允许尾部空白）。否则段偏移会整体错位，解出来是乱码。
-  // 每段起始按 4 字节对齐：TypedArray 视图（Uint32Array 等）要求对齐，否则构造就抛错
+  // header 长度会改变段偏移，迭代到长度自洽；再按定长补空格（JSON.parse 允许尾部空白），否则解出来是乱码。
+// 每段起始按 4 字节对齐：TypedArray 视图要求对齐，否则构造就抛错。
   const fillSections = (headerLen) => {
     let at = 14 + headerLen;
     header.sections = sections.map((s) => {
@@ -314,15 +290,15 @@ export function encodeCore(core, options = {}) {
     if (jsonBytes <= headerLen) break;
     headerLen = jsonBytes;
   }
-  fillSections(headerLen); // 偏移按最终长度重算
+  fillSections(headerLen);
   json = JSON.stringify(header);
   jsonBytes = enc.encode(json).length;
   if (jsonBytes > headerLen) throw new Error("header 长度无法收敛：" + jsonBytes + " > " + headerLen);
 
-  const headerBytes = new Uint8Array(headerLen).fill(0x20); // 空格填充
+  const headerBytes = new Uint8Array(headerLen).fill(0x20);
   headerBytes.set(enc.encode(json), 0);
 
-  const total = Math.ceil(fillSections(headerLen) / 4) * 4; // 末段也补齐
+  const total = Math.ceil(fillSections(headerLen) / 4) * 4;
   const out = new Uint8Array(total);
   const view = new DataView(out.buffer);
   out.set(enc.encode(CORE_BIN_MAGIC), 0);
@@ -392,8 +368,7 @@ export function decodeCore(buffer, options = {}) {
   const exEntries = Object.entries(d.avatarExceptions ?? {}).map(([url, id]) => [Number(id), url]);
   const exById = new Map(exEntries);
 
-  // 字典先解析好：matchedTags/categoryHits 全图只有几十/上千种组合，
-  // 逐节点 JSON.parse 是三万多次调用（实测占了解码时间的大头）。这些数组只读，可安全共享。
+  // 字典先解析好：matchedTags/categoryHits 全图只有几十/上千种组合，逐节点 JSON.parse（三万多次）占解码时间的大头；这些数组只读，可安全共享。
   const tagSets = d.tagSets.map((s) => JSON.parse(s || "[]"));
   const hitSets = d.hits.map((s) => JSON.parse(s || "[]"));
   // 推送时间按"天"记忆化：节点上万但不同日期只有几百个，逐节点 toISOString() 很贵
@@ -471,8 +446,7 @@ export function decodeCore(buffer, options = {}) {
   };
 
   if (!options.yielding) return finish();
-  // 分块模式：每块之间让出主线程（默认交还一帧），把"解 1.7 万个节点"摊到多帧里，
-  // 总时长几乎不变，但界面全程可交互 —— 这是"切换整份数据不再卡几秒"的关键。
+  // 分块模式每块之间让出主线程（默认交还一帧）：总时长几乎不变，但解 1.7 万个节点期间界面全程可交互。
   const step = Math.max(200, options.chunk ?? 800);
   const yieldFn = options.yieldFn ?? (() => new Promise((resolve) => setTimeout(resolve, 0)));
   return (async () => {
@@ -494,10 +468,7 @@ export function decodeCoreAsync(buffer, options = {}) {
 
 /* ---------------- 首屏分片 ---------------- */
 
-/**
- * 取"主干"分片：按星标取前 limit 个节点，重建 arms/edges/索引，并标记 meta.partial。
- * 先画主干、后台再换整份 —— 首屏只下几十 KB。
- */
+/** 取「主干」分片：按星标取前 limit 个节点并重建 arms/edges/索引、标记 meta.partial；先画主干、后台再换整份，首屏只下几十 KB。 */
 export function subsetCore(core, limit) {
   const nodes = core?.nodes ?? [];
   if (nodes.length <= limit) return core;

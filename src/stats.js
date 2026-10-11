@@ -1,8 +1,6 @@
 /**
  * 访问数与同时在线：向同端口的 /api/stats 与 /api/ping 打招呼。
- *
- * 设计原则：统计拿不到绝不能影响站点 —— 所有失败都静默吞掉，
- * 界面上的统计栏自动隐藏（例如换成纯静态服务器时）。
+ * 拿不到统计绝不影响站点——失败静默吞掉、统计栏自动隐藏（纯静态部署时）。
  */
 
 const CLIENT_KEY = "mesh-client-id";
@@ -41,10 +39,7 @@ export function formatCount(value) {
   return number.toLocaleString("zh-CN");
 }
 
-/**
- * 开始上报。onUpdate 收到 { visits, visitors, online }。
- * 返回 { stop }。
- */
+/** onUpdate 收 { visits, visitors, online }；返回 { stop } */
 export function startStats({ onUpdate, intervalMs = 20000, onUnavailable } = {}) {
   let timer = null;
   let stopped = false;

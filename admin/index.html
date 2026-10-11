@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="zh-CN" data-palette="fresh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow" />
+<title>管理后台 — 插件生态图</title>
+<link rel="stylesheet" href="admin.css" />
+</head>
+<body>
+
+<!-- 登录层：未登录时只显示这一层；口令正确后才进主界面 -->
+<div class="login" id="login">
+  <div class="login-card" id="login-card">
+    <div class="login-brand">
+      <span class="sigil" aria-hidden="true">◈</span>
+      <div class="brand-text">
+        <b>插件生态图</b>
+        <small>管理后台</small>
+      </div>
+    </div>
+    <label class="login-label" for="login-password">管理口令</label>
+    <input class="input login-input" id="login-password" type="password" autocomplete="current-password" placeholder="请输入管理口令" spellcheck="false" />
+    <button class="btn primary login-submit" id="login-submit" type="button">登录</button>
+    <div class="login-msg" id="login-msg" role="alert"></div>
+  </div>
+</div>
+
+<!-- 主界面：顶栏（站点名 / 标签 / 状态圆环 / 退出）+ 六个面板 -->
+<div class="app" id="app" hidden>
+  <header class="topbar">
+    <div class="brand">
+      <span class="sigil" aria-hidden="true">◈</span>
+      <div class="brand-text">
+        <b>插件生态图</b>
+        <small>管理后台</small>
+      </div>
+    </div>
+
+    <nav class="tabs" id="tabs" role="tablist" aria-label="管理分区">
+      <button class="tab on" type="button" role="tab" data-tab="status" aria-selected="true">状态</button>
+      <button class="tab" type="button" role="tab" data-tab="data" aria-selected="false">数据</button>
+      <button class="tab" type="button" role="tab" data-tab="workflow" aria-selected="false">工作流</button>
+      <button class="tab" type="button" role="tab" data-tab="lists" aria-selected="false">名单</button>
+      <button class="tab" type="button" role="tab" data-tab="resonance" aria-selected="false">共鸣</button>
+      <button class="tab" type="button" role="tab" data-tab="audit" aria-selected="false">审计</button>
+    </nav>
+
+    <div class="top-right">
+      <div class="status-wrap">
+        <button class="status-chip" id="status-chip" type="button" aria-haspopup="true" aria-expanded="false" title="采集状态：圆环是下一次扫描的倒计时">
+          <svg class="status-ring" viewBox="0 0 36 36" width="22" height="22" aria-hidden="true">
+            <circle class="ring-track" cx="18" cy="18" r="15.5"></circle>
+            <circle class="ring-fill" cx="18" cy="18" r="15.5"></circle>
+          </svg>
+          <span id="status-chip-text">状态</span>
+        </button>
+        <div class="status-panel" id="status-panel" hidden role="dialog" aria-label="采集状态"></div>
+      </div>
+      <span class="ro"><i>会话到期</i><b id="session-expires">—</b></span>
+      <button class="btn key" id="palette" type="button" title="切换配色：清爽 / 粉黛">清爽</button>
+      <button class="btn" id="logout" type="button">退出</button>
+    </div>
+  </header>
+
+  <main class="views" id="views">
+    <section class="view" id="view-status" data-view="status" role="tabpanel" aria-label="状态"></section>
+    <section class="view" id="view-data" data-view="data" role="tabpanel" aria-label="数据" hidden></section>
+    <section class="view" id="view-workflow" data-view="workflow" role="tabpanel" aria-label="工作流" hidden></section>
+    <section class="view" id="view-lists" data-view="lists" role="tabpanel" aria-label="名单" hidden></section>
+    <section class="view" id="view-resonance" data-view="resonance" role="tabpanel" aria-label="共鸣" hidden></section>
+    <section class="view" id="view-audit" data-view="audit" role="tabpanel" aria-label="审计" hidden></section>
+  </main>
+</div>
+
+<div class="toast" id="toast" hidden role="status" aria-live="polite"></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

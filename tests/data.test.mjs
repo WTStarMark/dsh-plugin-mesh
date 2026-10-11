@@ -146,8 +146,9 @@ test("回归：Tencent 组曾因度数裁剪被静默丢线", () => {
 test("数据必须自带来源与覆盖范围说明", (t) => {
   // meta.queries 是取样器写的；CI 夹具由采集器 --from-raw 离线重算，没有这个字段
   if (skipUnless(t, hasRealDataset || mesh.meta.kind !== "sample-seed", "当前是 CI 夹具：采集器离线重算的数据集不带取样查询来源")) return;
-  // 数据来源可能是离线取样（sample-seed）或每小时采集（hourly-crawl）
-  assert.ok(["sample-seed", "hourly-crawl"].includes(mesh.meta.kind), "未知的数据类型：" + mesh.meta.kind);
+  // 数据来源可能是离线取样（sample-seed）、每小时采集（hourly-crawl），
+  // 或管理后台「应用变更」触发的离线重建（store-rebuild：不联网，用本机累积索引重算）
+  assert.ok(["sample-seed", "hourly-crawl", "store-rebuild"].includes(mesh.meta.kind), "未知的数据类型：" + mesh.meta.kind);
   assert.ok(mesh.meta.note && mesh.meta.note.length > 0, "必须写明数据覆盖范围（meta.note）");
   assert.ok(mesh.meta.generatedAt, "必须记录生成时间");
   if (mesh.meta.kind === "sample-seed") {

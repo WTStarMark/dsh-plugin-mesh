@@ -1,15 +1,8 @@
 #!/usr/bin/env python3
-"""DSH 插件生态索引采集器 —— 纯脚本，全程不涉及任何模型调用。
+"""DSH 插件生态索引采集器 —— 纯脚本，全程不调用模型。
 
-用法：
-    python3 backend/collect.py --once                  # 跑一次（真实抓取）
-    python3 backend/collect.py --from-raw --dry-run    # 用本地原始记录离线复算，不写盘
-    python3 backend/collect.py --watch --interval 3600 # 常驻，每小时一份快照
-
-产出：
-    data/mesh.json                 前端契约（星标头部，默认 2000 个节点）
-    data/snapshots/<时间戳>.json    历史快照（保留最近 48 份）
-    data/last-crawl.json           本次采集的溯源信息（请求数、配额、差异）
+用法：--once 跑一次；--watch/--loop 常驻；--from-store 改规则后离线重建（不联网）。
+产出：data/mesh.json（前端契约）、data/snapshots/*.json（留 48 份）、data/last-crawl.json（溯源）。
 """
 
 from __future__ import annotations
@@ -22,6 +15,7 @@ import sys
 import time
 from pathlib import Path
 
+from dsh_mesh import admin_config
 from dsh_mesh import snapshot as snap
 from dsh_mesh.build import build_mesh, limit_for_frontend, normalize_repo, utcnow
 from dsh_mesh.config import (
@@ -42,7 +36,6 @@ from dsh_mesh.config import (
     STAR_HISTORY,
     UPDATE_LOG,
     README_CACHE,
-    WHITELIST_TAGS,
 )
 from dsh_mesh.readmes import ReadmeIndex, fetch_batch as fetch_readmes
 from dsh_mesh import releases as rel
@@ -65,13 +58,12 @@ def tag_totals_from(state: dict) -> dict[str, int]:
 
 
 def _write_status(**fields) -> None:
-    """写采集进度状态。包一层是为了让测试能 mock collect.STATUS_FILE 做路径隔离 ——
-    直接调 dsh_mesh.status.write_status 的话，路径写死在模块里，测试跑一轮就会污染真实的 data/cache。"""
+    """写采集进度状态；包一层让测试能 mock collect.STATUS_FILE 做路径隔离（直接调会污染真实 data/cache）。"""
     write_status(STATUS_FILE, **fields)
 
 
 def _report_progress(store, fetched: int, added: int, client, args, **extra) -> None:
-    """把当前进度写进 data/status.json（前端顶栏的"状态"圆环/浮窗读它）。dry-run 不写。"""
+    """进度写入 data/status.json（前端"状态"圆环读它）；dry-run 不写。"""
     if getattr(args, "dry_run", False):
         return
     try:
@@ -97,7 +89,7 @@ def fetch_live(args, log, blacklist=None):
     token = load_token()
     client = GitHubClient(token=token)
     store = SegmentStore(SEGMENT_STATE, REPO_CACHE, blacklist=set(blacklist or ()))
-    # 已判定的噪声作者：从累积索引里清掉，并让后续 merge 直接跳过（不再占配额）
+    # 噪声作者从累积索引剔除，后续 merge 直接跳过（不再占配额）
     purged = store.drop_owners(set(blacklist or ()))
     if purged:
         log("噪声黑名单：从累积索引剔除 " + str(purged) + " 个仓库（作者 " + str(len(blacklist)) + " 个）")
@@ -105,7 +97,7 @@ def fetch_live(args, log, blacklist=None):
     seeded = store.ensure_seeded(args.tags)
     if seeded:
         log("分段队列初始化：新增 " + str(seeded) + " 个待抓分段")
-    store.requeue_truncated(log=log)  # 之前被截断的段，按更细粒度补扫
+    store.requeue_truncated(log=log)
     before = store.coverage()
     log("累积索引 " + str(before["repos"]) + " 个仓库 | 分段 " + str(before["segments"]))
 
@@ -137,8 +129,7 @@ def fetch_live(args, log, blacklist=None):
         + str(added_this_round) + "）| 分段：待抓 " + str(after["segments"]["pending"])
         + " / 已抓 " + str(after["segments"]["done"]) + " / 已细分 " + str(after["segments"]["split"])
     )
-    # README 索引：抓完仓库后按预算补一批（供"搜索 README 内容"用，见 dsh_mesh/readmes.py）。
-    # 放在爬取之后：热度高的仓库优先，且不挤占分段扫描的请求预算。
+    # README 索引放在爬取之后：热度高的仓库优先，也不挤占分段扫描的请求预算（见 dsh_mesh/readmes.py）。
     readme_stats = None
     if getattr(args, "readme_budget", 0) > 0 and not getattr(args, "from_store", False):
         try:
@@ -156,8 +147,7 @@ def fetch_live(args, log, blacklist=None):
                 _write_status(
                     phase="readme",
                     readme={
-                        # 面板要的是"可索引的仓库里索引了多少"（≤ target）；
-                        # 缓存总量含早期抓过、现已不达标的条目，直接当分子会出现 14513 / 14490 这种怪值
+                        # 分子只算可索引池内的（≤ target）；缓存总量含已不达标的旧条目，直接用会出 14513/14490 这种怪值
                         "indexed": in_pool,
                         "cached": readme_stats.get("indexed"),
                         "target": len(pool),
@@ -210,11 +200,7 @@ def seconds_until_next(now: float, interval: int) -> float:
 
 
 def _core_looks_fresh(started: float, expected_nodes: int | None = None) -> bool:
-    """mesh-core.json 是否在这次尝试之后被完整重写过。
-
-    只看 mtime 不够：子进程可能在写文件写到一半时崩，留下半截 JSON。
-    所以还要能解析、节点数对得上、layout 标记正确，才认这次预计算成功。
-    """
+    """mesh-core.json 是否在本轮之后被完整重写；只看 mtime 会漏掉写一半就崩的半截 JSON，还要能解析、节点数对得上。"""
     from dsh_mesh.config import MESH_JSON
 
     path = MESH_JSON.parent / "mesh-core.json"
@@ -233,11 +219,7 @@ def _core_looks_fresh(started: float, expected_nodes: int | None = None) -> bool
 
 
 def _bin_looks_fresh(started: float, data_dir: Path | None = None) -> bool:
-    """二进制契约（mesh-core.bin / head.bin）是否也随本轮刷新了。
-
-    只看 mtime：内容正确性由编解码器的单测与往返比对保证（Python 侧不重复实现一遍格式解析）。
-    data_dir 可显式传入（测试用），默认取配置里的数据目录。
-    """
+    """二进制契约（mesh-core.bin / head.bin）是否也随本轮刷新：只看 mtime，内容正确性由编解码器单测保证。"""
     from dsh_mesh.config import MESH_JSON
 
     base = Path(data_dir) if data_dir is not None else MESH_JSON.parent
@@ -253,10 +235,7 @@ def _bin_looks_fresh(started: float, data_dir: Path | None = None) -> bool:
 
 def run_precompute(log, expected_nodes: int | None = None) -> None:
     """调 Node 工具预计算布局并给载荷瘦身（mesh-core.json + 详情分片）。
-
-    失败不影响数据本身：前端拿不到 core 会自动回退到本地计算布局。
-    expected_nodes：本轮 mesh.json 的节点数，用来校验产物是否完整（防半截文件）。
-    """
+    失败不影响数据（前端会回退本地计算）；expected_nodes 校验产物完整，防半截文件。"""
     from dsh_mesh.config import ROOT
 
     node = shutil.which("node")
@@ -272,7 +251,6 @@ def run_precompute(log, expected_nodes: int | None = None) -> None:
         return
 
     def attempt() -> tuple[bool, str]:
-        """跑一次预计算。成功 / 产物已更新都算成功。"""
         started = time.time()
         try:
             result = subprocess.run(
@@ -281,8 +259,7 @@ def run_precompute(log, expected_nodes: int | None = None) -> None:
                 capture_output=True,
                 text=True,
                 timeout=900,
-                # pm2 托管下 node 偶发 libuv 断言（uv__io_poll: errno == EEXIST）；
-                # 独立会话 + 空 stdin 能避开父进程进程组/信号带来的干扰
+                # pm2 托管下 node 偶发 libuv 断言（uv__io_poll: errno == EEXIST）：独立会话 + 空 stdin 可避开
                 stdin=subprocess.DEVNULL,
                 start_new_session=True,
             )
@@ -291,10 +268,8 @@ def run_precompute(log, expected_nodes: int | None = None) -> None:
         if result.returncode == 0:
             lines = [line for line in result.stdout.strip().splitlines() if line.strip()]
             return True, (lines[-1].strip() if lines else "")
-        # 非零退出：core 可能已经写好了，但【二进制契约常常就停在崩溃点之前】——
-        # 事故复盘：mesh-core.json 一直更新，mesh-core.bin 被冻结了 40 小时，
-        # 而这里把退出码 1 记成"退出阶段崩溃不影响结果"，于是没人发现。
-        # 所以非零退出必须同时确认二进制契约也刷新了，才认成功。
+        # 非零退出时 core 可能已写好，但二进制契约常停在崩溃点之前（曾出现 .bin 被冻结 40 小时没人发现），
+        # 所以必须同时确认它刷新了才认成功。
         if _core_looks_fresh(started, expected_nodes) and _bin_looks_fresh(started):
             return True, "产物已更新（子进程退出码 " + str(result.returncode) + "，二进制契约已同步刷新）"
         return False, (result.stderr.strip()[:160] or ("退出码 " + str(result.returncode))) + " / 二进制契约未刷新（mesh-core.bin 比本轮旧）"
@@ -314,10 +289,7 @@ def run_precompute(log, expected_nodes: int | None = None) -> None:
 
 def load_from_store(args, log):
     """离线重建：直接用累积索引（data/cache/repos.json）构图，不联网、不消耗配额。
-
-    改了分类 / 噪声 / 相关性规则后，用它立刻把前端契约按新规则重算一遍，
-    不必等下一轮采集。跑的仍然是同一套 build_mesh + 预计算，只是数据源换成已抓到的记录。
-    """
+    改完分类/噪声/相关性规则后立刻重算前端契约，不必等下一轮采集（仍走同一套 build_mesh + 预计算）。"""
     store = SegmentStore(SEGMENT_STATE, REPO_CACHE)
     raws = list(store.repos.values())
     log("离线重建：读入累积索引 " + str(len(raws)) + " 条记录（零网络请求）")
@@ -325,11 +297,8 @@ def load_from_store(args, log):
 
 
 def fetch_releases_safe(args, mesh: dict, log) -> dict:
-    """跑版本抓取，但**永不抛异常**。
-
-    版本缓存是"周更新热榜"的判定依据，却是加分项：它失败不该让本轮的前端数据不落盘。
-    线上踩过：一次 RemoteDisconnected 在写 mesh 之前把整轮打断，站点白等一小时。
-    """
+    """跑版本抓取，但永不抛异常：版本缓存只是"周更新热榜"的加分项，失败不该让前端数据不落盘
+    （曾有一次 RemoteDisconnected 在写 mesh 前打断整轮，站点白等一小时）。"""
     try:
         return fetch_releases(args, mesh, log)
     except Exception as exc:  # noqa: BLE001 - 这里就是要吞掉它，见上
@@ -338,11 +307,8 @@ def fetch_releases_safe(args, mesh: dict, log) -> dict:
 
 
 def fetch_release_pages(client, repo_id: str, keep: int = rel.RELEASES_KEEP) -> list[dict] | None:
-    """取一个仓库的 releases，最多 keep 个（GitHub 单页上限 100，所以可能要翻页）。
-
-    只有"第一页就抓满 100"的高频仓库才会发第二次请求，普通仓库仍是一次请求。
-    返回 None 表示这次没拿到（网络/限流），交给上层跳过。
-    """
+    """取一个仓库的 releases，最多 keep 个（单页上限 100，可能要翻页，通常只有高频仓库发第二次请求）。
+    返回 None 表示这次没拿到（网络/限流），交给上层跳过。"""
     out: list[dict] = []
     page = 1
     while len(out) < keep and page <= 5:
@@ -358,14 +324,9 @@ def fetch_release_pages(client, repo_id: str, keep: int = rel.RELEASES_KEEP) -> 
 
 
 def fetch_releases(args, mesh: dict, log) -> dict:
-    """按预算抓 releases（走 core 配额），并写回 data/cache/releases.json。
-
-    为什么单独一轮一步：搜索接口不返回 releases，只能一个仓库一次请求；
-    配额实测是"按认证身份一个桶"（同账号多令牌共享），所以这里只能限量 + 排优先级：
-    先抓"抓过之后又推过 / 近 7 天发过版 / 过期 / 从没抓过"的仓库（见 releases.pick_candidates）。
-
-    离线模式（--from-raw / --from-store）与 dry-run 一律跳过 —— 测试因此完全不碰网络。
-    """
+    """按预算抓 releases（走 core 配额）并写回 data/cache/releases.json。
+    搜索接口不返回 releases，只能一仓库一请求且配额按认证身份共享，故限量 + 按优先级挑
+    （见 releases.pick_candidates）；离线模式与 dry-run 跳过，测试因此完全不碰网络。"""
     budget = int(getattr(args, "releases_budget", 0) or 0)
     if budget <= 0 or args.dry_run or args.from_raw or getattr(args, "from_store", False):
         return {"enabled": False, "budget": budget}
@@ -376,7 +337,7 @@ def fetch_releases(args, mesh: dict, log) -> dict:
         return {"enabled": True, "budget": budget, "picked": 0, "fetched": 0, "failed": 0, **rel.stats(payload)}
     client = GitHubClient(token=load_token(), sleep=time.sleep)
     fetched = failed = 0
-    streak = 0  # 连续失败计数
+    streak = 0
     for repo_id in picked:
         if client.stats.core_remaining is not None and client.stats.core_remaining < rel.CORE_FLOOR:
             log("版本：core 配额只剩 " + str(client.stats.core_remaining) + "，本轮提前收手（下一轮接着抓）")
@@ -388,7 +349,7 @@ def fetch_releases(args, mesh: dict, log) -> dict:
             streak += 1
             log("版本：" + repo_id + " 抓取失败（跳过）：" + str(err)[:80])
             if streak >= 5:
-                # 网络真断了的话，别把剩下几百个仓库挨个重试（每个还要退避 3 次，能耗掉一小时）
+                # 网络真断了别把剩下几百个仓库挨个重试（每个还要退避 3 次，能耗掉一小时）
                 log("版本：连续 " + str(streak) + " 个仓库抓取失败，判断为网络/配额异常，本轮提前收手")
                 break
             continue
@@ -420,9 +381,11 @@ def run_once(args, log) -> dict:
     started = time.time()
     log(f"=== 采集开始 {utcnow()} ===")
     if not args.dry_run:
-        # 每轮开头就把本轮的请求计数与预算写进去：批次为空（所有分段都还新鲜）时
-        # 分段循环一次都不跑，浮窗会一直挂着上一轮的 "147 / 预算 600"（线上就这么看过）。
-        # quotaRemaining=None 是删除该键：本轮还没发过请求，留着旧值等于报假数。
+        # 开头就写本轮计数：批次为空时分段循环一次不跑，浮窗会一直挂着上一轮的 "147 / 预算 600"。
+        # quotaRemaining=None 是删键：本轮还没发过请求，留旧值等于报假数。
+        # --from-store 一个 GitHub 请求都不发，budget 写 0 会被误读成"配额是 0"，故这类轮次删 budget 键；
+        # --from-raw 是 CI 的离线复算，预算仍按调用方给的值写（保持测试口径）。
+        offline_round = bool(getattr(args, "from_store", False))
         _write_status(
             state="crawling",
             phase="segments",
@@ -433,10 +396,10 @@ def run_once(args, log) -> dict:
             fetched=0,
             added=0,
             requests=0,
-            budget=getattr(args, "budget", 0),
+            budget=None if offline_round else getattr(args, "budget", 0),
             quotaRemaining=None,
         )
-    # 噪声作者黑名单：长期生效。命中者既不进累积索引、也不进前端契约。
+    # 噪声作者黑名单长期生效：命中者不进累积索引、也不进前端契约。
     blacklist = snap.load_blacklist(NOISE_BLACKLIST)
     if blacklist:
         log("噪声黑名单：" + str(len(blacklist)) + " 个作者（" + "、".join(sorted(blacklist)[:5]) + ("…" if len(blacklist) > 5 else "") + "）")
@@ -454,6 +417,12 @@ def run_once(args, log) -> dict:
     new_noise = {owner: info for owner, info in noise_now.items() if owner not in blacklist}
     if env.get("readme"):
         mesh["meta"]["readmeIndexed"] = env["readme"].get("indexed")
+    else:
+        # 离线重建不抓 README，但索引还在磁盘上：如实记进 meta，免得后台只显示「—」；读不动就算了。
+        try:
+            mesh["meta"]["readmeIndexed"] = ReadmeIndex(README_CACHE).stats()["count"]
+        except Exception:
+            pass
     if args.from_raw:
         mesh["meta"]["kind"], mesh["meta"]["builtFrom"] = "sample-seed", "data/sample-raw.json（离线复算）"
     elif getattr(args, "from_store", False):
@@ -470,7 +439,7 @@ def run_once(args, log) -> dict:
         "tags": args.tags,
         "rawRecords": len(raws),
         "indexedNodes": total_indexed,
-        "frontendNodes": None,  # 裁剪后回填
+        "frontendNodes": None,
         "frontendEdges": None,
         "tagTotals": tag_totals,
         "stats": stats.as_dict() if stats is not None else None,
@@ -496,13 +465,22 @@ def run_once(args, log) -> dict:
         summary["dryRun"] = True
         return summary
 
-    # 黑名单落盘：下一轮抓取会直接跳过这些作者（人工删条目即可解除）
-    if new_noise or (noise_now and not NOISE_BLACKLIST.exists()):
-        snap.write_blacklist(noise_now, NOISE_BLACKLIST)
-        log("噪声黑名单已写入 data/noise-blacklist.json（共 " + str(len(noise_now)) + " 个作者）")
+    # 落盘前重读磁盘再取并集：后台可能在采集期间往 noise-blacklist.json 加条目，
+    # 只写本轮结果会把人工条目抹掉（冲突时以磁盘为准）。
+    previous_noise = snap.load_blacklist(NOISE_BLACKLIST)
+    merged_noise = {**noise_now, **previous_noise}
+    new_count = sum(1 for owner in merged_noise if owner not in previous_noise)
+    kept_count = len(merged_noise) - new_count
+    summary["noiseBlacklistSize"] = len(merged_noise)
+    if merged_noise and merged_noise != previous_noise:
+        snap.write_blacklist(merged_noise, NOISE_BLACKLIST)
+        log(
+            "噪声黑名单已写入 data/noise-blacklist.json（新增拉黑 " + str(new_count)
+            + " 个 / 保留既有（含人工）" + str(kept_count) + " 个，共 " + str(len(merged_noise)) + " 个作者）"
+        )
 
-    # 缩水保护：分段扫描预热期累积索引必然很小，绝不能拿它覆盖已有的完整索引。
-    # 但被黑名单剔除的仓库不算"缩水"——它们本来就不该再展示，否则第一次拉黑会被这道保护挡住。
+    # 缩水保护：预热期累积索引很小，不能拿它覆盖已有完整索引；被黑名单剔除的不算缩水，
+    # 否则第一次拉黑会被这道保护挡住。
     explained = total_indexed + int(mesh["meta"].get("noiseNodesRemoved") or 0) + int(env.get("noisePurged") or 0)
     previous = previous_index_size()
     if previous and explained < previous * args.min_ratio:
@@ -517,9 +495,7 @@ def run_once(args, log) -> dict:
         snap.write_last_crawl(summary, LAST_CRAWL)
         return summary
 
-    # 先按【完整索引】写快照，再裁剪给前端。
-    # 顺序反了的话，快照只会记录前端展示的头部，diff 会把"掉出头部"误报成"消失"。
-    # 索引与上一份完全一致时跳过写盘：不重复生成快照。
+    # 先按完整索引写快照再裁剪前端（顺序反了 diff 会把"掉出头部"误报成"消失"）；索引没变则跳过写盘。
     if not args.dry_run:
         _write_status(state="building", phase="write")
     path, diff = snap.write_snapshot(mesh, SNAPSHOT_DIR, KEEP_SNAPSHOTS)
@@ -527,16 +503,15 @@ def run_once(args, log) -> dict:
     summary["snapshotSkipped"] = path is None
     summary["diff"] = diff
 
-    # 星标历史环：按天记一个点（快照只留 KEEP_SNAPSHOTS 份，攒不出"周"窗口）。
-    # 前端「周 star 热榜」= 最近这个点与"约 7 天前"那个点的星标之差，真实观测值，不是估算。
+    # 星标历史环按天记一点（快照只留 48 份，攒不出"周"窗口）；「周 star 热榜」= 与约 7 天前
+    # 那个点的星标差，真实观测值。
     history = snap.update_star_history(mesh, STAR_HISTORY)
     summary["starHistory"] = {
         "points": len(history["points"]),
         "latest": history["points"][-1]["at"] if history["points"] else None,
     }
 
-    # 逐日星标台账：星标环一天只留一个点（同天覆盖），攒不出逐日形状 —— 这里每轮把
-    # "本轮观测到的星标变化"记进当天桶，star 榜的逐日趋势柱用它。
+    # 逐日台账：星标环同天只留一点，攒不出逐日形状 —— 每轮把观测到的星标变化记进当天桶。
     # 四条硬规矩见 snapshot.update_star_daily：首轮只落基线 / 断档转 spans / 缺席保留基线 / 首见不计数。
     star_daily = snap.update_star_daily(mesh, STAR_DAILY)
     last = star_daily["lastRound"]
@@ -558,8 +533,7 @@ def run_once(args, log) -> dict:
         + (" · 缺席保留基线 " + str(last["carried"]) + " 个" if last["carried"] else "")
     )
 
-    # 更新日志：每轮采样"pushedAt 比上次前进了吗"，按天累计次数。
-    # 前端「周更新热榜」按它排序 —— GitHub 只给最后一次推送时间，"一周更新几次"只能这样观测。
+    # 每轮采样 pushedAt 是否前进、按天累计；GitHub 只给最后一次推送时间，周更新次数只能这样观测。
     update_log = snap.update_update_log(mesh, UPDATE_LOG)
     summary["updateLog"] = {"days": len(update_log["days"]), "counted": update_log["lastRound"]["counted"]}
 
@@ -634,10 +608,13 @@ def main(argv=None) -> int:
     parser.add_argument("--no-slice", action="store_true", help="（已废弃）分段模式一律按星标切片")
     parser.add_argument("--frontend-limit", type=int, default=FRONTEND_LIMIT, help="前端快照保留多少个节点（0 = 不限）")
     parser.add_argument("--min-ratio", type=float, default=0.8, help="低于现有索引的这个比例时拒绝覆盖前端数据")
-    parser.add_argument("--tags", nargs="*", default=WHITELIST_TAGS, help="要抓取的标签")
+    parser.add_argument("--tags", nargs="*", default=None, help="要抓取的标签（默认读 data/admin/config.json，缺失/为空时回退内置白名单）")
     parser.add_argument("--quiet", action="store_true", help="少打印")
     args = parser.parse_args(argv)
     log = (lambda *a, **k: None) if args.quiet else (lambda *a, **k: print(*a, **k, flush=True))
+
+    # 抓取标签以 data/admin/config.json 为准（缺失/损坏/为空回退白名单），显式 --tags 优先；各入口共用这份解析。
+    args.tags = args.tags or admin_config.whitelist_tags()
 
     if not args.watch:
         run_once(args, log)

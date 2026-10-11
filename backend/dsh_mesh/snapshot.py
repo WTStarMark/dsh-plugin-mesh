@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -15,10 +16,7 @@ from .build import utcnow
 
 def day_of(at: str, offset_hours: int = DAY_TZ_OFFSET_HOURS) -> str:
     """把 UTC 时间戳换算成"哪一天" —— 按 offset_hours 时区的 00:00 切天。
-
-    默认 UTC+8：北京时间 00:00 换日（原来按 UTC 切，等于北京时间早上 08:00 才换日，
-    前半夜的数据会被算到前一天）。
-    """
+    默认 UTC+8：按 UTC 切等于北京时间早上 08:00 才换日，前半夜的数据会被算到前一天。"""
     text = str(at)
     try:
         stamp = datetime.strptime(text[:19], "%Y-%m-%dT%H:%M:%S")
@@ -28,10 +26,36 @@ def day_of(at: str, offset_hours: int = DAY_TZ_OFFSET_HOURS) -> str:
 
 
 def _write_json(path: Path, payload) -> int:
+    """原子写 JSON：先写同目录临时文件，再 os.replace 顶替原文件。
+    write_text 中途被杀/磁盘满会留半截 JSON，前端正好读到就当整份损坏；临时名 "<原名>.<pid>.tmp"
+    不是 *.json，不会被当成正式快照，带 pid 避免两个采集进程互踩；失败删临时文件并抛异常。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-    path.write_text(text, encoding="utf-8")
+    _replace_text(path, text)
     return len(text)
+
+
+def _replace_text(path: Path, text: str) -> None:
+    """同目录临时文件 + os.replace 的原子落盘；权限与原文一致（新文件按 umask）。"""
+    try:
+        mode = path.stat().st_mode & 0o777  # 原文件存在时沿用它的权限位
+    except OSError:
+        mode = None
+    tmp = path.with_name(path.name + "." + str(os.getpid()) + ".tmp")
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode if mode is not None else 0o666)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        if mode is not None:
+            os.chmod(tmp, mode)  # umask 会截掉旧文件里的权限位，这里对齐原文
+        os.replace(tmp, path)
+    except BaseException:
+        # 失败不能留下临时垃圾，更不能碰原文件
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
 
 
 def write_mesh(mesh: dict, path: Path) -> int:
@@ -106,15 +130,9 @@ def load_star_history(path: Path) -> dict:
 
 def update_star_history(mesh: dict, path: Path, keep: int = STAR_HISTORY_KEEP, now: str | None = None) -> dict:
     """把本轮星标记成"每天一个点"的历史环（前端「周 star 热榜」的唯一真源）。
-
-    为什么单独存：历史快照只保留 KEEP_SNAPSHOTS 份（约两小时），攒不出"周"窗口；
-    而周增量只需要一个"7 天前的星标基线"，所以按天存、只留最近 keep 个点最省。
-
-    - 同一天重复跑：覆盖当天的点（一天只留最后一次观测）
-    - 只留最近 keep 个点（= keep 天），文件大小约 keep × 全量仓库数
-    """
+    历史快照只留约两小时，攒不出"周"窗口；按天存基线最省：同一天重复跑覆盖当天，只留最近 keep 个点。"""
     at = (mesh.get("meta") or {}).get("generatedAt") or now or utcnow()
-    day = day_of(at)  # 按 DAY_TZ_OFFSET_HOURS 时区的 00:00 切天
+    day = day_of(at)
     previous = load_star_history(path)
     stars = {n["id"]: n.get("stars", 0) for n in mesh.get("nodes", []) if n.get("id")}
     points = [p for p in previous["points"] if day_of(p.get("at")) != day]
@@ -136,17 +154,9 @@ STAR_DAILY_KEEP = 8  # 逐日星标增量按天保留 8 天（算 7 天窗口够
 
 
 def load_star_daily(path: Path) -> dict:
-    """读逐日星标台账。文件不存在/损坏都当空表 —— 绝不因为一个缓存文件中断采集。
-
-    字段分工（接口端 tools/api.mjs 的 loadStarDaily 逐字段对应）：
-      seen        当前基线（id → 星标）
-      seenCarry   本轮缺席、被宽限保留基线的仓库（id → 最后一次真正被观测到的时刻）。
-                  只记这一类，所以体积跟"缺了几个"走，不跟索引规模走。
-      days        逐日柱：{当地日 → {id → 增量}}，只含【当天轮次观测到的】增量
-      spans       跨天宽条：[{from, to, hours, d}]，断档那一轮的增量走这里，不进 days
-      rounds      观测台账：{当地日 → {first, last}}，回答"这天到底观测过没有"
-      sampledDays 真正比对过的日（有 days 的日一定是它的子集）
-    """
+    """读逐日星标台账；文件不存在/损坏都当空表，绝不中断采集。
+    字段与 tools/api.mjs 的 loadStarDaily 逐字段对应：seen=当前基线；seenCarry=缺席仍保留基线的
+    仓库（体积只跟"缺了几个"走）；days=逐日柱；spans=跨天宽条；rounds=观测台账；sampledDays=比对过的日。"""
     empty = {
         "updatedAt": None, "unit": "stars/day", "keepDays": STAR_DAILY_KEEP,
         "seen": {}, "seenCarry": {}, "days": {}, "spans": [], "rounds": {}, "sampledDays": [], "lastRound": None,
@@ -210,24 +220,14 @@ def update_star_daily(
     now: str | None = None,
 ) -> dict:
     """每轮把「本轮观测到的星标变化」记进台账 —— 前端 star 榜的逐日趋势柱用它。
-
-    为什么需要它：星标历史环一天只留一个点（同一天重复跑会覆盖），"两个日点的差"只能落在
-    后一天，攒不出逐日形状（线上实测：只有 2 个点时，一天的涨幅全堆到最后一天）。
-
-    四条硬规矩（前三条是"逐日数据能站住"的前提）：
-      1. **首轮只记基线**：没有上一轮可比时，当天不进 sampledDays —— 否则"还没开始观测"
-         会在榜单上画成"这天涨了 0 星"（线上 2026-10-07 正是这么显示的）。
-      2. **断档不算单日**：某个基线距本轮超过 gap_hours 时，这一轮的增量写进 spans
-         （跨天宽条），不进当天桶 —— 一次停机恢复否则会把好几天的涨幅塞进恢复日。
-      3. **缺席不丢基线**：本轮没出现的仓库，在 grace_days 内保留基线。否则它下次出现会被
-         当成"首次见到"，这段变化被静默吞掉 —— 分段没跑完、配额不够时就会这样。
-      4. 首次见到某个仓库只记基线、不计数（"它本来就有这么多星"不是这一轮的增量）。
-
-    - 每轮都落盘（哪怕 0 变化）：这是"这一轮确实观测过"的唯一证据
-    - days / spans / rounds 只留最近 keep 天
+    星标环一天只留一个点，"两个日点的差"只能落在后一天，攒不出逐日形状，所以必须有这份台账。四条硬规矩：
+    1) 首轮只记基线，当天不进 sampledDays（否则"还没开始观测"会画成"这天涨 0 星"）；
+    2) 基线超过 gap_hours 的增量写进 spans 不进当天桶（一次停机恢复不能把几天涨幅塞进恢复日）；
+    3) 缺席仓库在 grace_days 内保留基线，否则下次出现会被当"首次见到"、这段变化被静默吞掉；
+    4) 首次见到只记基线不计数。每轮都落盘（0 变化也写），这是"这轮确实观测过"的唯一证据。
     """
     at = (mesh.get("meta") or {}).get("generatedAt") or now or utcnow()
-    day = day_of(at)  # 按 DAY_TZ_OFFSET_HOURS 时区的 00:00 切天
+    day = day_of(at)
     payload = load_star_daily(path)
     seen = dict(payload["seen"])
     carry = dict(payload["seenCarry"])
@@ -275,7 +275,7 @@ def update_star_daily(
         else:
             bucket[nid] = int(bucket.get(nid, 0)) + delta
 
-    # 本轮缺席的仓库：宽限期内保留基线（部分轮次不再静默吞掉变化），超期丢弃
+    # 本轮缺席：宽限期内保留基线，超期丢弃
     grace_floor = _day_shift(day, -grace_days)
     carried = 0
     for nid, stars in seen.items():
@@ -377,18 +377,12 @@ def _day_shift(day: str, delta: int) -> str:
 
 
 def update_update_log(mesh: dict, path: Path, *, keep: int = UPDATE_LOG_KEEP, now: str | None = None) -> dict:
-    """每轮采样一次「这个仓库又推了新东西吗」，按天累计次数（前端「周更新热榜」的排序依据）。
-
-    为什么需要它：GitHub 只给一个 pushedAt（最后一次推送），"一周更新了几次"盘上原本无从得知。
-    采集器每小时看一次，只要 pushedAt 比上次观测前进了，就记一次推进 —— 这是**观测到的下界**，
-    同一次推送最多记一次（采样间隔内的多次推送会合并成一次），界面上也照这个口径写清楚。
-
-    - 首次见到某个仓库不计数（那是"它本来就有推送"，不是"我们又看到它更新了"）
-    - 只跟最近 UPDATE_LOG_SEEN_DAYS 天内有推送的仓库：文件不会随仓库总数无限增长
-    - days 只留最近 keep 天
-    """
+    """每轮采样「这个仓库又推了新东西吗」，按天累计（前端「周更新热榜」的排序依据）。
+    GitHub 只给一个 pushedAt（最后一次推送），"一周更新了几次"只能这样观测：pushedAt 比上次
+    观测前进就记一次，是**观测到的下界**（采样间隔内的多次推送会合并成一次），界面照此口径写明。
+    首次见到不计数；seen 只跟最近 UPDATE_LOG_SEEN_DAYS 天内有推送的仓库；days 只留最近 keep 天。"""
     at = (mesh.get("meta") or {}).get("generatedAt") or now or utcnow()
-    day = day_of(at)  # 同上：按北京时间的 00:00 切天
+    day = day_of(at)
     payload = load_update_log(path)
     seen = dict(payload["seen"])
     days = {k: dict(v) for k, v in payload["days"].items()}

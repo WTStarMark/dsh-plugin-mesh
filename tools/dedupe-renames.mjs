@@ -1,23 +1,10 @@
 #!/usr/bin/env node
 /**
- * 改名去重（0.4.4）：把"改了名、图里还留着旧球"的仓库合并回一个。
- *
- * 为什么会新旧并存：GitHub 改名后 full_name 变了，而累积索引/图数据以 full_name 为键。
- * 0.4.4 起采集记录里带上了 GitHub 的数字 id（githubId，改名不变），从此不会再新增重复；
- * 但对【已经存下来的老数据】，需要用这个工具做一次迁移。
- *
- * 判定链（每条都有据可查，不做"猜"）：
- *   ① 先按 githubId 找：同一数字 id 出现两次 → 铁定是同一个仓库
- *   ② 老记录没有 githubId：把"同作者 + 同创建时间"的节点当嫌疑组（created_at 不可变）
- *   ③ 对嫌疑节点逐個问 GitHub（GET /repos/{owner}/{name}，改名会自动跟到新名字）→ 拿到数字 id 与当前 full_name
- *   ④ 同一数字 id 的节点收敛成一个：保留"当前 full_name"那条，删掉旧名字那条，并记录改名历史
- *
- * 用法：
- *   node tools/dedupe-renames.mjs [--mesh data/mesh.json] [--dry]     # 修前端契约
- *   node tools/dedupe-renames.mjs --cache data/cache/repos.json [--dry] # 修累积索引（治本：下轮构建就不会再带重复）
- * 逐個顺序请求 GitHub（不并发）：几千个嫌疑节点也就几分钟，对接口更友好。
- * 产物：
- *   合并后的 mesh.json（原文件先备份成 data/mesh.json.bak-<时间戳>）+ data/renames.json（改名账本）
+ * 改名去重：把「改了名、图里还留着旧球」的仓库合并回一个；改名账本写 data/renames.json，原 mesh 先备份成
+ * data/mesh.json.bak-<时间戳>。改名后 full_name 变了而累积索引以 full_name 为键，所以老数据要靠本工具迁移一次。
+ * 判定链不做「猜」：① 同 githubId 必是同一仓库；② 老记录没有 githubId 时，用「同作者 + 同创建时间」
+ * （created_at 不可变）当嫌疑组，逐个问 GitHub /repos/{owner}/{name}（会自动跟随改名）；③ 同 id 收敛成一条，保留当前 full_name。
+ * 用法：node tools/dedupe-renames.mjs [--mesh data/mesh.json | --cache data/cache/repos.json] [--dry]
  */
 import { readFile, writeFile, copyFile, rename } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
@@ -46,21 +33,18 @@ export function findSuspects(nodes) {
   return { suspectIds: ids, sameId, sameStamp };
 }
 
-/**
- * 规划合并方案（纯逻辑，网络访问通过 resolve 注入，便于离线测试）。
- * resolve(id) → { githubId, fullName } | null
- */
+/** 规划合并方案（纯逻辑，网络访问通过 resolve 注入，便于离线测试）；resolve(id) → { githubId, fullName } | null */
 export async function planRenames(nodes, resolveOne, { log = () => {} } = {}) {
   const { suspectIds } = findSuspects(nodes);
   const list = nodes.filter((n) => suspectIds.has(n.id));
-  const identity = new Map(); // node.id → { githubId, fullName } | null
+  const identity = new Map();
   let checked = 0;
   for (const n of list) {
     identity.set(n.id, await resolveOne(n));
     checked += 1;
     if (checked % 25 === 0) log("    …已核对 " + checked + "/" + list.length);
   }
-  const clusters = new Map(); // githubId → [{node, ident}]
+  const clusters = new Map();
   const unresolved = [];
   const resolved = []; // 核对到的稳定身份，回填进数据（下次不必再问接口）
   for (const n of list) {
@@ -192,11 +176,9 @@ async function runCacheMode(cachePath, DRY, token) {
   try {
     aliasDoc = JSON.parse(await readFile(aliasPath, "utf8"));
   } catch {
-    /* 首次 */
   }
   const aliases = { ...(aliasDoc.aliases ?? {}) };
-  // 历史上（本功能上线前）做过的改名也要并进来：它们只记在账本里，
-  // 否则采集器遇到那些旧名字时仍然认不出来（EAC 那几对就是这么漏掉的）。
+  // 历史上（本功能上线前）做过的改名也要并进来，否则采集器遇到那些旧名字仍然认不出来（EAC 那几对就是这么漏掉的）。
   try {
     const ledger = JSON.parse(await readFile(resolve(ROOT, "data/renames.json"), "utf8"));
     for (const r of [...(ledger.renames ?? []), ...(ledger.renamesInPlace ?? [])]) aliases[r.from] = r.to;
@@ -314,13 +296,11 @@ async function main() {
   const indexed = mesh.meta.indexedNodes ?? before;
   mesh.meta.indexedNodes = Math.max(mesh.nodes.length, indexed - drop.size);
   await writeFile(MESH, JSON.stringify(mesh), "utf8");
-  // 账本按 from→to 合并历史，而不是覆盖：多次运行的记录都留着才可审计
   const ledgerPath = resolve(ROOT, "data/renames.json");
   let ledger = { renames: [], renamesInPlace: [] };
   try {
     ledger = JSON.parse(await readFile(ledgerPath, "utf8"));
   } catch {
-    /* 首次运行没有账本 */
   }
   const mergeLedger = (old, fresh) => {
     const by = new Map((old ?? []).map((r) => [r.from + "→" + r.to, r]));

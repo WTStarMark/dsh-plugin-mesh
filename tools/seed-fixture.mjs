@@ -1,10 +1,8 @@
 #!/usr/bin/env node
 /**
  * seed-fixture — 用仓库里的 data/sample-raw.json 离线生成一份夹具数据集。
- *
- * 为什么需要：data/mesh.json 与预计算产物是运行时产物，不入库；干净克隆与 CI 里
- * 没有它们，而测试要读。走采集器的 --from-raw 路径，不联网、不消耗配额。
- *
+ * mesh.json 与预计算产物是运行时产物、不入库，干净克隆与 CI 里没有它们而测试要读；
+ * 走采集器的 --from-raw 路径，不联网、不消耗配额。
  * 安全：本机已有真实 data/mesh.json 时拒绝执行（免得把真数据覆盖成夹具），除非 --force。
  */
 import { existsSync } from "node:fs";

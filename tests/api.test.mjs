@@ -833,6 +833,18 @@ test("HTTP：卡片是 SVG，分享页是 HTML，错误码正确", async () => {
   assert.match(missing.headers.get("content-type") ?? "", /image\/svg\+xml/, "卡片缺失也应回一张占位 SVG");
 });
 
+test("回归：恶意排序参数不能把接口打成 500（查表要用 hasOwnProperty）", async () => {
+  // SORTS["__proto__"] 会返回 Object.prototype（真值），随后 sort(Object.prototype) 抛 TypeError。
+  // 一个 &&sort=__proto__ 的公开查询就能稳定拿 500 —— 这里锁住。
+  for (const sort of ["__proto__", "constructor", "toString", "valueOf", "hasOwnProperty", "不存在的排序", ""]) {
+    const result = await api.search(new URLSearchParams("sort=" + encodeURIComponent(sort) + "&limit=2"));
+    assert.equal(result.items.length, 2, "sort=" + sort + " 应回落到默认排序，而不是抛异常");
+  }
+  const stars = await api.search(new URLSearchParams("sort=stars&limit=3"));
+  const desc = stars.items.map((n) => n.stars);
+  assert.deepEqual(desc, [...desc].sort((a, b) => b - a), "默认/显式排序仍应按星标降序");
+});
+
 test("HTTP：写方法被拒，预检请求被放行", async () => {
   const post = await fetch(base + "/api/repos", { method: "POST" });
   assert.ok(post.status === 405 || post.status === 403, "写方法必须被拒，实际 " + post.status);

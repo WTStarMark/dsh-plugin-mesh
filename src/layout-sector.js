@@ -1,14 +1,8 @@
 /**
- * 扇区散布布局（唯一布局）
- *
- * 规则：
- *   1. 官方仓库固定在圆心；
- *   2. 每个功能分类占一个扇区，等角分布（N 个扇区 => 360/N 度）；
- *   3. 扇区内**离散随机散布**：随机角度 + 随机半径抖动，再松弛去重叠，
- *      不是同心环、不是等角排列、更不是一条线；
- *   4. 星标越多整体越靠近圆心（统计趋势，不做刚性排序 —— 刚性排序就是"僵硬"的来源）。
- *
- * 位置只由"星标 + 种子"决定，因此可复现、可 diff。
+ * 扇区散布布局（唯一布局）：官方仓库固定在圆心，每个功能分类等角占一个扇区（N 个扇区 => 360/N 度）。
+ * 扇区内离散随机散布（随机角度 + 半径抖动，再松弛去重叠）——不是同心环、不是等角排列。
+ * 星标越多整体越靠近圆心（统计趋势；刚性排序会显得僵硬）。
+ * 位置只由「星标 + 种子」决定，因此可复现、可 diff。
  */
 import { mulberry32, hashSeed } from "./rng.js";
 
@@ -154,7 +148,6 @@ export function createSectorLayout(options = {}) {
         const t = Math.log10((nodes[i].stars || 0) + 1) / maxLog;
         targetR[i] = spec.bounds.rMin + (spec.bounds.rMax - spec.bounds.rMin) * (1 - t);
         sectorOf[i] = si;
-        // 离散随机：半径抖动 + 扇区内随机角度
         const wobble = 1 + (rnd() * 2 - 1) * scatter;
         const r = Math.max(spec.bounds.rMin, Math.min(spec.bounds.rMax * 1.05, targetR[i] * wobble));
         const a = spec.bounds.start + rnd() * sectorWidth;
@@ -249,8 +242,7 @@ export function createSectorLayout(options = {}) {
     angleStep,
     sectorWidth,
     startAngle: START_ANGLE,
-    // label 由调用方给（全景=官方仓库，以某仓库为中心=焦点仓库）：渲染层拿它做圆心注记，
-    // 否则任何圆心都会被画成"官方仓库"。
+    // 圆心注记 label 由调用方给（全景=官方仓库，聚焦=焦点仓库），否则任何圆心都会被画成「官方仓库」。
     center: { id: centerId, index: centerIndex, label: options.centerLabel ?? null },
     get arms() {
       return arms;

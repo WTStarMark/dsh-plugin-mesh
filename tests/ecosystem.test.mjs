@@ -9,9 +9,12 @@ import { readFileSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { EDGE_STYLES, EDGE_TYPE_BY_CODE, prepare, prepareCore } from "../src/mesh-data.js";
+import { readEcosystem } from "../tools/admin-config.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const eco = JSON.parse(readFileSync(join(ROOT, "tools/ecosystem.json"), "utf8"));
+// 清单来源与采集器同规则：后台管理副本（data/admin/ecosystem.json）优先，没有才用策展产物 ——
+// 否则运营在后台加了几个基座，这条"数据与清单一致"的断言就会误报。
+const eco = readEcosystem().doc;
 const mesh = JSON.parse(readFileSync(join(ROOT, "data/mesh.json"), "utf8"));
 const core = JSON.parse(readFileSync(join(ROOT, "data/mesh-core.json"), "utf8"));
 
@@ -45,7 +48,20 @@ test("策展基座在数据里必须归入「协议基座」", () => {
   assert.ok(checked > 0, "当前数据里应至少有一个策展基座");
 });
 
-test("临时关闭的基座（enabled: false）不建共鸣边，但基座身份不变", () => {
+/**
+ * mesh.json 是不是按"当前生效的这份清单"建的？
+ * 不是的话（后台改了没点应用、或采集器还在跑旧代码），下面两条用例不该判红 ——
+ * 它们验的是构建规则，不是运营有没有及时重算。
+ */
+function dataMatchesList() {
+  const enabled = eco.bases.filter((b) => b.enabled !== false).map((b) => b.id).sort();
+  const disabled = eco.bases.filter((b) => b.enabled === false).map((b) => b.id).sort();
+  const haveEnabled = [...(mesh.meta.ecosystemBases ?? [])].sort();
+  const haveDisabled = [...(mesh.meta.ecosystemDisabled ?? [])].sort();
+  return JSON.stringify(enabled) === JSON.stringify(haveEnabled) && JSON.stringify(disabled) === JSON.stringify(haveDisabled);
+}
+
+test("临时关闭的基座（enabled: false）不建共鸣边，但基座身份不变", (t) => {
   const disabled = eco.bases.filter((b) => b.enabled === false);
   // 不假定"清单里一定有关闭的基座"（那是数据状态，会随运营变化）：
   // 有关闭的就验证规则，没有就验证 meta 如实为空。
@@ -64,6 +80,10 @@ test("临时关闭的基座（enabled: false）不建共鸣边，但基座身份
     }
     return;
   }
+  if (!dataMatchesList()) {
+    t.skip("mesh.json 还是用另一份清单建的：后台改了没点『应用变更』，或采集器还在跑旧代码");
+    return;
+  }
   const ids = new Set(mesh.nodes.map((n) => n.id));
   for (const base of disabled) {
     const edges = (mesh.edges ?? []).filter((e) => e.type === "resonance" && (e.source === base.id || e.target === base.id));
@@ -75,7 +95,11 @@ test("临时关闭的基座（enabled: false）不建共鸣边，但基座身份
   assert.ok((mesh.meta.ecosystemDisabled ?? []).includes(disabled[0].id), "meta.ecosystemDisabled 应记录被关闭的基座");
 });
 
-test("数据落地：mesh.json 的共鸣边 = 清单（启用的基座）∩ 图内节点", () => {
+test("数据落地：mesh.json 的共鸣边 = 清单（启用的基座）∩ 图内节点", (t) => {
+  if (!dataMatchesList()) {
+    t.skip("mesh.json 还是用另一份清单建的：后台改了没点『应用变更』，或采集器还在跑旧代码");
+    return;
+  }
   const ids = new Set(mesh.nodes.map((n) => n.id));
   const expected = new Set();
   for (const base of eco.bases) {

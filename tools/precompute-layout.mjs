@@ -1,12 +1,8 @@
 #!/usr/bin/env node
 /**
- * 预计算：把"浏览器每次都要算一遍"的东西提前算好，并给载荷瘦身。
- *
- * 产出三样：
- *   data/mesh-core.json    首屏必需：精简节点 + 预计算坐标 + 索引化连线（体积约为原 mesh.json 的一半）
- *   data/details/N.json    右栏详情分片（默认 8 片），点到才拉、空闲时后台预取
- *   （坐标直接写在 core 里，前端不再做 1.8 万节点的松弛布局）
- *
+ * 预计算：把「浏览器每次都要算一遍」的东西提前算好，并给载荷瘦身。
+ * 产出 data/mesh-core.json（精简节点 + 预计算坐标 + 索引化连线）、data/details/N.json（右栏详情分片，默认 8 片）
+ * 与二进制契约 mesh-core.bin（浏览器优先拉它）。
  * 用法：node tools/precompute-layout.mjs [--in data/mesh.json] [--out data] [--chunks 8]
  */
 
@@ -31,8 +27,7 @@ const CHUNKS = Math.max(1, Number(argOf("--chunks", "8")));
 const HUB_ID = "deepseek-ai/deepseek-harness";
 
 /** 挪到详情分片的字段：只有点开右栏才需要 */
-// 注意：pushedAt 不能挪走 —— 「最近推送」筛选、悬浮提示、相对时间都要用它，
-// 否则核心路径下 ts=0 会把所有节点过滤掉（曾出过这个 bug）。
+// pushedAt 不能挪走：「最近推送」筛选、悬浮提示、相对时间都要用它，否则核心路径下 ts=0 会把所有节点过滤掉（曾出过这个 bug）。
 const DETAIL_FIELDS = ["description", "topics", "license", "homepage", "sizeKb", "openIssues", "createdAt", "updatedAt"];
 /** 完全丢弃：能从 id 推出来，或者前端根本没用 */
 const DROP_FIELDS = ["htmlUrl"];
@@ -55,7 +50,6 @@ const t1 = performance.now();
 const ids = prepared.nodes.map((n) => n.id);
 const indexOf = new Map(ids.map((id, i) => [id, i]));
 
-// 节点瘦身 + 直接写入坐标（四舍五入到 0.1，够画了）
 let droppedBytes = 0;
 const nodes = prepared.nodes.map((node, i) => {
   const slim = {};
@@ -134,8 +128,7 @@ await mkdir(OUT_DIR, { recursive: true });
 const coreJson = JSON.stringify(core);
 await writeFile(join(OUT_DIR, "mesh-core.json"), coreJson, "utf8");
 
-// 二进制契约（v0.4.8）：浏览器优先拉它，体积是 JSON 的 1/8。
-// 主干分片（按星标前 HEAD_NODES 个）供首屏秒开，整份在后台补上。
+// 二进制契约（v0.4.8）浏览器优先拉，体积约 JSON 的 1/8；HEAD_NODES 主干分片供首屏秒开，整份后台补上。
 const HEAD_NODES = Number(process.env.HEAD_NODES ?? 3000);
 const binBytes = encodeCore(core);
 await writeFile(join(OUT_DIR, "mesh-core.bin"), binBytes);

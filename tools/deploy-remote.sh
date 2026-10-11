@@ -17,7 +17,9 @@ DRY="${1:-}"
 
 export SSH_ASKPASS="$LOCAL_DIR/tools/.askpass.sh"
 export SSH_ASKPASS_REQUIRE=force
-ssh_run() { setsid -w ssh -o StrictHostKeyChecking=no -o ConnectTimeout=20 "$HOST" "$@"; }
+# accept-new：首次连接仍然自动记住主机公钥，但之后公钥一变就拒绝连接。
+# 老写法 StrictHostKeyChecking=no 对中间人攻击毫无抵抗力（部署脚本会喂进去 SSH 口令）。
+ssh_run() { setsid -w ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 "$HOST" "$@"; }
 
 [ -n "${DSH_SSH_PASS:-}" ] || { echo "缺少 DSH_SSH_PASS" >&2; exit 2; }
 
@@ -61,6 +63,10 @@ echo "  传输完成"
 echo
 echo "=== 3. 用【远端自己的数据】重算预计算产物 ==="
 ssh_run "cd $REMOTE_DIR && $NODE tools/precompute-layout.mjs 2>&1 | tail -6" | sed 's/^/  /'
+
+echo
+echo "=== 3.5 管理后台路径（远端 .env，缺失才生成；口令不在这一步处理）==="
+ssh_run "cd $REMOTE_DIR && $NODE tools/admin-setup.mjs --path-only" | sed 's/^/  /'
 
 echo
 echo "=== 4. 重启 pm2（只重启本项目的两个进程，不动同机其它 pm2 应用）==="

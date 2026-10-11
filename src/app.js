@@ -1,7 +1,5 @@
 /**
- * app.js —— 状态中枢：把数据、布局、渲染器、面板接起来。
- *
- * 状态变更路径永远是：改 state -> applyHighlight() -> 重绘 / 重渲染面板。
+ * app.js —— 状态中枢：把数据、布局、渲染器、面板接起来。状态变更路径永远是「改 state -> applyHighlight() -> 重绘 / 重渲染面板」；
  * 过滤一律「淡化」而非「移除」，保证同一份数据在任意过滤下位置一致、可对比。
  */
 import { countReposByOwner, starPercentile, loadMeshBest, prepare, prepareCore, prepareCoreAsync, precomputedLayout, matches, formatStars, groupColor, starThreshold, ownerSiblings, stripNoiseOwners, isConfirmedNoise, EDGE_TYPE_BY_CODE, EDGE_STYLES, RAY_HIT_LIMIT, dataSignature } from "./mesh-data.js";
@@ -9,10 +7,9 @@ import { createDetailStore } from "./details.js";
 import { createStore } from "./cache.js";
 import { startStats, formatCount } from "./stats.js";
 import { createSectorLayout } from "./layout-sector.js";
-import { PALETTES, themeOf, DEFAULT_PALETTE, DEFAULT_MODE } from "./palettes.js";
+import { PALETTES, themeOf, DEFAULT_PALETTE } from "./palettes.js";
 import { buildLinks, countByType } from "./links.js";
 import { createGraphView } from "./graph.js";
-import { createStatusWidget } from "./status.js";
 import { createRankingBoard } from "./ranking.js";
 
 
@@ -26,7 +23,6 @@ const dom = {
   edgeTypes: document.getElementById("edge-types"),
   search: document.getElementById("search"),
   searchClear: document.getElementById("search-clear"),
-  theme: document.getElementById("theme"),
   palette: document.getElementById("palette"),
   deck: document.querySelector(".deck"),
   toggleRail: document.getElementById("toggle-rail"),
@@ -35,8 +31,6 @@ const dom = {
   telemetry: document.getElementById("telemetry"),
   stage: document.getElementById("stage"),
   canvas: document.getElementById("graph"),
-  statusChip: document.getElementById("status"),
-  statusPanel: document.getElementById("status-panel"),
   trophy: document.getElementById("trophy"),
   ranking: document.getElementById("ranking"),
   rankingTabs: document.getElementById("ranking-tabs"),
@@ -44,26 +38,9 @@ const dom = {
   rankingClose: document.getElementById("ranking-close"),
 };
 
-/**
- * 顶栏状态圆环：倒计时到下一次扫描，点开看采集器进度。
- * 接口不可用时（本地静态预览）环保持空环、浮窗给一句说明，不影响其它功能。
- */
-const statusWidget = createStatusWidget({
-  chip: dom.statusChip,
-  panel: dom.statusPanel,
-  localCount: () => (prepared ? prepared.nodes.length : 0),
-  fetcher:
-    typeof fetch === "function"
-      ? () =>
-          fetch("/api/status").then((res) => (res.ok ? res.json() : null))
-      : null,
-});
+// 采集状态圆环已迁到管理后台（公开页不再暴露采集进度）：见 admin/status.js 与 tools/admin.mjs。
 
-/**
- * 榜单弹窗：画布顶端那枚奖杯（正好夹在左栏与右栏之间）。
- * 两个榜单都由 GET /api/ranking 算好：周更新热榜（最近推送）、周 star 热榜（星标历史增量）。
- * 点某一行 = 选中它并把镜头移过去（与右栏「关联」同一套动作）。
- */
+/** 榜单弹窗：画布顶端那枚奖杯（正好夹在左栏与右栏之间）；两个榜单都由 GET /api/ranking 算好，点某一行 = 选中它并把镜头移过去（与右栏「关联」同一套动作）。 */
 const rankingBoard = createRankingBoard({
   button: dom.trophy,
   modal: dom.ranking,
@@ -77,21 +54,19 @@ const rankingBoard = createRankingBoard({
   onPick: (id) => actions.openRelated(id),
 });
 
-/** 圆心：官方仓库 */
 const HUB_ID = "deepseek-ai/deepseek-harness";
 
 const state = {
   palette: DEFAULT_PALETTE,
-  mode: DEFAULT_MODE,
   avatars: true,
-  labels: false, // v0.4.1：标签默认关闭（球太密时标签反而糊成一片）
+  labels: false, // 标签默认关闭：球太密时标签反而糊成一片
   hideRail: false,
   hideDossier: false,
   groupBy: "category",
   tags: new Set(),
   minStarsPct: 0,
   minStars: 0,
-  ownerRepoMin: 0, // 作者在该作者下的仓库数区间（下限）
+  ownerRepoMin: 0,
   ownerRepoMax: null, // 上限；null = 不限
   pushedDays: 0,
   language: "all",
@@ -101,7 +76,7 @@ const state = {
   focusCategory: null, // 单扇区放大：非空时只铺该分类，扇区变成它的细枝分类
   centerId: null, // 以某个仓库为中心重建扇形图（null = 以官方仓库为圆心）
   query: "",
-  searchHits: null, // 搜索命中集合：画布据此从圆心画放射线
+  searchHits: null,
   readmeHits: null, // README 正文命中（服务端返回，只给 id）：与本地命中合并后一起高亮/画线
   readmeTotal: 0,
   readmeIndexed: 0,
@@ -168,10 +143,7 @@ function computeGroups() {
     .map((g, i) => ({ ...g, color: palette[i % palette.length] }));
 }
 
-/**
- * 布局缓存：从细枝切回全局时，不必把上万个节点重算一遍。
- * 实测这是「切回来卡一下」的根因 —— 全局布局的重排是全量计算，缓存后切换是瞬时的。
- */
+/** 布局缓存：从细枝切回全局时不必把上万个节点重算一遍（全局重排是全量计算，实测这就是「切回来卡一下」的根因，缓存后切换是瞬时的）。 */
 const layoutCache = new Map();
 const LAYOUT_CACHE_MAX = 6;
 
@@ -202,9 +174,8 @@ function buildLayout() {
 
 function buildLayoutUncached() {
   const focus = state.focusCategory;
-  // 以某个仓库为中心重建扇形图（双击球 / 从「关联」跳到布局外的仓库）：
-  // 节点 = 它 + 它的关联（直接关联 + 同作者兄弟，口径与右栏「关联」一致），
-  // 扇区 = 这些关联按当前"划分依据"分出来的分类。
+  // 以某个仓库为中心重建扇形图（双击球 / 从「关联」跳到布局外的仓库）：节点 = 它 + 它的关联
+// （直接关联 + 同作者兄弟，口径与右栏「关联」一致），扇区 = 这些关联按当前「划分依据」分出的分类。
   const center = state.centerId;
   if (!focus && center && center !== HUB_ID) {
     const keep = new Set([center, ...(prepared.adjacency.get(center) ?? []).map((n) => n.id), ...ownerSiblings(prepared, center)]);
@@ -254,8 +225,7 @@ function viewInfo() {
       arm.members.forEach((m, idx) => armOf.set(m.id, { id: arm.id, label: arm.label, rank: idx + 1, count: arm.count }));
     }
   }
-  // 同作者给的是"完整关系对数"：数据层为了控制载荷，超大作者只存星形拓扑，
-  // 直接数存边会少一大截（v0.4.2 起图例与画布都按完整关系走）。
+  // 同作者给的是「完整关系对数」：数据层为了控制载荷，对超大作者只存星形拓扑，直接数存边会少一大截（图例与画布都按完整关系走）。
   const linkCounts = {
     neighbor: countByType(links, "neighbor"),
     owner: prepared.ownerPairs ?? countByType(links, "owner"),
@@ -294,22 +264,20 @@ function tagColorMap() {
   return map;
 }
 
-/** 应用配色：JS 是唯一真源，直接写 CSS 变量并同步画布 */
+/** 应用配色：JS 是唯一真源，直接写 CSS 变量并同步画布；明暗固定浅色（前台不再提供明暗切换），配色仍可在清爽 / 粉黛之间轮换。 */
 function applyTheme() {
-  activeTheme = themeOf(state.palette, state.mode);
+  activeTheme = themeOf(state.palette, "light");
   const root = document.documentElement;
   root.dataset.palette = activeTheme.palette;
-  root.dataset.theme = activeTheme.mode;
+  root.dataset.theme = "light"; // CSS 依赖 data-theme，固定浅色
   for (const [key, value] of Object.entries(activeTheme.vars)) root.style.setProperty(key, value);
   if (view) {
     view.setTheme(activeTheme);
     view.setGroupColors(groupColorMap());
   }
   if (dom.palette) dom.palette.textContent = activeTheme.label;
-  if (dom.theme) dom.theme.textContent = activeTheme.mode === "light" ? "浅色" : "深色";
   try {
     localStorage.setItem("mesh-palette", state.palette);
-    localStorage.setItem("mesh-theme", state.mode);
   } catch {
     /* 隐私模式等场景下忽略 */
   }
@@ -324,7 +292,7 @@ function resetView() {
   state.hideNoise = false;
   state.archived = "all";
   state.clusterFocus = null;
-  state.centerId = null; // 重置筛选＝回到以官方仓库为圆心的全景
+  state.centerId = null;
   state.query = "";
   state.neighborFocus = null;
   state.selectedId = null;
@@ -337,7 +305,6 @@ function computeHighlight() {
     ? new Set([
         state.neighborFocus,
         ...(prepared.adjacency.get(state.neighborFocus) ?? []).map((n) => n.id),
-        // 同作者兄弟：数据层对大作者只存星形拓扑，这里按 owner 索引补齐
         ...ownerSiblings(prepared, state.neighborFocus),
       ])
     : null;
@@ -351,8 +318,7 @@ function computeHighlight() {
     const readmeHit = state.query && state.readmeHits ? state.readmeHits.has(n.id) : false;
     const hit = state.query ? matches(n, state.query) || readmeHit : false;
     if (hit) (searchSet ??= new Set()).add(n.id);
-    // 标签之间取"与"：仓库必须同时具备所有已开启的标签才高亮。
-    // 用"或"会失效——标签高度重叠（多数仓库同时挂 dsh 与 dsh-plugin），关掉任何一个都几乎筛不掉东西。
+    // 标签之间取「与」：仓库必须同时具备所有已开启的标签才高亮。取「或」会失效 —— 标签高度重叠（多数仓库同时挂 dsh 与 dsh-plugin），关掉任何一个都几乎筛不掉东西。
     if (!n.matchedTags.every((t) => state.tags.has(t))) continue;
     if (state.minStars > 0 && n.stars < state.minStars) continue;
     // 作者仓库数区间：按"该作者在图上被收录的仓库数"筛（用来定位批量发布的作者）
@@ -370,11 +336,8 @@ function computeHighlight() {
     if (state.hideNoise && isConfirmedNoise(n)) continue;
     if (state.archived === "hide" && n.archived) continue;
     if (state.archived === "only" && !n.archived) continue;
-    // 放大模式下 clusterFocus 是「细枝」id，必须用细枝键比较；
-    // 否则拿大类去比细枝永远不相等，会把所有节点都过滤掉（整个图被隐藏）。
+    // 放大模式下 clusterFocus 是「细枝」id，必须用细枝键比较，否则拿大类去比细枝永远不相等，会把所有节点都过滤掉（整个图被隐藏）。
     if (state.clusterFocus) {
-      // 放大模式下 clusterFocus 是「细枝」id，必须用细枝键比较；
-      // 否则拿大类去比细枝永远不相等，会把所有节点都过滤掉（整张图被隐藏）。
       const key = state.focusCategory ? (n.subcategory ?? "misc-" + (n.category ?? "other")) : groupKeyOf(n);
       if (key !== state.clusterFocus) continue;
     }
@@ -391,7 +354,7 @@ function computeHighlight() {
 function apply(options = {}) {
   const highlight = computeHighlight();
   view.setHighlight(highlight);
-  view.setSearchHits(state.searchHits); // 搜索后从圆心放射指向命中仓库
+  view.setSearchHits(state.searchHits);
   view.setSelected(state.selectedId);
   updateStatus(highlight);
   const info = viewInfo();
@@ -412,8 +375,7 @@ function updateStatus(highlight) {
   const by = state.groupBy === "language" ? "语言" : "功能分类";
   const byLine = "按" + by + "划分";
   const title = "滚轮缩放 · 拖拽平移 · 单击选中 · 双击以该仓库为中心重建扇形图";
-  // 以某个仓库为中心时，画面里只剩它的关联：这时报"命中 1.7 万"会让人以为筛选坏了，
-  // 所以单独一段文案，说明这张图有多大、怎么回去。
+  // 以某个仓库为中心时画面里只剩它的关联：这时报「命中 1.7 万」会让人以为筛选坏了，所以单独一段文案说明这张图有多大、怎么回去。
   if (state.centerId && layout && layout.index && layout.index.has(state.centerId)) {
     const related = Math.max(0, (layout.size ?? 0) - 1);
     const body = related === 0
@@ -460,8 +422,7 @@ const actions = {
   openRelated(id) {
     if (!id || !prepared?.byId?.get(id)) return;
     actions.selectRepo(id);
-    // 目标已经画在当前这张图里 → 只移动镜头，保留全景上下文；
-    // 目标不在（例如正处在别的仓库的扇形图中）→ 只居中会看到一片空白，
+    // 目标已经画在当前这张图里 → 只移动镜头、保留全景上下文；不在（例如正处在别的仓库的扇形图中）→ 只居中会看到一片空白，
     // 这时改为以它为中心重建扇形图，保证它一定落在画面正中央。
     if (layout?.index?.has(id)) actions.centerOn(id);
     else actions.centerRepo(id);
@@ -492,7 +453,6 @@ const actions = {
     apply();
   },
   setOwnerRepos(min, max) {
-    // 作者仓库数区间：下限/上限都可拖可输入；上限为 null 表示不限
     state.ownerRepoMin = Math.max(0, Math.round(min) || 0);
     state.ownerRepoMax = max === null || max === undefined ? null : Math.max(state.ownerRepoMin, Math.round(max) || 0);
     // 拖动过程中不重建左栏，否则正在拖的滑块会被换掉、拖拽中断
@@ -522,22 +482,19 @@ const actions = {
     apply();
   },
   focusGroup(id) {
-    // 放大后默认显示该分类下的【全部】节点：clusterFocus 保持为空，
-    // 只有再点某个细枝（focusArm）才收窄到单支。
+    // 放大后默认显示该分类下的【全部】节点（clusterFocus 保持为空），只有再点某个细枝（focusArm）才收窄到单支。
     state.clusterFocus = null;
-    state.centerId = null; // 放大某个分类＝离开"以某仓库为中心"的扇形图
-    // 只在「按功能分类」时放大：选中的分类铺满整圆，细枝成为新扇区
+    state.centerId = null; // 放大某个分类＝离开「以某仓库为中心」的扇形图；只在「按功能分类」时放大：选中的分类铺满整圆，细枝成为新扇区。
     state.focusCategory = id && state.groupBy === "category" ? id : null;
     layout = buildLayout();
     refreshLinks();
     if (view) {
       view.setData(prepared, layout);
-      view.setSectorFocus(null); // 放大模式下圆里全是该扇区，不需要淡化别的
+      view.setSectorFocus(null);
       view.fit();
     }
     apply();
   },
-  /** 放大模式下点细枝：只做高亮淡化，不换布局 */
   /** 一键清空所有筛选（含放大与关联聚焦），回到干净的全景 */
   resetFilters() {
     resetView();
@@ -580,30 +537,25 @@ const actions = {
   },
   selectRepo(id) {
     state.selectedId = id;
-    // 点空白处（id 为空）＝ 退出「只看关联仓库」。
-    // 双击聚焦关联仓库后，neighborFocus 会把无关节点一直压暗；之前点空白只清掉选中，
-    // 图还是暗的，只能靠 Esc 或「重置筛选」——这是个死路（v0.4.2 修复）。
+    // 点空白处（id 为空）＝ 退出「只看关联仓库」：双击聚焦后 neighborFocus 会把无关节点一直压暗，
+    // 之前点空白只清掉选中、图还是暗的，只能靠 Esc 或「重置筛选」——这是个死路。
     if (!id) state.neighborFocus = null;
-    if (id) revealDossier(); // 点项目 → 自动展开右栏（详情在里面）
+    if (id) revealDossier();
     view.setSelected(id);
-    // 图例里的「同作者 / 主题共现」计数要跟着选中项走（回车搜索选中时没有 hover，
-    // 之前跳过渲染会让计数停在旧值上）
+    // 图例里的「同作者 / 主题共现」计数要跟着选中项走（回车搜索选中时没有 hover，之前跳过渲染会让计数停在旧值上）。
     apply({ rail: false });
   },
   toggleEdgeType(type) {
     if (state.edgeTypes.has(type)) state.edgeTypes.delete(type);
     else state.edgeTypes.add(type);
     view.setEdgeTypes(state.edgeTypes);
-    refreshLegend(); // 连线开关已取消：这里只刷新计数图例
+    refreshLegend();
   },
 };
 
 /**
- * README 正文检索（v0.4.6）：正文太大，进不了前端契约，所以走服务端的紧凑接口
- * （只回命中 id）。真源是采集器每轮抓的 data/cache/readmes.json。
- *
- * 防抖 260ms：打字过程中不必每键都发请求；接口不可用（离线/静态托管）时静默跳过，
- * 本地检索（id/描述/topics）照常工作。
+ * README 正文检索：正文太大进不了前端契约，所以走服务端的紧凑接口（只回命中 id）；真源是采集器每轮抓的 data/cache/readmes.json。
+ * 防抖 260ms：打字过程中不必每键都发请求；接口不可用（离线/静态托管）时静默跳过，本地检索（id/描述/topics）照常工作。
  */
 let readmeTimer = null;
 let readmeAbort = null;
@@ -676,7 +628,6 @@ function revealDossier() {
   applyPanels();
 }
 
-/** 侧栏收起/展开：改栅格列宽 + 记进 localStorage */
 function applyPanels() {
   exclusivePanels();
   if (dom.deck) {
@@ -688,16 +639,15 @@ function applyPanels() {
   try {
     localStorage.setItem("mesh-panels", JSON.stringify({ rail: state.hideRail, dossier: state.hideDossier }));
   } catch {
-    /* 忽略 */
   }
-  if (view) view.invalidate(); // 画布尺寸变了，立刻重绘
+  if (view) view.invalidate();
 }
 
 function bindChrome() {
   if (dom.toggleRail)
     dom.toggleRail.addEventListener("click", () => {
       state.hideRail = !state.hideRail;
-      if (!state.hideRail) state.hideDossier = true; // 开左栏就收右栏（手机上两者是同一块区域）
+      if (!state.hideRail) state.hideDossier = true;
       applyPanels();
     });
   if (dom.toggleDossier)
@@ -728,7 +678,7 @@ function bindChrome() {
       else if (act === "relayout") {
         state.seed = "mesh-" + Date.now();
         layout.reseed(state.seed);
-        refreshLinks(); // 位置变了，近邻连线必须重算
+        refreshLinks();
         view.fit();
         view.invalidate();
         apply({ rail: false, inspector: false });
@@ -744,10 +694,6 @@ function bindChrome() {
     });
   });
 
-  dom.theme.addEventListener("click", () => {
-    state.mode = state.mode === "light" ? "dark" : "light";
-    applyTheme();
-  });
   if (dom.palette) {
     dom.palette.addEventListener("click", () => {
       const ids = Object.keys(PALETTES);
@@ -764,10 +710,6 @@ function bindChrome() {
       // 榜单弹窗在最上层：先关它，再轮到状态浮窗与放大退回
       if (rankingBoard.isOpen()) {
         rankingBoard.setOpen(false);
-        return;
-      }
-      if (statusWidget.isOpen()) {
-        statusWidget.setOpen(false);
         return;
       }
       // 退出顺序：先退出单扇区放大，再退出"以某仓库为中心"的扇形图，最后才是清选中
@@ -788,9 +730,9 @@ function bindChrome() {
 }
 
 let booted = false;
-let precomputed = null; // 预计算布局（核心优化：浏览器不再做上万节点的松弛计算）
-let details = null; // 详情分片（懒加载）
-let panels = null; // 面板模块（首屏画完后再动态载入）
+let precomputed = null;
+let details = null;
+let panels = null;
 
 /** 面板是动态载入的：首屏先把画布画出来，不为了几个面板阻塞解析 */
 function loadPanels() {
@@ -807,16 +749,13 @@ function loadPanels() {
 
 /** 用一份数据把界面搭起来；后台校验拿到新数据时用 resetFilters=false 再跑一次 */
 async function bootMesh(mesh, { resetFilters, core }) {
-  // 噪声黑名单：必须在 prepareCore / precomputedLayout 之前剔除，
-  // 否则预计算里的节点索引与扇区成员会对不上（旧快照兜底，新数据本就干净）。
+  // 噪声黑名单必须在 prepareCore / precomputedLayout 之前剔除，否则预计算里的节点索引与扇区成员会对不上（旧快照兜底，新数据本就干净）。
   mesh = stripNoiseOwners(mesh);
-  // 整份数据用分块版：邻接表按批建、阶段间让帧，避免切换时 ~250ms 的同步块
   prepared = core ? await prepareCoreAsync(mesh) : prepare(mesh);
   precomputed = core ? precomputedLayout(mesh) : null;
   details = core ? createDetailStore(mesh.meta ?? {}) : null;
-  state.localLayout = false; // 换数据就回到"用预计算坐标"
+  state.localLayout = false;
   if (core) {
-    // 空闲时把详情分片预取完，之后搜索描述、随意点选都不再等
     details.prefetch((bucket) => {
       for (const [id, detail] of Object.entries(bucket)) {
         const node = prepared.byId.get(id);
@@ -827,7 +766,7 @@ async function bootMesh(mesh, { resetFilters, core }) {
   }
   if (resetFilters || state.tags.size === 0) resetView();
   pickTopLanguages();
-  clearLayoutCache(); // 数据换了，旧布局不能复用
+  clearLayoutCache();
   layout = buildLayout();
 
   if (!view) {
@@ -885,12 +824,11 @@ function refreshLegend() {
 function viewHooks() {
   return {
     onSelect: (node) => {
-      // 走统一的选中入口：点画布上的球同样会自动展开右栏
       actions.selectRepo(node ? node.id : null);
     },
     onHover: (node, pos) => {
       hoverNode = node;
-      refreshLegend(); // 计数跟着鼠标走（实时）
+      refreshLegend();
       const rect = dom.stage.getBoundingClientRect();
       panels?.renderTooltip(dom.tooltip, node, pos ?? { x: 0, y: 0 }, rect);
     },
@@ -899,7 +837,6 @@ function viewHooks() {
       panels?.renderTooltip(dom.tooltip, hoverNode, pos, dom.stage.getBoundingClientRect());
     },
     onFocus: (id) => {
-      // 双击球：以该仓库为中心重建扇形图（「只看关联仓库」仍可从右栏按钮进入）
       actions.centerRepo(id);
     },
     onViewChange: ({ k }) => {
@@ -909,15 +846,14 @@ function viewHooks() {
 }
 
 async function main() {
-  const saved = (() => {
+  const savedPalette = (() => {
     try {
-      return { palette: localStorage.getItem("mesh-palette"), mode: localStorage.getItem("mesh-theme") };
+      return localStorage.getItem("mesh-palette");
     } catch {
-      return { palette: null, mode: null };
+      return null;
     }
   })();
-  if (saved.palette && PALETTES[saved.palette]) state.palette = saved.palette;
-  if (saved.mode === "dark" || saved.mode === "light") state.mode = saved.mode;
+  if (savedPalette && PALETTES[savedPalette]) state.palette = savedPalette;
   try {
     const saved = localStorage.getItem("mesh-panels");
     if (saved) {
@@ -925,11 +861,10 @@ async function main() {
       state.hideRail = !!panels.rail;
       state.hideDossier = !!panels.dossier;
     } else if (window.matchMedia?.("(max-width: 900px)").matches) {
-      state.hideRail = true; // 手机首屏：画布全屏，侧栏收进抽屉
+      state.hideRail = true;
       state.hideDossier = true;
     }
   } catch {
-    /* 忽略 */
   }
   applyPanels();
   const narrow = window.matchMedia?.("(max-width: 900px)");
@@ -950,17 +885,6 @@ async function main() {
     }
   });
 
-  // 状态圆环：点开浮窗；点画布空白处或按 Esc 关闭（Esc 挂在上面那个 keydown 里）
-  if (dom.statusChip) {
-    dom.statusChip.addEventListener("click", (ev) => {
-      ev?.stopPropagation?.();
-      statusWidget.toggle();
-    });
-  }
-  dom.stage?.addEventListener("pointerdown", () => statusWidget.setOpen(false));
-  statusWidget.start();
-
-  // 访问数 / 同时在线：拿不到就整栏隐藏，绝不影响站点
   startStats({
     onUpdate: (data) => {
       if (!dom.stats) return;
@@ -972,16 +896,14 @@ async function main() {
     },
   });
 
-  // 先吃缓存秒开，再带 ETag 后台校验；数据真的变了才重建
   const store = await createStore();
   const { mesh, core, fromCache, revalidate } = await loadMeshBest("./data/mesh.json", { store });
   await bootMesh(mesh, { resetFilters: true, core });
-  loadPanels(); // 画布已经出来了，面板随后动态载入
+  loadPanels();
   if (fromCache) dom.hint.title = "已用本地缓存渲染，正在后台校验是否有新快照…";
 
   // 在线实时更新：数据每次核对都带 ETag，没变就是 304（几乎零成本），变了才重建
-  // 签名同时看 generatedAt 与节点数：二进制主干分片与整份的 generatedAt 相同，
-  // 只看时间戳的话"后台补全"永远不会触发重建。
+  // 签名同时看 generatedAt 与节点数：二进制主干分片与整份的 generatedAt 相同，只看时间戳的话「后台补全」永远不会触发重建。
   let liveGeneration = dataSignature(mesh);
   let refreshing = false;
   const pullFresh = async (why) => {
@@ -992,15 +914,13 @@ async function main() {
       const freshSignature = dataSignature(fresh);
       if (fresh && freshSignature !== liveGeneration) {
         liveGeneration = freshSignature;
-        // 换数据要重建整张图（解 1.7 万个节点 + 重排 + 重绘），同步做会卡住主线程几秒。
-        // 排到空闲时执行：用户正在拖拽/缩放时不会被抢主线程；超时兜底保证一定会补上。
+        // 换数据要重建整张图（解 1.7 万个节点 + 重排 + 重绘），同步做会卡住主线程几秒，所以排到空闲时执行：用户正在拖拽/缩放时不被抢主线程，超时兜底保证一定会补上。
         dom.hint.title = "正在补全完整数据…";
         await new Promise((resolve) => {
           if (typeof requestIdleCallback === "function") requestIdleCallback(() => resolve(), { timeout: 2500 });
           else setTimeout(resolve, 120);
         });
-        // 必须带上 core 标记：补全拿到的是【预计算契约】，不带的话会被当成 mesh 走 prepare()，
-        // 并退回"从零跑布局模拟" —— 表现就是球全部从圆心散开重排（而且模拟本身要吃 CPU）。
+        // 必须带上 core 标记：补全拿到的是【预计算契约】，不带的话会被当成 mesh 走 prepare()，并退回「从零跑布局模拟」——表现就是球全部从圆心散开重排（模拟本身也吃 CPU）。
         await bootMesh(fresh, { resetFilters: false, core });
         dom.hint.title = "已同步到最新快照（" + String(liveGeneration ?? "").slice(11, 16) + " UTC）";
       } else if (why === "boot" && fromCache) {

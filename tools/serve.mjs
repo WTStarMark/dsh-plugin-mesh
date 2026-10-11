@@ -1,15 +1,11 @@
 #!/usr/bin/env node
 /**
- * 静态预览服务（加固版）—— 只暴露"前端跑起来真正需要的东西"。
- *
- * 安全策略：
- *   1. 【路径白名单】只提供 /、/index.html、/styles.css、/src/*.js、/data/mesh.json；
- *      backend/、tests/、docs/、data/cache/、data/snapshots/、README、package.json 一律 403。
- *   2. 【方法白名单】只允许 GET / HEAD，其余 405。
- *   3. 【Host 白名单】只接受本机地址访问，挡掉 DNS rebinding（恶意域名解析到本机 IP）。
- *   4. 【安全响应头】CSP / nosniff / frame-ancestors none / CORP same-origin / no-referrer。
- *   5. 隐藏文件（.env 等）与路径穿越双重拦截。
- *   6. 协商缓存：ETag + 304，并对 JSON/JS/CSS 开 gzip。
+ * 静态预览服务（加固版）—— 只暴露「前端跑起来真正需要的东西」。安全策略：
+ *   ① 【路径白名单】只提供 /、/index.html、/styles.css、/src/*.js、/data/mesh.json；
+ *      backend/、tests/、docs/、data/cache/、data/snapshots/、README、package.json 一律 403；
+ *   ② 【方法白名单】只允许 GET / HEAD，其余 405；③ 【Host 白名单】只接受本机地址，挡掉 DNS rebinding；
+ *   ④ 【安全响应头】CSP / nosniff / frame-ancestors none / CORP same-origin / no-referrer；
+ *   ⑤ 隐藏文件（.env 等）与路径穿越双重拦截；⑥ 协商缓存：ETag + 304，并对 JSON/JS/CSS 开 gzip。
  */
 
 import { createServer } from "node:http";
@@ -21,16 +17,15 @@ import { createHash } from "node:crypto";
 import { gzipSync, brotliCompress, constants } from "node:zlib";
 import { promisify } from "node:util";
 
-// 同步压缩会把单线程服务整个卡住：details 分片 250KB 用 q11 要 ~0.5-1s，
-// 期间所有请求（连 /api/status 这种 1KB 的）都在排队 —— 表现就是"页面卡一下"。
-// 改用异步版：压缩跑在 libuv 线程池里，事件循环不被阻塞。
+// 同步压缩会把单线程服务整个卡住（details 分片 250KB 用 q11 要 ~0.5-1s，期间连 /api/status 都在排队，表现就是「页面卡一下」）；改用异步版，压缩跑在 libuv 线程池里。
 const brotliAsync = promisify(brotliCompress);
 import { networkInterfaces } from "node:os";
 import { createApi, apiIndex, validNamePart } from "./api.mjs";
 import { renderPreviewSvg, sceneFromCore } from "./preview-svg.mjs";
+import { createAdmin } from "./admin.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const VERSION = "0.5.1";
+const VERSION = "0.5.2";
 /** 卡片默认去处（线上站点），可用环境变量 SITE_URL 或请求参数 ?link= 覆盖 */
 const SITE_URL = process.env.SITE_URL ?? "https://www.moc-chen.cn/";
 
@@ -67,7 +62,7 @@ const ALLOW = [
   { pattern: /^\/$/, file: "index.html" },
   { pattern: /^\/index\.html$/, file: "index.html" },
   { pattern: /^\/styles\.css$/, file: "styles.css" },
-  { pattern: /^\/src\/[A-Za-z0-9_.-]+\.js$/, file: null }, // 前端模块
+  { pattern: /^\/src\/[A-Za-z0-9_.-]+\.js$/, file: null },
   { pattern: /^\/data\/mesh\.json$/, file: "data/mesh.json" },
   { pattern: /^\/data\/mesh-core\.json$/, file: "data/mesh-core.json" },
   { pattern: /^\/data\/mesh-core\.bin$/, file: "data/mesh-core.bin" },
@@ -104,12 +99,9 @@ const STATS_FILE = process.env.STATS_FILE ?? join(ROOT, "data", "stats.json");
 const ONLINE_WINDOW_MS = 45_000; // 45 秒内有心跳算在线
 const MAX_SEEN = 20000; // 见过的人最多记这么多，防止文件无限膨胀
 // ---------- 限流：令牌桶（按 IP，带成本权重与标准头部）----------
-// 旧实现是固定窗口 + "超 5000 IP 就清空整表"：前者在窗口边界会放行双倍流量，
-// 后者等于给刷 IP 的人一个"重置所有人额度"的开关。换成令牌桶，并且：
-//   · 成本权重：/api/ranking 要读 mesh + 快照环 + 更新日志 + 版本缓存再算榜单，
-//     比 /api/health 贵一个量级 —— 按权重扣令牌，重接口先被限住；
-//   · 标准头部：每个 /api 响应都带 X-RateLimit-*，429 另给 Retry-After（秒）；
-//   · 内存护栏：只清理闲置 / 最旧的桶，绝不清空整表。
+// 令牌桶（按 IP，带成本权重与标准头部）：旧的固定窗口在窗口边界会放行双倍流量，「超 5000 IP 就清空整表」
+// 又等于给刷 IP 的人一个「重置所有人额度」的开关。重接口按权重多扣令牌、先被限住；每个 /api 响应都带
+// X-RateLimit-*，429 另给 Retry-After（秒）；内存护栏只清理闲置/最旧的桶，绝不清空整表。
 // 环境变量可调（测试用得上）：RATE_LIMIT_MAX（桶容量，默认 90）、RATE_LIMIT_REFILL（每秒回填，默认 1.5）
 const RATE = {
   capacity: Math.max(1, Number(process.env.RATE_LIMIT_MAX ?? 90) || 90),
@@ -118,10 +110,12 @@ const RATE = {
   buckets: new Map(),
 };
 
-/** 各接口的令牌成本：贵的多扣，免得一个爬虫把榜单接口当免费 CDN */
+/** 各接口的令牌成本：贵的多扣，免得一个爬虫把榜单接口当免费 CDN（预览图要解析 19.6MB、静态大文件 2~33MB，成本更高） */
 function apiCost(pathname) {
-  if (pathname === "/api/ranking") return 5; // 最贵：多份缓存 + 排序 + 版本缓存
-  if (pathname.startsWith("/api/card/")) return 4; // 卡片 SVG：现渲染
+  if (pathname === "/api/ranking") return 5;
+  if (pathname.startsWith("/api/card/")) return 4;
+  if (pathname === "/api/preview.svg") return 3;
+  if (pathname === "/api/static-large") return 3;
   if (pathname === "/api/repos" || pathname === "/api/categories") return 2;
   return 1;
 }
@@ -217,10 +211,7 @@ function takeToken(req, pathname) {
   return { ok, headers };
 }
 
-/**
- * 压缩结果缓存：Brotli q9 对 11MB 的契约要压 ~1 秒，而同一份文件会被多个访客反复请求。
- * 按「路径 + ETag + 编码」缓存最近几份压缩结果，文件一变 ETag 就变，缓存自然失效。
- */
+/** 压缩结果缓存：Brotli q9 对 11MB 的契约要压 ~1 秒，而同一份文件会被多个访客反复请求；按「路径 + ETag + 编码」缓存最近几份，文件一变 ETag 就变，缓存自然失效。 */
 const compressCache = new Map();
 const COMPRESS_CACHE_MAX = 8;
 function compressCacheGet(pathname, etag, encoding) {
@@ -232,10 +223,7 @@ function compressCachePut(pathname, etag, encoding, payload) {
   return payload;
 }
 
-/**
- * API JSON 也走协商压缩：榜单 200 行 ≈ 450KB，Brotli q5 后 ~84KB（本机实测 8ms）。
- * 动态响应不挂 compressCache —— 那份缓存是给大静态文件用的，这里压一次的成本可以忽略。
- */
+/** API JSON 也走协商压缩（榜单 200 行 ≈ 450KB，Brotli q5 后 ~84KB、本机实测 8ms）；动态响应不挂 compressCache —— 那份缓存是给大静态文件用的。 */
 async function encodeJson(req, body) {
   const accept = String(req.headers["accept-encoding"] ?? "");
   if (/\bbr\b/.test(accept)) {
@@ -281,12 +269,37 @@ function sendJson(res, data, code = 200, extra = {}) {
 const CORS = { "access-control-allow-origin": "*", "access-control-allow-methods": "GET, HEAD, OPTIONS" };
 const API_CACHE = { "cache-control": "public, max-age=300" };
 
-/**
- * README 预览图：按【当前预计算数据】实时渲染，采集器更新数据后图自己就变。
- * 缓存到 mesh-core.json 的 mtime 变化为止；响应带 ETag + max-age=300，
- * GitHub 的图片代理（camo）会按这个节奏回源，所以 README 里的图最迟 5 分钟跟上。
- */
+/** README 预览图：按【当前预计算数据】实时渲染，采集器更新数据后图自己就变；缓存到 mesh-core.json 的 mtime 变化为止，响应带 ETag + max-age=300，GitHub 的图片代理（camo）按这个节奏回源，所以 README 里的图最迟 5 分钟跟上。 */
 const previewCache = new Map();
+const PREVIEW_CACHE_MAX = 16; // 有界：键空间已经被下面两档限制到几十个，这里再兜一层，防止内存被撑爆
+// 场景（解析 19.6MB 的 mesh-core.json + 转场景）按 mtime 缓存一次，别每次缓存未命中都重解析
+let previewScene = { mtimeMs: -1, scene: null };
+async function sceneFor(info) {
+  if (previewScene.mtimeMs !== info.mtimeMs || !previewScene.scene) {
+    const core = JSON.parse(await readFile(join(ROOT, "data/mesh-core.json"), "utf8"));
+    previewScene = { mtimeMs: info.mtimeMs, scene: sceneFromCore(core) };
+  }
+  return previewScene.scene;
+}
+
+/** size/sample 只认固定档位：否则攻击者可以用任意数值组合造出无数缓存键，每个键都要重新解析 19.6MB 数据并渲染一张大图 —— 单线程服务会被一个循环请求打死。 */
+function snapTo(value, steps, fallback) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  let best = steps[0];
+  let bestGap = Infinity;
+  for (const step of steps) {
+    const gap = Math.abs(step - n);
+    if (gap < bestGap) {
+      bestGap = gap;
+      best = step;
+    }
+  }
+  return best;
+}
+const PREVIEW_SIZES = [600, 800, 1000, 1200, 1400, 1700, 2000];
+const PREVIEW_SAMPLES = [500, 1000, 2000, 4000, 6000, 10000, 15000, 20000];
+
 async function previewSvg(theme, size, sample) {
   const file = join(ROOT, "data/mesh-core.json");
   const info = await stat(file).catch(() => null);
@@ -294,10 +307,10 @@ async function previewSvg(theme, size, sample) {
   const key = theme + "|" + size + "|" + sample;
   const hit = previewCache.get(key);
   if (hit && hit.mtimeMs === info.mtimeMs) return hit;
-  const core = JSON.parse(await readFile(file, "utf8"));
-  const svg = renderPreviewSvg(sceneFromCore(core), { theme, size, sample });
+  const svg = renderPreviewSvg(await sceneFor(info), { theme, size, sample });
   const entry = { svg, etag: '"' + createHash("sha1").update(svg).digest("hex").slice(0, 20) + '"', mtimeMs: info.mtimeMs };
   previewCache.set(key, entry);
+  while (previewCache.size > PREVIEW_CACHE_MAX) previewCache.delete(previewCache.keys().next().value);
   return entry;
 }
 
@@ -306,9 +319,16 @@ async function handlePreview(req, res, method, url) {
     deny(res, 405, "405 只允许 GET / HEAD");
     return;
   }
+  // 渲染是重活（解析 19.6MB + 出图），跟 /api/* 一样吃限流，别让它变成免费 CPU
+  const gate = takeToken(req, "/api/preview.svg");
+  for (const [key, value] of Object.entries(gate.headers)) res.setHeader(key, value);
+  if (!gate.ok) {
+    deny(res, 429, "429 请求过于频繁，请按 Retry-After 退避");
+    return;
+  }
   const theme = url.searchParams.get("theme") === "light" ? "light" : "dark";
-  const size = Math.min(2000, Math.max(600, Number(url.searchParams.get("size")) || 1400));
-  const sample = Math.min(20000, Math.max(500, Number(url.searchParams.get("sample")) || 6000));
+  const size = snapTo(url.searchParams.get("size"), PREVIEW_SIZES, 1400);
+  const sample = snapTo(url.searchParams.get("sample"), PREVIEW_SAMPLES, 6000);
   const entry = await previewSvg(theme, size, sample);
   if (!entry) {
     sendSvg(
@@ -322,7 +342,7 @@ async function handlePreview(req, res, method, url) {
   if (req.headers["if-none-match"] === entry.etag) {
     res.writeHead(304, { etag: entry.etag, "cache-control": "public, max-age=300, must-revalidate", ...SECURITY_HEADERS });
     res.end();
-    console.log("304 " + url.pathname + " (" + theme + ")");
+    console.log("304 " + sanitizeForLog(url.pathname) + " (" + theme + ")");
     return;
   }
   sendSvg(res, entry.svg, 200, {
@@ -330,7 +350,7 @@ async function handlePreview(req, res, method, url) {
     "cache-control": "public, max-age=300, must-revalidate",
     "access-control-allow-origin": "*",
   });
-  console.log("200 " + url.pathname + " (" + theme + ", " + (entry.svg.length / 1024).toFixed(0) + "KB)");
+  console.log("200 " + sanitizeForLog(url.pathname) + " (" + theme + ", " + (entry.svg.length / 1024).toFixed(0) + "KB)");
 }
 
 function sendSvg(res, svg, code = 200, extra = {}) {
@@ -418,8 +438,7 @@ async function handleApi(req, res, method, pathname, url) {
     const cats = await api.categories();
     // readme 字段让"README 索引堆了多少"一眼可见（indexed 篇 / diskKB 磁盘 / memoryBytes 检索时的内存）
     const readme = await api.readmeStats().catch(() => null);
-    // starDaily 字段让"逐日星标这几天齐不齐"一眼可见：coveredDays / missingDays / spans / lastRound。
-    // 没有它，"7 天有没有"只能点开榜单去猜。
+    // starDaily 字段让「逐日星标这几天齐不齐」一眼可见（coveredDays / missingDays / spans / lastRound）；没有它，「7 天有没有」只能点开榜单去猜。
     const starDaily = await api.starDailyStats().catch(() => null);
     sendJson(
       res,
@@ -429,11 +448,7 @@ async function handleApi(req, res, method, pathname, url) {
     );
     return;
   }
-  if (pathname === "/api/status") {
-    // 不缓存：圆环要秒级倒计时，采集器也会随时更新进度
-    sendJson(res, { ok: true, version: VERSION, ...(await api.status()) }, 200, CORS);
-    return;
-  }
+  // 采集状态接口已随「公开页状态圆环」一起迁进管理后台（/{ADMIN_PATH}/api/status），公开端口不再提供 —— 采集进度属于运营信息，不该对外暴露。
   if (pathname === "/api/categories") {
     sendJson(res, await api.categories(), 200, { ...API_CACHE, ...CORS });
     return;
@@ -515,8 +530,8 @@ async function handleApi(req, res, method, pathname, url) {
     }
     const now = Date.now();
     const isNew = !(id in stats.seen);
-    if (payload.first === true) stats.visits += 1; // 一次页面浏览算一次访问
-    if (isNew) stats.visitors += 1; // 新面孔算一个访客
+    if (payload.first === true) stats.visits += 1; // 一次页面浏览算一次访问；新面孔算一个访客
+    if (isNew) stats.visitors += 1;
     stats.seen[id] = now;
     pruneSeen(now);
     scheduleSave();
@@ -534,23 +549,72 @@ const SECURITY_HEADERS = {
   "referrer-policy": "no-referrer",
   "cross-origin-resource-policy": "same-origin",
   "x-frame-options": "DENY",
+  // HSTS 只在 https 下才被浏览器认（http 响应里会被忽略），所以放心常发；刻意不带 includeSubDomains —— 本域名下若还有 http-only 的子域，加上会把它们一起打死。
+  "strict-transport-security": "max-age=31536000",
 };
 
 function deny(res, code, reason) {
   res.writeHead(code, { "content-type": "text/plain; charset=utf-8", ...SECURITY_HEADERS }).end(reason);
 }
 
-const server = createServer(async (req, res) => {
+/** 管理后台：与站点同进程、同端口，不额外起服务也不额外占端口；路由前缀是 .env 里的 ADMIN_PATH（部署时由 tools/admin-setup.mjs 生成的 32 位随机串），没配置就整体关闭 —— 绝不留一个默认可猜的后台入口。 */
+const admin = createAdmin({ version: VERSION, api, securityHeaders: SECURITY_HEADERS });
+if (admin.enabled) {
+  // 故意不打印完整路径：路径本身就是一道口令，日志经常被翻看
+  console.log("管理后台: 已启用（路径见 .env 的 ADMIN_PATH；查地址：node tools/admin-setup.mjs --show）");
+} else {
+  console.log("管理后台: 未启用（" + admin.reason + "）");
+}
+
+/** 路径解码：畸形百分号编码（/% 、/%zz 、/%E0%A4%A）会让 decodeURIComponent 抛 URIError，而这个异常在 async 处理器里 = unhandled rejection = 【整个进程退出】：一句 curl http://host/% 就能打掉站点与管理后台，所以必须自己接住并返回 400。 */
+function safeDecode(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return null;
+  }
+}
+
+/** 访问日志：路径是攻击者可控的，先抹掉控制字符，否则 %0a 能往日志里伪造整行 */
+function sanitizeForLog(value) {
+  return String(value ?? "")
+    .replace(/[\u0000-\u001f\u007f]/g, "?")
+    .slice(0, 300);
+}
+
+async function handleRequest(req, res) {
   const method = (req.method ?? "GET").toUpperCase();
   // Host 校验对静态与接口一视同仁，先做
   if (!hostAllowed(req.headers.host)) {
     deny(res, 403, "403 Host 不在允许列表（只接受本机地址访问）");
-    console.log("403 " + req.url + " (host=" + req.headers.host + ")");
+    console.log("403 " + sanitizeForLog(req.url) + " (host=" + sanitizeForLog(req.headers.host) + ")");
     return;
   }
 
-  const url = new URL(req.url ?? "/", "http://" + (req.headers.host ?? "localhost"));
-  let pathname = decodeURIComponent(url.pathname);
+  let url;
+  try {
+    url = new URL(req.url ?? "/", "http://" + (req.headers.host ?? "localhost"));
+  } catch {
+    deny(res, 400, "400 请求地址不合法");
+    console.log("400 " + sanitizeForLog(req.url) + " (bad url)");
+    return;
+  }
+  // 注意：下面"去尾斜杠"会重新赋值，这里必须是 let
+  let pathname = safeDecode(url.pathname);
+  if (pathname === null) {
+    deny(res, 400, "400 请求地址编码不合法");
+    console.log("400 " + sanitizeForLog(req.url) + " (malformed encoding)");
+    return;
+  }
+
+  // 管理后台必须放在「去尾斜杠」之前 —— 后台首页以 / 结尾（/{路径}/），被归一化成不带斜杠的话相对资源路径会全错，还会和「补斜杠」的跳转来回打转；
+// 日志只记接口名，绝不把后台路径写进访问日志。
+  if (admin.enabled && admin.match(pathname)) {
+    await admin.handle(req, res, method, pathname, url);
+    console.log("后台 " + method + " " + admin.logName(pathname.slice(admin.basePath.length + 1)));
+    return;
+  }
+
   if (pathname.endsWith("/") && pathname !== "/") pathname = pathname.slice(0, -1);
 
   // README 预览图：实时按当前数据渲染（静态白名单之外，单独一条路由）
@@ -563,8 +627,7 @@ const server = createServer(async (req, res) => {
     try {
       await handleApi(req, res, method, pathname, url);
     } catch (err) {
-      // 接口内部异常也必须回一个响应。否则这条连接一直挂着，前端只能等自己超时
-      // —— 线上踩过：ranking 里一个 RangeError 让 /api/ranking 挂满 30 秒、无任何响应。
+      // 接口内部异常也必须回一个响应，否则这条连接一直挂着、前端只能等自己超时 —— 线上踩过：ranking 里一个 RangeError 让 /api/ranking 挂满 30 秒、无任何响应。
       const where = (err && err.stack ? String(err.stack).split("\n")[0] : String(err));
       console.error("接口异常 " + pathname + " → " + where);
       try {
@@ -580,7 +643,6 @@ const server = createServer(async (req, res) => {
     }
     return;
   }
-  // 卡片分享页：/card/:owner/:name（同样是只读、同端口）
   const pageMatch = /^\/card\/([^/]+)\/([^/]+)$/.exec(pathname);
   if (pageMatch) {
     const [, owner, name] = pageMatch;
@@ -609,28 +671,28 @@ const server = createServer(async (req, res) => {
 
   if (method !== "GET" && method !== "HEAD") {
     deny(res, 405, "405 只允许 GET / HEAD");
-    console.log("405 " + method + " " + req.url);
+    console.log("405 " + method + " " + sanitizeForLog(req.url));
     return;
   }
 
   // 隐藏文件与路径穿越
   if (pathname.split("/").some((seg) => seg.startsWith("."))) {
     deny(res, 403, "403 隐藏文件不对外提供");
-    console.log("403 " + pathname + " (hidden)");
+    console.log("403 " + sanitizeForLog(pathname) + " (hidden)");
     return;
   }
 
   const rule = ALLOW.find((item) => item.pattern.test(pathname));
   if (!rule) {
     deny(res, 403, "403 该路径不在白名单内");
-    console.log("403 " + pathname + " (not allowlisted)");
+    console.log("403 " + sanitizeForLog(pathname) + " (not allowlisted)");
     return;
   }
   const relative = rule.file ?? pathname.slice(1);
   const filePath = resolve(join(ROOT, normalize(relative)));
   if (filePath !== ROOT && !filePath.startsWith(ROOT + sep)) {
     deny(res, 403, "403 非法路径");
-    console.log("403 " + pathname + " (escape)");
+    console.log("403 " + sanitizeForLog(pathname) + " (escape)");
     return;
   }
 
@@ -640,6 +702,16 @@ const server = createServer(async (req, res) => {
       deny(res, 403, "403 只提供文件");
       return;
     }
+    // 大文件也吃限流：mesh.json 33MB、mesh-core.bin 2.2MB，被反复拉就是免费带宽放大；正常访客一次首屏只碰一个大文件（3 个令牌），不受影响。
+    if (info.size >= 1024 * 1024) {
+      const gate = takeToken(req, "/api/static-large");
+      for (const [key, value] of Object.entries(gate.headers)) res.setHeader(key, value);
+      if (!gate.ok) {
+        deny(res, 429, "429 请求过于频繁，请按 Retry-After 退避");
+        console.log("429 " + sanitizeForLog(pathname) + " (large static)");
+        return;
+      }
+    }
     const body = await readFile(filePath);
     const type = MIME[extname(filePath)] ?? "application/octet-stream";
     // 缓存分两层：数据（mesh.json）永远实时；代码与样式走浏览器缓存 + 304 校验
@@ -648,7 +720,7 @@ const server = createServer(async (req, res) => {
     if (req.headers["if-none-match"] === etag) {
       res.writeHead(304, { etag, "cache-control": cacheControl, ...SECURITY_HEADERS });
       res.end();
-      console.log("304 " + pathname);
+      console.log("304 " + sanitizeForLog(pathname));
       return;
     }
     // 二进制契约（.bin）本身已经很紧凑，但 Brotli 仍能再省一点，一并压
@@ -659,10 +731,7 @@ const server = createServer(async (req, res) => {
     if (compressible && body.length > 1024) {
       // 优先 Brotli（JSON 比 gzip 再省 15~20%），不支持的客户端回落 gzip
       if (/\bbr\b/.test(accept)) {
-        // Brotli 是同步压缩，会把整个服务卡住 —— 按体积分档：
-        //   <512KB  q11（首屏主干 250KB → 98KB，压缩 ~0.5s）
-        //   <2MB    q9 （整份二进制 1.4MB → 601KB，~0.3s）
-        //   更大    直接 gzip（11MB 的 JSON 用 q11 要 21 秒，不能这么干）
+        // Brotli 是同步压缩（11MB 的 JSON 用 q11 要 21 秒），所以按体积分档：<512KB 用 q11、<2MB 用 q9、更大直接 gzip；
         const quality = body.length < 512 * 1024 ? 11 : body.length < 2 * 1024 * 1024 ? 9 : 5;
         const cached = quality ? compressCacheGet(pathname, etag, "br") : null;
         if (quality) {
@@ -698,11 +767,30 @@ const server = createServer(async (req, res) => {
     res.writeHead(200, headers);
     if (method === "HEAD") res.end();
     else res.end(payload);
-    console.log("200 " + pathname + " (" + payload.length + "B" + (encoding ? " " + encoding : "") + ")");
+    console.log("200 " + sanitizeForLog(pathname) + " (" + payload.length + "B" + (encoding ? " " + encoding : "") + ")");
   } catch {
-    deny(res, 404, "404 " + pathname);
-    console.log("404 " + pathname);
+    deny(res, 404, "404 " + sanitizeForLog(pathname));
+    console.log("404 " + sanitizeForLog(pathname));
   }
+}
+
+/** 最外层兜底：请求处理器是 async 的，任何漏出来的异常都会变成 unhandled rejection，Node 默认直接终止进程（相当于一个远程 DoS）；这里统一接住，回 500 而不是躺下。 */
+// 显式收敛超时：默认 requestTimeout 5 分钟、keepAliveTimeout 5 秒，慢速发请求头/body 的连接能占住资源很久，这里给一个更紧的上限。
+const server = createServer({ keepAliveTimeout: 65_000, headersTimeout: 20_000, requestTimeout: 60_000 }, (req, res) => {
+  handleRequest(req, res).catch((err) => {
+    const where = err && err.stack ? String(err.stack).split("\n")[0] : String(err);
+    console.error("请求处理异常 " + sanitizeForLog(req.url) + " -> " + where);
+    try {
+      if (!res.headersSent) deny(res, 500, "500 服务器内部错误");
+      else res.end();
+    } catch {
+      try {
+        res.destroy();
+      } catch {
+        /* 连接已经断了，没什么可做的 */
+      }
+    }
+  });
 });
 
 server.listen(PORT, HOST, () => {

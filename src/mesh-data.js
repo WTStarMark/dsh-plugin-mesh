@@ -17,11 +17,10 @@ export const TAG_COLORS = {
 };
 
 /**
- * 连线样式。color 为 null 时用端点所属扇区的颜色（近邻连线因此与扇区同色）。
- * curv：弧线鼓起的程度（相对弦长），值越大越远离圆心 —— 观赏性的关键参数。
+ * 连线样式：color = null 时用端点所属扇区的颜色；curv 是弧线鼓起程度（相对弦长），
+ * 越大越远离圆心 —— 观赏性的关键参数。
  */
 export const EDGE_STYLES = {
-  // 选中时画的三类连线：颜色明显区分（同作者=主题主色，主题共现=琥珀，生态共鸣=紫罗兰）
   owner: { label: "同作者", color: null, alpha: 0.85, curv: 0.16, dash: [] },
   topic: { label: "主题共现", color: "#e08a00", alpha: 0.5, curv: 0.22, dash: [5, 4] },
   // 生态共鸣：人工策展的"谁长在谁上面"（基座 → 生态），与规则推导的边区分开
@@ -55,8 +54,8 @@ export async function loadMesh(url = "./data/mesh.json") {
 const MESH_CACHE_KEY = "mesh:v1";
 
 /**
- * 带缓存的载入：先把本地缓存的数据交出去（秒开），再带 ETag 去后台校验。
- * 返回 { mesh, fromCache, revalidate }；revalidate() 返回新数据或 null（表示没变）。
+ * 带缓存的载入：先把本地缓存的数据交出去（秒开），再带 ETag 去后台校验；
+ * 返回 { mesh, fromCache, revalidate }，revalidate() 返回新数据或 null（表示没变）。
  */
 export async function loadMeshCached(url = "./data/mesh.json", options = {}) {
   const store = options.store ?? (await createStore());
@@ -71,7 +70,7 @@ export async function loadMeshCached(url = "./data/mesh.json", options = {}) {
     const headers = {};
     if (cached?.etag) headers["If-None-Match"] = cached.etag;
     const res = await fetch(url, { headers, cache: "no-store" });
-    if (res.status === 304) return null; // 服务端说没变，直接用缓存
+    if (res.status === 304) return null;
     if (!res.ok) throw new Error("载入 " + url + " 失败：HTTP " + res.status);
     const etag = res.headers?.get?.("etag") ?? null;
     const mesh = await res.json();
@@ -89,10 +88,7 @@ export async function loadMeshCached(url = "./data/mesh.json", options = {}) {
   return { mesh, fromCache: false, revalidate: async () => null };
 }
 
-/**
- * 优先载入预计算契约（mesh-core.json）：体积小一半、且浏览器不用再算布局。
- * 没有 core 就回退到整份 mesh.json（老数据/老部署照常能用）。
- */
+/** 优先载入预计算契约（mesh-core.json：体积小一半、浏览器不用再算布局），没有就回退整份 mesh.json（老数据/老部署照常能用）。 */
 export async function loadMeshBest(url = "./data/mesh.json", options = {}) {
   const coreUrl = options.coreUrl ?? "./data/mesh-core.json";
 
@@ -114,21 +110,17 @@ export async function loadMeshBest(url = "./data/mesh.json", options = {}) {
         mesh: head,
         core: true,
         fromCache: false,
-        // 后台把整份拉回来；签名不同（节点数变了）就交给上层重建
         revalidate: async () => {
-          // 整份用【分块解码】：1.7 万个节点摊到多帧里建，主线程不再被独占几秒
           const full = await fetchBin(binBase, "no-cache", true).catch(() => null);
           return full && dataSignature(full) !== dataSignature(head) ? full : null;
         },
       };
     }
   } catch {
-    /* 没有二进制契约就往下走 JSON */
   }
 
   try {
-    // 走浏览器缓存 + ETag：回访拿到 304（几十字节），不再每次重下整份契约。
-    // 数据新鲜度靠下面的 revalidate（带 no-cache 强制校验 ETag）。
+    // 走浏览器缓存 + ETag：回访拿 304（几十字节）而不是重下整份契约；新鲜度靠下面 revalidate 的 no-cache 强制校验。
     const res = await fetch(coreUrl);
     if (res.ok) {
       const core = await res.json();
@@ -147,7 +139,6 @@ export async function loadMeshBest(url = "./data/mesh.json", options = {}) {
       }
     }
   } catch {
-    /* 回退 */
   }
   const result = await loadMeshCached(url, options);
   return { ...result, core: false };
@@ -156,10 +147,7 @@ export async function loadMeshBest(url = "./data/mesh.json", options = {}) {
 /** 预计算契约里的连线类型编码（新增类型只能往后追加，老数据才不会错位） */
 export const EDGE_TYPE_BY_CODE = ["owner", "topic", "fork", "neighbor", "resonance"];
 
-/**
- * 从预计算契约（mesh-core.json）构建，产物与 prepare() 同形。
- * 区别：节点已经带好 x/y/r，连线已经是索引三元组（不再需要 buildLinks）。
- */
+/** 从预计算契约构建，产物与 prepare() 同形；节点已带 x/y/r，连线已是索引三元组（不再需要 buildLinks）。 */
 export function prepareCore(core) {
   const nodes = core.nodes ?? [];
   const triples = core.edges ?? [];
@@ -203,11 +191,7 @@ export function prepareCore(core) {
   };
 }
 
-/**
- * 分块版 prepareCore：切换整份数据时用。
- * prepareCore 是一次 ~250ms 的同步块（边上万条的邻接表 + 几个全量扫描），
- * 这里把邻接表按批构建、并在各阶段之间让出主线程 —— 单块降到几十毫秒，切换不再"卡一下"。
- */
+/** 分块版 prepareCore：prepareCore 是一次 ~250ms 的同步块（上万条边的邻接表 + 几个全量扫描），这里按批构建并在各阶段之间让出主线程，单块降到几十毫秒。 */
 export async function prepareCoreAsync(core, options = {}) {
   const yieldFn = options.yieldFn ?? (() => new Promise((resolve) => setTimeout(resolve, 0)));
   const step = Math.max(500, options.chunk ?? 4000);
@@ -262,11 +246,7 @@ export async function prepareCoreAsync(core, options = {}) {
   };
 }
 
-/**
- * 预计算布局 → 与 createSectorLayout 同接口的轻量对象。
- * 坐标直接来自数据，浏览器不再做上万节点的松弛迭代（这正是卡顿的根因）。
- * 入场动画仍保留：从圆心扩散到最终位置。
- */
+/** 预计算布局 → 与 createSectorLayout 同接口的轻量对象：坐标直接来自数据，浏览器不再做上万节点的松弛迭代（卡顿根因）；入场动画仍保留。 */
 export function precomputedLayout(core) {
   const nodes = core.nodes ?? [];
   const size = nodes.length;
@@ -277,8 +257,7 @@ export function precomputedLayout(core) {
   const x = Float64Array.from(tx);
   const y = Float64Array.from(ty);
   const radius = Float32Array.from(nodes, (n) => n.r ?? 3);
-  // 坐标立即就位：视图的沉降判定是 alpha > 0.004（原布局 alpha 从 1 递减到 0），
-  // 预计算模式没有可沉降的东西，所以直接给最终坐标 + alpha = 1，第一次 tick 就归零。
+  // 预计算模式没有可沉降的东西：直接给最终坐标 + alpha = 1，而视图按 alpha > 0.004 判定沉降，第一次 tick 就归零。
   let alpha = 1;
   let minX = Infinity;
   let maxX = -Infinity;
@@ -313,7 +292,6 @@ export function precomputedLayout(core) {
       return alpha;
     },
     tick() {
-      // 预计算布局没有沉降过程：一帧内结束，坐标已经是最终值
       alpha = 0;
       return false;
     },
@@ -329,11 +307,8 @@ export function precomputedLayout(core) {
 
 /**
  * 作者索引：owner -> 该作者的全部仓库 id（星标降序）。
- *
- * 为什么需要单独建索引：数据层为了控制载荷，同一作者成员超过 OWNER_CLIQUE_MAX 时
- * 只存"星形拓扑"（枢纽连所有人、其余人只连枢纽）。只看存下来的边就会出现
- * 「几个同作者仓库里，有的能指到其余全部、有的只指到一个」。这里按 owner 还原
- * 完整关系，渲染与面板一律以它为准 —— 不论几个同作者仓库，彼此都能指到。
+ * 数据层为控载荷，对大作者只存「星形拓扑」（枢纽连所有人、其余只连枢纽），只看存边会出现
+ * 「有的能指到全部、有的只指一个」；这里按 owner 还原完整关系，渲染与面板一律以它为准。
  */
 function indexByOwner(nodes) {
   const groups = new Map();
@@ -361,16 +336,15 @@ function countOwnerPairs(ownerIndex) {
 const EMPTY_IDS = [];
 
 /** 噪声作者阈值：与后端 backend/dsh_mesh/config.py 保持一致（两边都拦一道） */
-export const NOISE_OWNER_MIN_REPOS = 300; // 主判据：仓库数（超过）
-export const NOISE_OWNER_ZERO_RATIO = 0.98; // 主判据：0 星占比（超过）
-export const NOISE_OWNER_STRICT_MIN_REPOS = 200; // 老判据：仓库数（超过）
-export const NOISE_OWNER_MAX_STARS = 1; // 老判据：最高星标（低于）
+export const NOISE_OWNER_MIN_REPOS = 300;
+export const NOISE_OWNER_ZERO_RATIO = 0.98;
+export const NOISE_OWNER_STRICT_MIN_REPOS = 200;
+export const NOISE_OWNER_MAX_STARS = 1;
 
 /**
- * 噪声作者：批量刷标签的垃圾号。两条判据命中任一 ——
- *   1) 收录仓库数 > minRepos，且 0 星占比 > zeroRatio（默认 300 / 98%）
- *   2) 收录仓库数 > strictMinRepos，且每个仓库都是 0 星（默认 200，老判据保留）
- * 判定结果带 zeroRatio 与 reason，前端可显示"为什么被判"。
+ * 噪声作者：批量刷标签的垃圾号。两条判据命中任一 —— ① 收录仓库数 > minRepos 且 0 星占比 > zeroRatio
+ * （默认 300 / 98%）；② 收录仓库数 > strictMinRepos 且每个仓库都是 0 星（默认 200，老判据保留）。
+ * 判定结果带 zeroRatio 与 reason，前端可显示「为什么被判」。
  */
 export function noiseOwners(nodes, options = {}) {
   const minRepos = options.minRepos ?? NOISE_OWNER_MIN_REPOS;
@@ -402,12 +376,9 @@ export function noiseOwners(nodes, options = {}) {
 }
 
 /**
- * 把噪声作者从一份数据里剔除（两种契约都支持）：
- *   mesh.json      —— edges 是 {source,target,type}，按 id 过滤即可
- *   mesh-core.json —— edges 是 [索引,索引,类型码]，删了节点必须重排索引
- * 没有噪声作者时原样返回（零成本，正常路径不受影响）。
- *
- * 采集管道已经会剔除它们；这里再拦一道，是为了让**已经写出去的旧快照**也不再展示。
+ * 把噪声作者从一份数据里剔除（两种契约都支持）：mesh.json 的 edges 是 {source,target,type}，按 id 过滤；
+ * mesh-core.json 的 edges 是 [索引,索引,类型码]，删了节点必须重排索引；没有噪声作者时原样返回。
+ * 采集管道已经会剔除它们，这里再拦一道，是为了让已经写出去的旧快照也不再展示。
  */
 export function stripNoiseOwners(mesh) {
   const nodes = mesh?.nodes ?? [];
@@ -415,7 +386,7 @@ export function stripNoiseOwners(mesh) {
   if (noise.size === 0) return mesh;
 
   const keep = [];
-  const remap = new Map(); // 旧下标 -> 新下标
+  const remap = new Map();
   const droppedIds = new Set();
   for (let i = 0; i < nodes.length; i++) {
     if (noise.has(nodes[i].owner)) {
@@ -467,8 +438,7 @@ export function stripNoiseOwners(mesh) {
   meta.sampleNodes = keep.length;
   meta.sampleEdges = edges.length;
   if (typeof meta.indexedNodes === "number") meta.indexedNodes = Math.max(keep.length, meta.indexedNodes - removed);
-  // 分类统计也必须跟着剔除走：否则 meta.categories 还写着旧总数，
-  // 与 indexedNodes / nodes 对不上（数据自洽性回归测试会当场抓到）。
+  // 分类统计也必须跟着剔除走，否则 meta.categories 还写着旧总数，与 indexedNodes / nodes 对不上（数据自洽性回归测试会当场抓到）。
   if (meta.categories && typeof meta.categories === "object") {
     const counts = new Map();
     for (const n of keep) counts.set(n.category, (counts.get(n.category) ?? 0) + 1);
@@ -494,10 +464,7 @@ export function stripNoiseOwners(mesh) {
   return out;
 }
 
-/**
- * 同作者兄弟：与 id 同一个作者（owner）的其它仓库，按星标降序。
- * 这是"完整"的同作者关系，不从存下来的边推导；没有伙伴时返回空数组。
- */
+/** 与 id 同一个作者（owner）的其它仓库，按星标降序；这是「完整」的同作者关系、不从存边推导，没有伙伴时返回空数组。 */
 export function ownerSiblings(prepared, id) {
   if (!prepared?.byId || !prepared.ownerIndex) return EMPTY_IDS;
   const node = prepared.byId.get(id);
@@ -562,28 +529,17 @@ export function prepare(mesh) {
   };
 }
 
-/**
- * 是否"确认噪声"：采集器给出的三档结论里的 noise 档
- * （名字/描述/主题都没有 DSH 专有线索，且空壳、堆标签或只挂最宽泛的 dsh 标签）。
- * 老数据（没有 verdict 字段）退回到"相关度 0 且在待复核里"，其余仍按待复核处理。
- */
+/** 是否「确认噪声」：采集器三档结论里的 noise 档（名字/描述/主题都没有 DSH 专有线索，且空壳、堆标签或只挂最宽泛的 dsh 标签）；老数据没有 verdict 时退回「相关度 0 且在待复核里」。 */
 export function isConfirmedNoise(node) {
   if (!node) return false;
   if (node.verdict) return node.verdict === "noise";
   return !!node.review && !(node.relevance > 0);
 }
 
-/**
- * 搜索命中的"最多画多少条放射线"（v0.4.6）。
- * 命中一多（比如搜 "dsh" 命中上万），每帧要建上万条路径 + 描边，浏览器直接卡死；
- * 超过这个数就只做高亮、不画放射线，并在状态栏说明原因。
- */
+/** 搜索放射线的命中上限（v0.4.6）：命中上万时每帧要建上万条路径 + 描边，浏览器直接卡死；超过就只高亮、不画线，并在状态栏说明原因。 */
 export const RAY_HIT_LIMIT = 100;
 
-/**
- * 头像尺寸统一：GitHub 默认给 460×460 原图（实测单张最大 282KB），图上最大才几十像素。
- * 与 backend/dsh_mesh/build.py 的 AVATAR_SIZE 保持一致；旧数据里没带参数的在渲染前补上。
- */
+/** 头像尺寸统一：用 64 而不是 GitHub 默认的 460×460 原图（实测单张最大 282KB），图上最大才几十像素；与 backend/dsh_mesh/build.py 的 AVATAR_SIZE 保持一致，旧数据没带参数的在渲染前补上。 */
 export const AVATAR_SIZE = 64;
 
 export function sizedAvatar(url) {
@@ -610,7 +566,6 @@ export function dataSignature(mesh) {
   return [meta.generatedAt ?? "", meta.sampleNodes ?? mesh.nodes?.length ?? 0, meta.partial ? "head" : "full"].join("|");
 }
 
-/** 搜索匹配：仓库名 / 作者 / 描述 / 标签 */
 export function matches(node, query) {
   if (!query) return false;
   const q = query.trim().toLowerCase();

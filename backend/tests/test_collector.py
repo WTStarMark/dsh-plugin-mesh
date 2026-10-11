@@ -6,7 +6,10 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
+import os
 import shutil
 import sys
 import time
@@ -20,6 +23,7 @@ sys.path.insert(0, str(BACKEND))
 
 from dsh_mesh import snapshot as snap  # noqa: E402
 from dsh_mesh import releases as rel  # noqa: E402
+from dsh_mesh import admin_config as admin_cfg  # noqa: E402
 from dsh_mesh.build import build_mesh, limit_for_frontend, relevance_score  # noqa: E402
 from dsh_mesh import build as build_mod  # noqa: E402
 from dsh_mesh.classify import apply_categories, classify_node  # noqa: E402
@@ -94,7 +98,14 @@ class ParityTest(unittest.TestCase):
         js = sample_mesh()
         # aliases={}：冻结的 JS 参照物不经改名别名表，这里也不能读盘，
         # 否则生产机上检测到的改名会让这条比对假红。
-        py = build_mesh(sample_raw(), {}, aliases={})
+        # 同理，管理后台的运行态是"本机状态"，不能参与这条跨语言比对：
+        #   · data/admin/config.json（白名单/旧版开关覆盖）
+        #   · data/admin/ecosystem.json（共鸣清单的管理副本：后台关掉一个基座，本地就会少建共鸣边）
+        # 两个都指向不存在的文件，等于强制回落到内置默认与策展产物。
+        with mock.patch.object(admin_cfg, "CONFIG_FILE", TMP / "no-such-admin-config.json"), mock.patch.object(
+            admin_cfg, "MANAGED_ECOSYSTEM_FILE", TMP / "no-such-managed-ecosystem.json"
+        ):
+            py = build_mesh(sample_raw(), {}, aliases={})
 
         js_ids = {n["id"] for n in js["nodes"]}
         py_ids = {n["id"] for n in py["nodes"]}
@@ -516,7 +527,8 @@ class RunOnceOrderTest(unittest.TestCase):
         ), mock.patch.object(collect, "STAR_HISTORY", TMP / "star-history.json"), mock.patch.object(
             collect, "UPDATE_LOG", TMP / "update-log.json"), mock.patch.object(
         collect, "STAR_DAILY", TMP / "star-daily.json"
-        ):
+        # 预计算会调 node 按真实 data/mesh.json 重写 data/mesh-core.*；测试一律用临时目录，挡掉
+        ), mock.patch.object(collect, "run_precompute", lambda *_a, **_k: None):
             code = collect.main(["--from-raw", "--frontend-limit", "100", "--quiet"])
         self.assertEqual(code, 0)
         # 状态文件也必须落在临时目录：跑测试不能污染真实的 data/cache
@@ -581,7 +593,10 @@ class StatusBudgetTest(unittest.TestCase):
             collect, "STATUS_FILE", status_path
         ), mock.patch.object(collect, "STAR_HISTORY", TMP / "star-history.json"), mock.patch.object(
             collect, "UPDATE_LOG", TMP / "update-log.json"
-        ), mock.patch.object(collect, "STAR_DAILY", TMP / "star-daily.json"):
+        ), mock.patch.object(
+            collect, "STAR_DAILY", TMP / "star-daily.json"
+        # 同上：别让测试里的预计算去改真实 data/ 目录
+        ), mock.patch.object(collect, "run_precompute", lambda *_a, **_k: None):
             code = collect.main(["--from-raw", "--budget", "900", "--releases-budget", "1200", "--quiet"])
         self.assertEqual(code, 0)
 
@@ -1806,6 +1821,322 @@ class RobustnessTest(unittest.TestCase):
             out = collect.fetch_releases(args, {"nodes": nodes}, lambda *_a: None)
         self.assertEqual(out["failed"], 5, "只试 5 个就收手，实际 " + str(out["failed"]))
         self.assertGreaterEqual(out.get("picked", 0), 5, "本来该抓的仓库数要够触发熔断")
+
+
+class AdminConfigTest(unittest.TestCase):
+    """管理后台共享配置（data/admin/config.json）：缺失/损坏/正常三态都要能用，永不抛异常。"""
+
+    def setUp(self):
+        shutil.rmtree(TMP, ignore_errors=True)
+        TMP.mkdir(parents=True, exist_ok=True)
+        self.path = TMP / "admin" / "config.json"
+
+    def tearDown(self):
+        shutil.rmtree(TMP, ignore_errors=True)
+
+    def _write(self, payload):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        text = payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False)
+        self.path.write_text(text, encoding="utf-8")
+        return self.path
+
+    def test_missing_file_returns_deep_copied_default(self):
+        cfg = admin_cfg.load_admin_config(self.path)
+        self.assertEqual(cfg["version"], 1)
+        self.assertEqual(cfg["whitelistTags"], list(WHITELIST_TAGS))
+        self.assertEqual(cfg["resonance"], {"overrides": {}})
+        # 默认值必须是深拷贝：调用方改它不能污染模块级默认值 / 下一次读取
+        cfg["whitelistTags"].append("污染")
+        cfg["resonance"]["overrides"]["a/b"] = {"enabled": False}
+        again = admin_cfg.load_admin_config(self.path)
+        self.assertEqual(again["whitelistTags"], list(WHITELIST_TAGS))
+        self.assertEqual(again["resonance"], {"overrides": {}})
+
+    def test_broken_and_wrong_type_files_never_raise(self):
+        for text in ("{ 坏掉的 json", "[1, 2, 3]", '"只是字符串"', "null", ""):
+            self._write(text)
+            self.assertEqual(admin_cfg.load_admin_config(self.path)["version"], 1, text)
+            self.assertEqual(admin_cfg.whitelist_tags(self.path), list(WHITELIST_TAGS), text)
+            self.assertEqual(admin_cfg.resonance_overrides(self.path), {}, text)
+        # 路径指向目录（read_text 抛 IsADirectoryError）也只能回退，不能抛
+        self.path.unlink()
+        self.path.mkdir(parents=True, exist_ok=True)
+        self.assertEqual(admin_cfg.whitelist_tags(self.path), list(WHITELIST_TAGS))
+
+    def test_normal_config_is_read(self):
+        self._write({
+            "version": 1,
+            "updatedAt": "2026-10-11T00:00:00Z",
+            "whitelistTags": ["dsh-plugin", "dsh-custom"],
+            "resonance": {"overrides": {"owner/repo": {"enabled": False}}},
+        })
+        self.assertEqual(admin_cfg.load_admin_config(self.path)["updatedAt"], "2026-10-11T00:00:00Z")
+        self.assertEqual(admin_cfg.whitelist_tags(self.path), ["dsh-plugin", "dsh-custom"])
+        self.assertEqual(admin_cfg.resonance_overrides(self.path), {"owner/repo": False})
+
+    def test_whitelist_cleans_dedupes_and_falls_back(self):
+        self._write({"whitelistTags": [" dsh-plugin ", "", "dsh-plugin", 42, None, "dsh-x", "dsh-x"]})
+        self.assertEqual(admin_cfg.whitelist_tags(self.path), ["dsh-plugin", "dsh-x"], "去空、去重、保序")
+        for bad in ([], [1, None, "   "], "dsh", {"dsh": True}):
+            self._write({"whitelistTags": bad})
+            self.assertEqual(admin_cfg.whitelist_tags(self.path), list(WHITELIST_TAGS), repr(bad))
+
+    def test_resonance_overrides_ignore_illegal_entries(self):
+        self._write({"resonance": {"overrides": {
+            "a/b": {"enabled": False},
+            "c/d": {"enabled": True},
+            "e/f": {"enabled": "no"},  # enabled 不是布尔 => 忽略
+            "g/h": {},                 # 缺 enabled => 忽略
+            "": {"enabled": False},    # 空键 => 忽略
+            "i/j": None,               # 值不是对象/布尔 => 忽略
+            "k/l": True,               # 容错：直接写布尔也认
+        }}})
+        self.assertEqual(admin_cfg.resonance_overrides(self.path), {"a/b": False, "c/d": True, "k/l": True})
+        for bad in ("坏", {"overrides": []}, {"overrides": {"a/b": {"enabled": 1}}}):
+            self._write({"resonance": bad})
+            self.assertEqual(admin_cfg.resonance_overrides(self.path), {}, repr(bad))
+
+    def test_main_resolves_tags_from_admin_config_offline_too(self):
+        """--tags 省略时读后台配置；离线路径（--from-raw）也走同一份解析结果。"""
+        import collect
+
+        cfg = self._write({"whitelistTags": ["dsh-custom"]})
+        seen = {}
+        with mock.patch.object(admin_cfg, "CONFIG_FILE", cfg), mock.patch.object(
+            collect, "run_once", side_effect=lambda args, log: seen.update(tags=args.tags)
+        ):
+            collect.main(["--from-raw", "--quiet"])
+            self.assertEqual(seen["tags"], ["dsh-custom"])
+            collect.main(["--from-raw", "--quiet", "--tags", "a", "b"])
+            self.assertEqual(seen["tags"], ["a", "b"], "显式 --tags 优先于后台配置")
+            cfg.unlink()
+            collect.main(["--from-raw", "--quiet"])
+            self.assertEqual(seen["tags"], list(WHITELIST_TAGS), "后台配置缺失时回退内置白名单")
+
+
+class ResonanceOverrideTest(unittest.TestCase):
+    """后台启停覆盖：enabled=false 的基座不建共鸣边，但仍归入协议基座。"""
+
+    def setUp(self):
+        shutil.rmtree(TMP, ignore_errors=True)
+        TMP.mkdir(parents=True, exist_ok=True)
+        self.eco = TMP / "ecosystem.json"
+        self.eco.write_text(json.dumps({"bases": [
+            {"id": "zzz/base", "label": "开着的基座", "enabled": True, "verified": [{"id": "aaa/plugin"}]},
+            {"id": "yyy/base", "label": "后台关掉的基座", "enabled": True, "verified": [{"id": "bbb/plugin"}]},
+            {"id": "xxx/off", "label": "策展就关掉的基座", "enabled": False, "verified": [{"id": "ccc/plugin"}]},
+        ]}), encoding="utf-8")
+        self.admin = TMP / "admin" / "config.json"
+        self.admin.parent.mkdir(parents=True, exist_ok=True)
+        self.admin.write_text(json.dumps({"resonance": {"overrides": {
+            "yyy/base": {"enabled": False},
+            "nope/missing": {"enabled": False},  # 清单里没有的基座：忽略，不凭空造
+        }}}), encoding="utf-8")
+
+    def tearDown(self):
+        shutil.rmtree(TMP, ignore_errors=True)
+
+    def test_disabled_base_is_kept_in_meta_but_builds_no_edge(self):
+        raws = [
+            fake_repo("zzz", "base", stars=100),
+            fake_repo("aaa", "plugin", stars=5),
+            fake_repo("yyy", "base", stars=90),
+            fake_repo("bbb", "plugin", stars=4),
+            fake_repo("xxx", "off", stars=80),
+            fake_repo("ccc", "plugin", stars=3),
+        ]
+        with mock.patch.object(build_mod, "ECOSYSTEM_JSON", self.eco), mock.patch.object(
+            admin_cfg, "CONFIG_FILE", self.admin
+        ):
+            mesh = build_mesh(raws, {})
+        reso = {(e["source"], e["target"]) for e in mesh["edges"] if e["type"] == "resonance"}
+        self.assertEqual(reso, {("zzz/base", "aaa/plugin")}, "被关掉的基座不能建共鸣边")
+        self.assertEqual(mesh["meta"]["ecosystemBases"], ["zzz/base"])
+        self.assertEqual(mesh["meta"]["ecosystemDisabled"], ["xxx/off", "yyy/base"])
+        # 关掉的基座仍然是"协议基座"：apply_categories 的 base_ids 用全部基座（含关闭的）
+        by_id = {n["id"]: n for n in mesh["nodes"]}
+        self.assertTrue(by_id["yyy/base"].get("categoryCurated"), "后台关掉的基座仍要归入协议基座")
+        self.assertEqual(by_id["yyy/base"]["category"], "spec")
+        self.assertNotIn("nope/missing", mesh["meta"]["ecosystemBases"], "覆盖里不存在的基座不能凭空造出来")
+
+    def test_missing_admin_config_leaves_curated_state(self):
+        raws = [fake_repo("zzz", "base", stars=100), fake_repo("aaa", "plugin", stars=5)]
+        with mock.patch.object(build_mod, "ECOSYSTEM_JSON", self.eco), mock.patch.object(
+            admin_cfg, "CONFIG_FILE", TMP / "no-such-config.json"
+        ):
+            mesh = build_mesh(raws, {})
+        reso = [(e["source"], e["target"]) for e in mesh["edges"] if e["type"] == "resonance"]
+        self.assertEqual(reso, [("zzz/base", "aaa/plugin")], "后台没配置时按策展清单走")
+
+
+class AtomicWriteTest(unittest.TestCase):
+    """_write_json 原子落盘：临时文件 + os.replace；失败不留垃圾、原文件不动。"""
+
+    def setUp(self):
+        shutil.rmtree(TMP, ignore_errors=True)
+        TMP.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self):
+        shutil.rmtree(TMP, ignore_errors=True)
+
+    def _temps(self):
+        return sorted(p.name for p in TMP.glob("*.tmp"))
+
+    def test_failure_keeps_original_and_cleans_temp(self):
+        path = TMP / "last-crawl.json"
+        snap._write_json(path, {"n": 1})
+        before = path.read_bytes()
+        with mock.patch("dsh_mesh.snapshot.os.replace", side_effect=OSError("磁盘满了")):
+            with self.assertRaises(OSError):
+                snap._write_json(path, {"n": 2})
+        self.assertEqual(path.read_bytes(), before, "写入失败时原文件必须保持原样")
+        self.assertEqual(self._temps(), [], "失败不能留下临时文件")
+
+    def test_replaces_content_and_keeps_original_mode(self):
+        path = TMP / "mesh.json"
+        path.write_text("旧内容", encoding="utf-8")
+        os.chmod(path, 0o640)
+        snap._write_json(path, {"v": 2})
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"v": 2})
+        self.assertEqual(path.stat().st_mode & 0o777, 0o640, "权限要与原文件一致")
+        self.assertEqual(self._temps(), [])
+
+    def test_temp_file_is_not_treated_as_snapshot(self):
+        (TMP / "2026010100.json").write_text("{}", encoding="utf-8")
+        (TMP / "2026010200.json").write_text('{"ok": true}', encoding="utf-8")
+        (TMP / "2026010300.json.99999.tmp").write_text("{写到一半", encoding="utf-8")
+        self.assertEqual(snap.latest_snapshot(TMP), {"ok": True}, "枚举快照必须跳过 .tmp")
+        removed = snap.prune_snapshots(TMP, 1)
+        self.assertEqual(removed, ["2026010100.json"])
+        self.assertEqual(self._temps(), ["2026010300.json.99999.tmp"], "prune 不能把 tmp 当正式快照")
+
+    def test_write_snapshot_leaves_no_temp_file(self):
+        mesh = build_mesh(sample_raw(), {}, aliases={})
+        path, _diff = snap.write_snapshot(mesh, TMP, keep=5)
+        self.assertIsNotNone(path)
+        self.assertEqual(self._temps(), [])
+        self.assertEqual(snap.latest_snapshot(TMP)["counts"]["nodes"], len(mesh["nodes"]))
+
+
+class AdminBlacklistPersistenceTest(unittest.TestCase):
+    """后台人工黑名单条目不能被采集器的自动落盘抹掉：落盘 = 现有 ∪ 本轮新判定。"""
+
+    def setUp(self):
+        shutil.rmtree(TMP, ignore_errors=True)
+        TMP.mkdir(parents=True, exist_ok=True)
+        self.raw = TMP / "raw.json"
+        raws = [fake_repo("mass", "dsh-mass-%d" % i) for i in range(201)]  # >200 个全 0 星 => 判噪声
+        self.raw.write_text(json.dumps({"repos": raws, "queryMeta": []}), encoding="utf-8")
+        self.blacklist = TMP / "noise-blacklist.json"
+
+    def tearDown(self):
+        shutil.rmtree(TMP, ignore_errors=True)
+
+    def _write_blacklist(self, owners):
+        self.blacklist.write_text(
+            json.dumps({"updatedAt": "x", "count": len(owners), "owners": owners}), encoding="utf-8"
+        )
+
+    def _run_round(self, patch_build=None):
+        import collect
+
+        patches = [
+            mock.patch.object(collect, "SAMPLE_RAW", self.raw),
+            mock.patch.object(collect, "NOISE_BLACKLIST", self.blacklist),
+            mock.patch.object(collect, "MESH_JSON", TMP / "mesh.json"),
+            mock.patch.object(collect, "SNAPSHOT_DIR", TMP / "snapshots"),
+            mock.patch.object(collect, "LAST_CRAWL", TMP / "last-crawl.json"),
+            mock.patch.object(collect, "STATUS_FILE", TMP / "status.json"),
+            mock.patch.object(collect, "STAR_HISTORY", TMP / "star-history.json"),
+            mock.patch.object(collect, "STAR_DAILY", TMP / "star-daily.json"),
+            mock.patch.object(collect, "UPDATE_LOG", TMP / "update-log.json"),
+            # 预计算会调 node 写真实 data/ 目录：测试里必须挡掉（测试一律用临时目录）
+            mock.patch.object(collect, "run_precompute", lambda *_a, **_k: None),
+            # 隔离真实运行态的 data/admin/config.json
+            mock.patch.object(admin_cfg, "CONFIG_FILE", TMP / "admin" / "config.json"),
+        ]
+        out = io.StringIO()
+        with contextlib.ExitStack() as stack:
+            for patch in patches:
+                stack.enter_context(patch)
+            if patch_build is not None:
+                stack.enter_context(mock.patch.object(collect, "build_mesh", side_effect=patch_build))
+            with contextlib.redirect_stdout(out):
+                code = collect.main(["--from-raw"])
+        return code, out.getvalue()
+
+    def test_existing_manual_entry_survives_automatic_write(self):
+        self._write_blacklist({"human/manual": {"repos": 1, "reason": "人工"}})
+        code, out = self._run_round()
+        self.assertEqual(code, 0)
+        owners = snap.load_blacklist(self.blacklist)
+        self.assertIn("human/manual", owners, "采集开始前就存在的人工条目必须保留")
+        self.assertIn("mass", owners, "本轮新判定的噪声作者必须写入")
+        self.assertIn("新增拉黑 1 个", out)
+        self.assertIn("保留既有（含人工）1 个", out)
+
+    def test_entry_added_by_admin_during_round_is_not_overwritten(self):
+        self._write_blacklist({})
+        real_build = build_mod.build_mesh
+
+        def build_then_admin_adds(*args, **kwargs):
+            mesh = real_build(*args, **kwargs)
+            # 模拟后台在采集期间往黑名单里加人：run_once 开头读到的还是空表，
+            # 只写"本轮解析结果"就会把这行人工条目抹掉。
+            payload = json.loads(self.blacklist.read_text(encoding="utf-8"))
+            payload.setdefault("owners", {})["human/midround"] = {"repos": 2, "reason": "后台期间人工添加"}
+            self.blacklist.write_text(json.dumps(payload), encoding="utf-8")
+            return mesh
+
+        code, _out = self._run_round(patch_build=build_then_admin_adds)
+        self.assertEqual(code, 0)
+        owners = snap.load_blacklist(self.blacklist)
+        self.assertIn("human/midround", owners, "采集期间后台新增的人工条目不能被本轮落盘覆盖")
+        self.assertIn("mass", owners, "本轮新判定的噪声作者仍要写入")
+
+
+class EcosystemSourceTest(unittest.TestCase):
+    """共鸣清单的来源：后台管理副本优先，其次策展产物（与 Node 侧 readEcosystem 同规则）。
+
+    管理副本放 data/admin/ 下是为了活过两次覆盖：部署脚本同步整个 tools/，
+    策展工具复跑也会整体重写 tools/ecosystem.json。
+    """
+
+    def setUp(self):
+        import tempfile
+
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name)
+        self.managed = self.dir / "ecosystem.json"
+        self.curated = self.dir / "curated.json"
+        self.curated.write_text(
+            json.dumps({"bases": [{"id": "curated/base", "label": "策展基座", "enabled": True, "verified": []}]}),
+            encoding="utf-8",
+        )
+
+    def test_managed_copy_wins(self):
+        self.managed.write_text(
+            json.dumps({"bases": [{"id": "managed/base", "label": "后台基座", "enabled": True, "verified": []}]}),
+            encoding="utf-8",
+        )
+        with mock.patch.object(admin_cfg, "MANAGED_ECOSYSTEM_FILE", self.managed):
+            self.assertEqual(admin_cfg.ecosystem_path(), self.managed, "有后台副本就该用它")
+            eco = build_mod.load_ecosystem()
+            self.assertIn("managed/base", eco)
+            self.assertNotIn("curated/base", eco, "有副本时不该再读策展产物")
+
+    def test_broken_managed_copy_falls_back(self):
+        self.managed.write_text("{ 坏掉的 json", encoding="utf-8")
+        with mock.patch.object(admin_cfg, "MANAGED_ECOSYSTEM_FILE", self.managed):
+            self.assertEqual(admin_cfg.ecosystem_path(), admin_cfg.ECOSYSTEM_FILE, "副本坏了要退回策展产物，不能拖垮采集")
+
+    def test_explicit_path_never_gets_hijacked(self):
+        self.managed.write_text(json.dumps({"bases": []}), encoding="utf-8")
+        with mock.patch.object(admin_cfg, "MANAGED_ECOSYSTEM_FILE", self.managed):
+            self.assertEqual(admin_cfg.ecosystem_path(self.curated), self.curated, "显式指定的清单不能被管理副本插队")
+            eco = build_mod.load_ecosystem(self.curated)
+            self.assertIn("curated/base", eco)
 
 
 if __name__ == "__main__":

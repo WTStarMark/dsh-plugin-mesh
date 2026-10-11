@@ -1,15 +1,7 @@
 """分段扫描：把"一轮抓完"改成"每轮抓一部分"，最终覆盖全部仓库。
-
-为什么必须这样：
-  - GitHub 搜索接口【单个查询最多返回 1000 条】，topic:dsh-plugin 有 1.7 万个仓库，
-    一轮硬抓既超配额又必然截断；
-  - 因此把抓取空间切成"段"（topic × 星标区间，必要时再按创建时间细分），
-    每轮只刷新最久没动的一批，结果并入【累积索引】；
-  - 累积索引保存"所有见过的仓库"，前端因此最终能看到全部项目仓库。
-
-状态文件：
-  data/cache/segments.json   每段的抓取时间与计数（可断点续跑）
-  data/cache/repos.json      累积索引（前端数据的唯一来源）
+GitHub 搜索单个查询最多返回 1000 条，而 topic:dsh-plugin 有 1.7 万个仓库，一轮硬抓既超配额又必然截断：
+把空间切成"段"（topic × 星标区间，必要时按创建时间细分），每轮只刷新最久没动的一批，结果并入
+【累积索引】data/cache/repos.json（前端数据的唯一来源，与 segments.json 都可续跑）。
 """
 
 from __future__ import annotations
@@ -94,10 +86,7 @@ def _split_created(created: str | None) -> tuple[str, str]:
 
 def subdivide(segment: dict, now: datetime | None = None) -> list[dict]:
     """把命中数超过 1000 的段按创建时间细分：星标区间 → 年 → 季度 → 月 → 半月 → 日。
-
-    日粒度才是叶子。此前把"月"当叶子，导致热门月份的段被整段截断
-    （实测 7 段共漏掉 1.5 万个仓库），所以必须继续往下切。
-    """
+    日粒度才是叶子：把"月"当叶子时热门月份的段会被整段截断（曾漏掉 1.5 万个仓库），必须继续往下切。"""
     now = now or utcnow()
     level = segment.get("level", 0)
     windows: list[tuple[str, int]] = []
@@ -112,10 +101,9 @@ def subdivide(segment: dict, now: datetime | None = None) -> list[dict]:
             windows.append((f"{year}-{first:02d}-01..{year}-{last:02d}-{_days_in_month(year, last):02d}", 2))
     elif level == 2:
         year, first_month = _window_start(segment.get("created"))
-        for month in range(first_month, first_month + 3):  # 季度 -> 三个月，一个都不能少
+        for month in range(first_month, first_month + 3):
             windows.append((f"{year}-{month:02d}-01..{year}-{month:02d}-{_days_in_month(year, month):02d}", 3))
     elif level == 3:
-        # 月 -> 上半月 / 下半月
         start, end = _split_created(segment.get("created"))
         year, month = int(start[:4]), int(start[5:7])
         last_day = int(end[8:10])
@@ -124,7 +112,6 @@ def subdivide(segment: dict, now: datetime | None = None) -> list[dict]:
         if last_day > middle:
             windows.append((f"{year}-{month:02d}-{middle + 1:02d}..{year}-{month:02d}-{last_day:02d}", 4))
     elif level == 4:
-        # 半月 -> 逐日
         start, end = _split_created(segment.get("created"))
         year, month = int(start[:4]), int(start[5:7])
         for day in range(int(start[8:10]), int(end[8:10]) + 1):
@@ -180,7 +167,7 @@ class SegmentStore:
             except (OSError, json.JSONDecodeError):
                 repos = {}
         self.repos = repos
-        self._apply_aliases()  # 旧名 → 现名（别名表来自经 API 核对的迁移）
+        self._apply_aliases()
         return self.repos
 
     def _load_aliases(self) -> dict[str, str]:
@@ -228,12 +215,9 @@ class SegmentStore:
                 self._by_github[str(gid)] = key
 
     def save(self) -> None:
-        """落盘。顺序很重要：【先写仓库数据，后写队列状态】。
-
-        如果反过来，进程在两次写入之间被杀（pm2 重启、Ctrl-C、OOM），
-        队列会记着"这些段抓完了"，而抓到的仓库却没落盘 —— 数据就永久丢了。
-        两次写入都用临时文件 + 原子替换，任何时刻被杀都不会留下半截 JSON。
-        """
+        """落盘。顺序很重要：先写仓库数据，后写队列状态。
+        反过来若在两次写入之间被杀（pm2 重启、Ctrl-C、OOM），队列会记着"这些段抓完了"而仓库
+        没落盘，数据永久丢失；两次写入都走临时文件 + 原子替换，任何时刻被杀都不留半截 JSON。"""
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
         self.state["updatedAt"] = iso()
         _atomic_write(
@@ -261,11 +245,8 @@ class SegmentStore:
 
     def next_batch(self, budget_requests: int, refresh_hours: float, log=print, refresh_share: float = 0.25) -> list[dict]:
         """挑这一轮要抓的段，顺序固定为【先检索新仓库，后更新旧仓库】。
-
-        - 发现阶段：从没抓过的段（state=pending）优先，且优先吃预算；
-        - 更新阶段：已抓过但超过 refresh_hours 没刷新的段，按最久未更新排序；
-          只要还有没抓过的段，更新阶段最多分到 refresh_share 的预算（避免旧仓库一直抢占新仓库的额度）。
-        """
+        发现阶段（pending）优先吃预算；更新阶段（超过 refresh_hours 没刷新，按最久未更新排序）
+        在有 pending 时最多分到 refresh_share 的预算，避免旧仓库一直抢占新仓库的额度。"""
         stale_before = utcnow() - timedelta(hours=refresh_hours)
         discovering = [s for s in self.state["segments"].values() if s.get("state") == "pending"]
         discovering.sort(key=lambda s: (s.get("level", 0), s.get("key", "")))
@@ -278,8 +259,7 @@ class SegmentStore:
 
         unlimited = budget_requests <= 0
         has_refresh = bool(refreshing)
-        # 预算显式切两段：有旧仓库要更新时，给发现阶段留 (1 - refresh_share)，
-        # 否则发现阶段会吃光预算，旧仓库的星标永远刷不到。
+        # 预算切两段：有旧仓库要更新时给发现阶段留 (1 - refresh_share)，否则旧仓库星标永远刷不到。
         refresh_budget = 0 if unlimited or not has_refresh else max(1, int(budget_requests * refresh_share))
         discover_budget = budget_requests if unlimited or not has_refresh else max(1, budget_requests - refresh_budget)
 
@@ -315,9 +295,7 @@ class SegmentStore:
 
     def requeue_truncated(self, log=print) -> int:
         """把先前被截断的段按更细的时间粒度（月→半月→日）重新排队。
-
-        细分层级是后来才加深的，已经跑过的截断段不会自动重来；这个方法让它们补扫。
-        """
+        细分层级是后来才加深的，跑过的截断段不会自动重来；这个方法让它们补扫。"""
         items = list(self.state.get("truncated") or [])
         requeued = 0
         still: list[dict] = []
@@ -356,13 +334,9 @@ class SegmentStore:
         return {"split": False, "added": added, "children": 0}
 
     def merge(self, records: list[dict]) -> int:
-        """并入累积索引。返回新识别到的仓库数。
-
-        改名处理：仓库改名后 full_name（也就是 id）会变，但 GitHub 的数字 id 不变。
-        因此带 githubId 的记录会先按 githubId 找到旧键：如果旧键的名字和这次不一样，
-        说明改名了 —— 把旧记录挪到新名字下（留下 renamedFrom 痕迹），而不是新增一条，
-        否则生态图里会同时出现改名前后两个球。
-        """
+        """并入累积索引，返回新识别到的仓库数。
+        改名后 full_name（id）会变但 githubId 不变：带 githubId 的记录先按它找到旧键，
+        名字不同就把旧记录挪到新名字下（留 renamedFrom 痕迹）而不是新增，否则图里会有两个球。"""
         added = 0
         for record in records:
             rid = record.get("id")
@@ -414,16 +388,13 @@ class SegmentStore:
 
 
 def _atomic_write(path: Path, data) -> None:
-    """原子写：先写临时文件再替换，任何时刻被杀都不会留下半截文件。
-
-    data 可以是 str（普通文本）或 bytes（gzip 之类的二进制）。
-    """
+    """原子写：先写临时文件再替换，任何时刻被杀都不会留下半截文件；data 可为 str 或 bytes。"""
     tmp = path.with_name(path.name + ".tmp")
     if isinstance(data, (bytes, bytearray)):
         tmp.write_bytes(data)
     else:
         tmp.write_text(data, encoding="utf-8")
-    os.replace(tmp, path)  # 原子替换：要么是旧内容，要么是完整新内容
+    os.replace(tmp, path)
 
 
 def _parse(value: str) -> datetime:

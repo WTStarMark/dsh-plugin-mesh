@@ -1,18 +1,14 @@
 #!/usr/bin/env node
 /**
- * seed-sample — 临时取样器（非正式采集器）
- *
- * 目的：只跑一次，为「前端原型」取一份真实、可信的样本数据。
- * 正式采集器（增量、缓存、去噪、快照 diff）尚未开工，见 README 的路线图。
- *
- * 输出：
- *   data/sample-raw.json  原始 API 响应（裁剪字段，作为可追溯来源）
- *   data/mesh.json        前端数据契约（meta / tags / clusters / nodes / edges）
+ * seed-sample — 临时取样器（非正式采集器）：只跑一次，为「前端原型」取一份真实、可信的样本数据；
+ * 正式采集器（增量、缓存、去噪、快照 diff）见 README 路线图。
+ * 输出 data/sample-raw.json（原始 API 响应，可追溯来源）与 data/mesh.json（前端数据契约）。
  */
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { applyCategories, DEFAULT_OPTIONS, nonPluginReason } from "./categories.mjs";
-// 生态共鸣清单（人工策展，见 tools/curate-ecosystem.mjs）
-import ecosystem from "./ecosystem.json" with { type: "json" };
+// 生态共鸣清单：后台管理副本优先，其次策展产物（与采集器同规则）
+import { loadAdminConfig, readEcosystem, whitelistTagsOf } from "./admin-config.mjs";
+const ecosystem = readEcosystem().doc;
 // 相关性判定与采集器同一套口径（三档结论：related / noise / manual）
 import { analyzeRelevance } from "./relevance.mjs";
 import { dirname, resolve } from "node:path";
@@ -22,15 +18,8 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DATA_DIR = resolve(ROOT, "data");
 const API = "https://api.github.com";
 
-/** 白名单：项目要捕获的 6 个标签 */
-const WHITELIST = [
-  "dsh-plugin-desktop",
-  "dsh-desktop",
-  "dsh-plugin-market",
-  "dsh-plugins",
-  "dsh-plugin",
-  "dsh",
-];
+/** 白名单：与采集器同源（data/admin/config.json，管理后台可改；缺省即 6 个默认标签） */
+const WHITELIST = whitelistTagsOf(loadAdminConfig());
 
 const HEADERS = {
   accept: "application/vnd.github+json",
@@ -115,10 +104,8 @@ function buildMesh(rawRepos, queryMeta) {
     nodes.push(node);
   }
 
-  // ---- 边：主题共现（只连稀有主题）+ 同作者 ----
   const edgeMap = new Map();
-  // directed：resonance 是"基座 → 插件"的有向关系，方向必须保留（插件字母序在前也不能翻）；
-  // topic / owner 是对等关系，按字母序归一化以便去重。与 backend/dsh_mesh/build.py 同一口径。
+  // resonance 是「基座 → 插件」的有向关系，方向必须保留；topic / owner 是对等关系，按字母序归一化去重（与 backend/dsh_mesh/build.py 同一口径）。
   const addEdge = (a, b, type, via, directed = false) => {
     const [s, t] = directed || a < b ? [a, b] : [b, a];
     const key = type + ":" + s + "|" + t;
@@ -179,7 +166,7 @@ function buildMesh(rawRepos, queryMeta) {
     }
   }
 
-  // ---- 生态共鸣：基座 → 长在它上面的插件（人工策展 + README 复核，不是规则推导）----
+  // 生态共鸣边：基座 → 长在它上面的插件，人工策展 + README 复核，不是规则推导
   let resonanceEdges = 0;
   const nodeIds = new Set(nodes.map((n) => n.id));
   for (const base of ecosystem.bases ?? []) {
@@ -192,8 +179,7 @@ function buildMesh(rawRepos, queryMeta) {
     }
   }
 
-  // ---- 度数上限：只裁剪"主题共现"边；同作者是硬关系，必须保留 ----
-  // （曾经的 bug：高星仓库先被主题边占满配额，Tencent/BrowserSkill 与 Tencent/WeKnora 的同作者边被静默丢掉）
+  // 度数上限只裁剪主题共现边：同作者是硬关系必须保留（高星仓库曾被主题边占满配额，同作者边被静默裁掉）。
   const DEGREE_CAP = 14;
   const sorted = [...edgeMap.values()].sort((a, b) => b.weight - a.weight);
   const degree = new Map();
@@ -216,7 +202,6 @@ function buildMesh(rawRepos, queryMeta) {
   }
   for (const n of nodes) n.degree = degree.get(n.id) ?? 0;
 
-  // ---- 功能分类：纯规则打分，不按标签分组（见 tools/categories.mjs）----
   // 策展认定的生态基座直接归入协议基座（与 reclassify / Python 采集器同一套口径）
   const categoryStats = applyCategories(nodes, {
     ...DEFAULT_OPTIONS,

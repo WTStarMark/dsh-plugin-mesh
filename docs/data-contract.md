@@ -6,22 +6,27 @@
 {
   "meta": {
     "generatedAt": "ISO 时间",
-    "kind": "sample-seed | full-crawl",   // 前端据此显示"取样/全量"提示
+    "kind": "sample-seed | hourly-crawl | store-rebuild",  // 只有 sample-seed 会被前端标成"抽样数据"
     "note": "必须写明数据局限",
     "source": "GitHub REST Search API",
     "sampleNodes": 593, "sampleEdges": 1019, "droppedEdges": 104,
-    "hubThreshold": 8, "degreeCap": 14, "reviewedAsNoise": 120,
-    // 噪声黑名单（v0.4.2）：同一作者被收录 > 200 个仓库且每个仓库星标都 < 1 => 判为垃圾账号。
+    "hubThreshold": 8, "degreeCap": 14, "reviewedAsNoise": 447,
+    "verdictCounts": { "related": 27441, "noise": 444, "manual": 447 },  // 三档相关性结论各多少条
+    // 噪声黑名单：批量刷标签的垃圾账号。两条判据命中任一即拉黑 ——
+    //   1) 收录仓库数 > 300 且 0 星占比 > 98%；2) 收录仓库数 > 200 且全部 0 星。
     // 这类节点与它们的边不会出现在 nodes / edges 里；下面几个字段只是如实记账。
-    "noiseBlacklist": { "spammer": { "repos": 1285, "maxStars": 0 } },
+    "noiseBlacklist": { "spammer": { "repos": 1285, "zeroStars": 1285, "zeroRatio": 1, "maxStars": 0, "reason": "mass-publish" } },
     "noiseBlacklistSize": 1, "noiseNodesRemoved": 1285, "noiseSkipped": 0,
-    // 非 DSH 语境排除（v0.4.3）：挂着 dsh 标签但 DSH 是别的意思（深度哈希…），不进索引
+    // 非 DSH 语境排除：挂着 dsh 标签但 DSH 是别的意思（深度哈希…），不进索引
     "excludedNotPlugin": { "owner/repo": "深度哈希类：这里的 DSH 是 Deep Supervised Hashing…" },
     "excludedNotPluginCount": 1,
-    // 无信号空壳不收录（v0.5.0）：只有名字命中 dsh、既没有描述也没有主题标签的（实测 5174 个）
-    "noSignalSkipped": 5174,
-    // 生态共鸣（v0.4.3）：人工策展的边数，清单在 tools/ecosystem.json
-    "resonanceEdges": 24, "ecosystemBases": ["omdsh-dev/DSH-better-sidebar"],
+    // 无信号空壳不收录：只有名字命中 dsh、既没有描述也没有主题标签的
+    "noSignalSkipped": 10860,
+    // 生态共鸣：人工策展的边数。清单优先读后台副本 data/admin/ecosystem.json，
+    // 没有它才读策展产物 tools/ecosystem.json
+    "resonanceEdges": 72,
+    "ecosystemBases": ["T-Auto/dsh-std", "WTStarMark/dsh-myskin"],   // enabled !== false 的基座
+    "ecosystemDisabled": ["T-Auto/dsh-ecosystem-spec"],              // enabled === false：只停共鸣边，分类不受影响
     "queries": [ { "id", "q", "page", "sort", "totalCount", "fetched", "rateRemaining" } ],
     "errors": []
   },
@@ -57,6 +62,8 @@
 | `categoryScore` | number | 分类得分（可解释性） |
 | `categoryHits` | string[] | 命中的规则词，如 `["skin","皮肤"]` |
 | `categoryRaw` | string? | 被长尾合并前的原始分类（仅当被并入「其他」时存在） |
+| `subcategory` / `subcategoryLabel` | string \| null | 细枝（扇区内的更小分组）id 与中文名，单扇区放大时用 |
+| `githubId` / `renamedFrom` | number / string? | GitHub 数字 id 与旧名字；改名去重按数字 id 认人 |
 | `degree` | number | 度数（用于标签显示优先级） |
 
 ## Edge
@@ -64,7 +71,7 @@
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `source` / `target` | string | 必须是已存在的 `node.id`，且不得自环 |
-| `type` | `"topic" \| "owner" \| "fork" \| "resonance"` | 主题共现 / 同作者 / fork 血缘 / **生态共鸣**（人工策展：基座 → 长在它上面的插件，见 `tools/ecosystem.json`） |
+| `type` | `"topic" \| "owner" \| "fork" \| "resonance"` | 主题共现 / 同作者 / fork 血缘 / **生态共鸣**（人工策展：基座 → 长在它上面的插件；清单优先读后台副本 `data/admin/ecosystem.json`，没有才用 `tools/ecosystem.json`） |
 | `weight` | number > 0 | 共现次数或权重，决定线宽与粗细 |
 | `via` | string[] | 产生这条边的中间实体（主题名或作者名），用于"为什么它们连着" |
 

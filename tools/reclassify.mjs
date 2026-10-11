@@ -1,14 +1,9 @@
 #!/usr/bin/env node
 /**
- * 就地重建：不重新采集，用当前规则重算 data/mesh.json 的派生字段。
- *
- *  1) 非插件语境排除（DSH 是别的意思，例如 DeepHash-pytorch 的 DSH = Deep Supervised Hashing）
- *     —— 这一步会真的删节点与相关边，并用 meta.excludedNotPlugin 记账
- *  2) 功能分类 + 细枝（tools/categories.mjs）
- *  3) 相关性三档判定（tools/relevance.mjs）
- *  4) 生态共鸣边重建（tools/ecosystem.json，人工策展 + README 复核）
- *
- * 节点集合只允许因"排除规则"减少，不允许增加。改完记得跑 tools/precompute-layout.mjs。
+ * 就地重建：不重新采集，用当前规则重算 data/mesh.json 的派生字段——
+ * 非插件语境排除、功能分类 + 细枝（tools/categories.mjs）、相关性三档判定（tools/relevance.mjs）、
+ * 生态共鸣边重建（tools/ecosystem.json，人工策展 + README 复核）。
+ * 节点集合只允许因「排除规则」减少、不允许增加；改完记得跑 tools/precompute-layout.mjs。
  */
 
 import { readFile, writeFile } from "node:fs/promises";
@@ -16,7 +11,10 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyCategories, DEFAULT_OPTIONS, nonPluginReason } from "./categories.mjs";
 import { analyzeRelevance } from "./relevance.mjs";
-import ecosystem from "./ecosystem.json" with { type: "json" };
+import { readEcosystem } from "./admin-config.mjs";
+
+// 与 Python 的 build.load_ecosystem 同规则：后台管理副本（data/admin/ecosystem.json）优先，没有才用策展产物 tools/ecosystem.json
+const ecosystem = readEcosystem().doc;
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const FILE = resolve(ROOT, "data/mesh.json");
@@ -24,7 +22,6 @@ const FILE = resolve(ROOT, "data/mesh.json");
 const mesh = JSON.parse(await readFile(FILE, "utf8"));
 const nodeCount = mesh.nodes.length;
 
-// ---- 1) 非插件语境排除 ----
 const excluded = [];
 const keep = new Set();
 for (const node of mesh.nodes) {
@@ -42,7 +39,6 @@ if (excluded.length) {
 }
 const ids = new Set(mesh.nodes.map((n) => n.id));
 
-// ---- 2) 功能分类 + 细枝 ----
 const before = new Map(mesh.nodes.map((n) => [n.id, n.category]));
 const stats = applyCategories(mesh.nodes, {
   ...DEFAULT_OPTIONS,
@@ -58,7 +54,6 @@ for (const node of mesh.nodes) {
   }
 }
 
-// ---- 3) 相关性三档判定 ----
 const verdicts = { related: 0, noise: 0, manual: 0 };
 for (const node of mesh.nodes) {
   const v = analyzeRelevance(node);
@@ -69,12 +64,11 @@ for (const node of mesh.nodes) {
   verdicts[v.verdict] += 1;
 }
 
-// ---- 4) 生态共鸣边：先清掉旧的，再按策展清单重建（两端都在图里才建）----
 const edges = (mesh.edges ?? []).filter((e) => e.type !== "resonance");
 let resonance = 0;
 const missing = [];
 for (const base of ecosystem.bases ?? []) {
-  if (base.enabled === false) continue; // 临时关闭的基座不建边
+  if (base.enabled === false) continue;
   if (!ids.has(base.id)) {
     missing.push(base.id);
     continue;
@@ -85,10 +79,8 @@ for (const base of ecosystem.bases ?? []) {
     resonance += 1;
   }
 }
-// ---- 4b) 同作者边：按当前节点集重建 ----
-// 删过节点之后，原来的"星形枢纽"可能已经不在了，残留的 owner 边会让同一作者的部分仓库失联
-// （tests/data.test.mjs 的连通性用例会抓这个）。这里按与采集器完全一致的算法重建：
-// 作者成员 ≤ OWNER_CLIQUE_MAX 用完全图，超过就用"星标最高的那个当枢纽"的星形拓扑。
+// 删过节点后残留的 owner 边会让同一作者的部分仓库失联（tests/data.test.mjs 的连通性用例会抓这个），
+// 所以按与采集器一致的算法重建：成员 ≤ OWNER_CLIQUE_MAX 用完全图，超过则用星标最高者当枢纽的星形拓扑。
 const OWNER_CLIQUE_MAX = 8;
 const ownerless = edges.filter((e) => e.type !== "owner");
 const byOwner = new Map();
@@ -128,7 +120,6 @@ mesh.meta.resonanceEdges = resonance;
 mesh.meta.ecosystemBases = (ecosystem.bases ?? []).filter((b) => b.enabled !== false).map((b) => b.id);
 mesh.meta.ecosystemDisabled = (ecosystem.bases ?? []).filter((b) => b.enabled === false).map((b) => b.id);
 
-// ---- 派生字段与计数 ----
 mesh.meta.categories = {
   classified: stats.classified,
   unclassified: stats.unclassified,
@@ -150,7 +141,6 @@ mesh.tags = (mesh.tags ?? []).map((t) => ({
 
 await writeFile(FILE, JSON.stringify(mesh), "utf8");
 
-// ---- 自检 ----
 const expected = nodeCount - excluded.length;
 if (mesh.nodes.length !== expected) {
   console.error("节点数异常：期望 " + expected + "（原 " + nodeCount + " - 排除 " + excluded.length + "），实际 " + mesh.nodes.length);

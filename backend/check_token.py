@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """诊断：确认 .env 里的令牌是否真的生效。
-
-只打印配额数字，绝不打印令牌内容。
-用法：python3 backend/check_token.py
+只打印配额数字，绝不打印令牌内容。用法：python3 backend/check_token.py
 """
 
 from __future__ import annotations

@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """一致性校验：用 Python 采集器复算前端 JS 版的产物，逐项比对。
-
-存在的意义：采集器要长期接管数据生产，必须证明它与既有 JS 管线结果一致，
-否则前端会在无人察觉的情况下换到一份"看着差不多、其实不一致"的数据。
-
+采集器要长期接管数据生产，必须证明它与既有 JS 管线结果一致，否则前端会在无人察觉下
+换到一份"看着差不多、其实不一致"的数据。
 用法：python3 backend/verify_parity.py [--js data/mesh.json] [--raw data/sample-raw.json]
 """
 

@@ -1,10 +1,7 @@
 /**
- * 榜单弹窗（v0.5.0）：画布顶端那枚奖杯 → 「周更新热榜」/「周 star 热榜」。
- *
+ * 榜单弹窗：画布顶端那枚奖杯 → 「周更新热榜」/「周 star 热榜」。
  * 数据来自 GET /api/ranking（服务端读 data/mesh.json 与 data/cache/star-history.json）：
- *   · 周更新热榜 = pushedAt 落在窗口内的仓库，按最近推送排序 —— GitHub 事实，直接可用
- *   · 周 star 热榜 = 两个时间点的星标之差（真实观测）。历史还没攒够一个窗口时，
- *     服务端会如实返回"实际窗口天数"，这里原样展示，绝不把它说成"周增量"。
+ * 历史还没攒够一个窗口时，服务端如实返回「实际窗口天数」，这里原样展示，绝不把它说成「周增量」。
  * 接口拿不到就直说拿不到，不编任何数字。
  */
 
@@ -39,16 +36,7 @@ export function timeAgo(iso, now = Date.now()) {
   return Math.floor(day / 30) + " 个月前";
 }
 
-/**
- * @param {object} opts
- * @param {HTMLElement} opts.button  奖杯按钮
- * @param {HTMLElement} opts.modal   弹窗容器（带 hidden）
- * @param {HTMLElement} opts.tabs    两个榜单的切换条（.seg）
- * @param {HTMLElement} opts.body    列表容器
- * @param {HTMLElement} opts.close   关闭按钮
- * @param {Function} [opts.fetcher]  拉 /api/ranking；缺省或失败时如实显示"拿不到"
- * @param {Function} [opts.onPick]   点某一行：回调仓库 id（调用方负责选中/居中）
- */
+/** opts：{ button, modal, tabs, body, close, fetcher, onPick }；fetcher 失败时如实显示「拿不到」，onPick 回调仓库 id */
 export function createRankingBoard({ button, modal, tabs, body, close, fetcher, onPick }) {
   let data = null;
   let loadedAt = 0;
@@ -73,10 +61,7 @@ export function createRankingBoard({ button, modal, tabs, body, close, fetcher, 
     return board?.items ?? [];
   }
 
-  /**
-   * 近 7 日趋势柱：服务端给的是逐日序列（null = 那天没观测，不是 0）。
-   * 有数据的天画实心柱，0 画一条浅底座，没观测的画虚线底座 —— 三种状态必须一眼能分开。
-   */
+  /** 近 7 日趋势柱：null = 那天没观测（不是 0）——有数据画实心、0 画浅底座、没观测画虚线底座 */
   function sparkline(item, board) {
     const values = Array.isArray(item.series) ? item.series : null;
     const days = Array.isArray(data?.seriesDays) ? data.seriesDays : [];
@@ -97,10 +82,9 @@ export function createRankingBoard({ button, modal, tabs, body, close, fetcher, 
       }
       return wrap;
     }
-    // 每行按自己的峰值归一：看的是"这一周的起伏形状"，绝对值看右侧指标与悬停明细。
-    // （全榜统一比例尺试过，长尾行的柱子会几乎看不见，不合适。）
+    // 每行按自己的峰值归一（看的是这一周的起伏形状，绝对值看右侧指标）；全榜统一比例尺会让长尾行的柱子几乎看不见。
     const peak = Math.max(1, ...values.map((v) => (typeof v === "number" && v > 0 ? v : 0)));
-    const BAR_MAX = 18; // px
+    const BAR_MAX = 18;
     values.forEach((v, i) => {
       const nodata = v === null || v === undefined;
       const down = !nodata && v < 0; // 掉星：star 榜会真的出现负数，如实画出来（不显示成 0）
@@ -111,8 +95,7 @@ export function createRankingBoard({ button, modal, tabs, body, close, fetcher, 
       bar.title = (days[i] ?? "第 " + (i + 1) + " 天") + "：" + (nodata ? "—" : label);
       wrap.append(bar);
     });
-    // 跨多天的观测（例如只有一个旧观测点）：画成一根压在底部的宽柱，标出它覆盖了哪几天。
-    // 绝不平摊到某一天 —— 那会变成凭空的日柱。
+    // 跨多天的观测画成一根压在底部的宽柱，并标出它覆盖了哪几天；绝不平摊到某一天——那会变成凭空的日柱。
     for (const s of spans) {
       const n = values.length || 7;
       const span = el("span", "spark-span");
@@ -161,8 +144,7 @@ export function createRankingBoard({ button, modal, tabs, body, close, fetcher, 
         el("span", null, "最新 " + (newest?.tag ?? "—") + " · ★ " + formatStars(item.stars)),
       );
     } else if (board?.metric === "updates") {
-      // 主指标 = 采样到的"推送推进轮次数"。它是**下界**（每轮最多记一次、同一轮里的多次推送会合并），
-      // 所以数字前加 ≥：一眼能看出"至少这么多次"，不额外堆解释文字。
+      // 主指标是采样到的「推送推进轮次数」，是下界（每轮最多记一次、同一轮多次推送合并），所以数字前加 ≥。
       metric.append(
         el("b", null, "≥" + (item.updates ?? 1) + " 次"),
         el("span", null, timeAgo(item.pushedAt) + " · ★ " + formatStars(item.stars)),
@@ -187,7 +169,6 @@ export function createRankingBoard({ button, modal, tabs, body, close, fetcher, 
     return row;
   }
 
-  /** 口径文字（不上屏）：挂在列表与标签页的悬停提示上 —— 信息不丢，但不占版面 */
   function renderBody() {
     if (!body) return;
     body.textContent = "";
@@ -219,8 +200,7 @@ export function createRankingBoard({ button, modal, tabs, body, close, fetcher, 
   function render() {
     syncTabs();
     renderBody();
-    // 前端不再展示任何口径解释（列表、标签页都不挂）：口径在接口字段里
-    // （updatesSource / window.days / dataAgeHours / seriesSource / note），文档里也写着。
+    // 前端不再展示任何口径解释（列表、标签页都不挂）：口径在接口字段里（updatesSource / window.days / dataAgeHours / seriesSource / note），文档里也写着。
   }
 
   async function refresh() {

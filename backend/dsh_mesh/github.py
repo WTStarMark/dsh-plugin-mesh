@@ -1,8 +1,6 @@
 """GitHub 搜索 API 客户端：令牌、限流、退避重试、按星标分片翻页。
-
-为什么必须分片：GitHub 搜索接口对任何查询最多只返回 1000 条结果
-（per_page=100 时就是 10 页）。topic:dsh-plugin 有 1.6 万+ 个仓库，
-不分片就永远只能拿到前 1000 个，而且**不会报错**——这是最容易踩的坑。
+搜索接口对任何查询最多只返回 1000 条（per_page=100 时 10 页）且**不会报错**：
+topic:dsh-plugin 有 1.6 万+ 仓库，不分片就永远只能拿到前 1000 个。
 """
 
 from __future__ import annotations
@@ -130,10 +128,8 @@ class GitHubClient:
                 return self._open(url, attempt + 1, accept=accept)
             raise RuntimeError(f"GitHub 返回 {err.code}：{body}") from err
         except OSError as err:
-            # 连接级抖动（RemoteDisconnected / 读超时 / DNS 抖动 / 连接被重置）：重试几次再放弃。
-            # 这些**不是** HTTPError，原来会一路冒到调用方、把整轮采集打断 ——
-            # 线上实测过一次 RemoteDisconnected，整轮在前端数据落盘之前就结束，站点白等一小时。
-            # 最后统一转成 RuntimeError：调用方（README / releases）已经按 RuntimeError 做了降级。
+            # 连接级抖动（RemoteDisconnected/读超时/DNS）不是 HTTPError，原来会冒到调用方打断整轮
+            # （曾因此在前端数据落盘前结束、白等一小时）；重试几次后统一转 RuntimeError，调用方按它降级。
             if attempt < 3:
                 self.stats.retries += 1
                 self._sleep(min(30.0, 2.0 ** attempt))
@@ -168,10 +164,7 @@ class GitHubClient:
 
     def readme(self, repo_id: str) -> str | None:
         """抓仓库 README 原文（raw 格式，省去 base64 解码）。
-
-        返回 None 表示"这个仓库没有可读的 README"（404/403 等）——调用方应把它
-        记成"已抓过、内容为空"，否则每轮都会重新试探同一批仓库。
-        """
+        返回 None 表示没有可读 README（404/403）：调用方要记成"已抓过、内容为空"，否则每轮重新试探。"""
         url = f"{API_ROOT}/repos/{repo_id}/readme"
         try:
             return self._open(url, accept="application/vnd.github.raw").decode("utf-8", "replace")
@@ -180,14 +173,9 @@ class GitHubClient:
 
     # ---------- 版本（releases）----------
     def releases(self, repo_id: str, per_page: int = 20, page: int = 1) -> list[dict] | None:
-        """取一个仓库的一页 release —— 走 **core** 配额（1 个仓库 = 1 次请求）。
-
-        per_page 上限是 100；要更多版本由调用方翻页（见 collect.fetch_release_pages）。
-
-        - 返回 []：这个仓库确实没有 release（404 是正常情况，不是错误）；
-        - 返回 None：这次没拿到（网络/限流），下次再说；
-        - 草稿（draft）在公开抓取里本来就看不到，由 slim_releases 再兜一层。
-        """
+        """取一个仓库的一页 release —— 走 core 配额（1 个仓库 = 1 次请求）；per_page 上限 100。
+        返回 [] 表示确实没有 release（404 是正常情况）；返回 None 表示这次没拿到（网络/限流）。
+        草稿（draft）公开抓取看不到，由 slim_releases 再兜一层。"""
         url = f"{API_ROOT}/repos/{repo_id}/releases?per_page={per_page}&page={page}"
         try:
             payload = self._request(url)
@@ -202,9 +190,7 @@ class GitHubClient:
 
     def crawl_segment(self, query: str, max_pages: int = 10, log=print) -> tuple[list[dict], int]:
         """抓一个分段：返回（裁剪后的记录, 接口报告总数）。
-
-        到 GitHub 的 1000 条上限就停；上限之外的由上层把该段再细分（见 segments.subdivide）。
-        """
+        到 1000 条上限就停，上限之外由上层把该段再细分（见 segments.subdivide）。"""
         from .build import pick_repo  # 延迟导入避免循环依赖
 
         out: list[dict] = []
@@ -224,10 +210,7 @@ class GitHubClient:
 
     def crawl_tag(self, tag: str, max_pages_per_slice: int = 10, sliced: bool = True, log=print) -> tuple[list[dict], int]:
         """抓一个标签下的仓库（按星标分片翻页）。
-
-        返回 (原始记录, 该标签的接口报告总数)。分片的星标区间互不重叠，
-        因此各分片的 total_count 之和就是该标签的真实总数。
-        """
+        分片的星标区间互不重叠，各分片 total_count 之和就是该标签的真实总数。"""
         queries = [f"topic:{tag} {s}" for s in STAR_SLICES] if sliced else [f"topic:{tag}"]
         out: list[dict] = []
         total_count = 0

@@ -1,7 +1,6 @@
 """构图：把抓到的原始仓库变成前端契约（nodes / edges / clusters / meta）。
 
-与前端 tools/seed-sample.mjs 的构图逻辑保持一致，差异只在于数据规模：
-真实采集会有上万条记录，因此多了"前端快照限量"这一步。
+与前端 tools/seed-sample.mjs 的构图逻辑保持一致（改一边要改两边），区别是多了"前端快照限量"。
 """
 
 from __future__ import annotations
@@ -11,17 +10,19 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
+from . import admin_config
 from .classify import apply_categories, non_plugin_reason
 from .config import ROOT  # noqa: E402  (ROOT 在下面 config 段还会用到)
 
 
 def load_ecosystem(path=None) -> dict:
-    """读生态共鸣清单。缺失/损坏都当空表，绝不因此中断采集。"""
-    path = path or ECOSYSTEM_JSON
+    """读生态共鸣清单；缺失/损坏都当空表，绝不中断采集。
+    后台 resonance.overrides 只覆盖 enabled：关掉的基座不建共鸣边，但仍算协议基座
+    （build_mesh 用 ecosystem.keys() 写进 meta）；覆盖里不存在的基座忽略，不凭空造。"""
+    # 用哪份清单由 admin_config.ecosystem_path 决定（后台副本优先，其次策展产物）；显式传 path 时不插队。
+    path = admin_config.ecosystem_path(path or ECOSYSTEM_JSON) if path is None else path
     try:
-        import json as _json
-
-        data = _json.loads(Path(path).read_text(encoding="utf-8"))
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001 - 清单是加分项，读不到就只是没有这些边
         return {}
     out: dict[str, dict] = {}
@@ -39,6 +40,11 @@ def load_ecosystem(path=None) -> dict:
                 if v.get("id")
             ],
         }
+    # 后台启停覆盖：只认清单里已有的基座；resonance_overrides 本身绝不抛异常
+    for base_id, enabled in admin_config.resonance_overrides().items():
+        info = out.get(base_id)
+        if info is not None:
+            info["enabled"] = bool(enabled)
     return out
 from .config import (
     DEGREE_CAP,
@@ -73,8 +79,7 @@ def pick_repo(item: dict) -> dict:
     owner = (item.get("owner") or {})
     license_info = item.get("license") or {}
     return {
-        # id 是对外展示的 owner/name（会随改名变化）；githubId 是 GitHub 的稳定数字 id，
-        # 改名不变 —— 累积索引靠它识别"同一个仓库换了名字"，否则新旧两个球会一直在图里。
+        # id 随改名变化；githubId 是稳定数字 id，累积索引靠它识别"同一仓库换了名字"，否则新旧两球都在图里。
         "id": item.get("full_name"),
         "githubId": item.get("id"),
         "name": item.get("name"),
@@ -109,10 +114,7 @@ ALIASES_JSON = ROOT / "data" / "cache" / "aliases.json"
 
 def load_aliases(path=None) -> dict[str, str]:
     """改名别名表（旧名 → 现名），由 tools/dedupe-renames.mjs 经 API 核对后写出。
-
-    采集器的 SegmentStore 已经在加载/合并时归一；这里再兜一道，
-    让 --from-raw 之类的离线构建也不会把旧名当成另一个仓库。
-    """
+    SegmentStore 加载/合并时已归一；这里再兜一道，让 --from-raw 之类的离线构建不把旧名当另一个仓库。"""
     path = path or ALIASES_JSON
     try:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -141,7 +143,7 @@ def owner_of(repo: dict) -> str:
 
 
 def relevance_score(repo: dict) -> int:
-    """朴素相关度启发式（0~8）。用于把"挂了标签但不像 DSH 插件"的仓库挑出来复核。"""
+    """朴素相关度启发式（0~8），作为 analyze_relevance 的参考分。"""
     score = 0
     if _NAME_RE.search(repo.get("name") or ""):
         score += 3
@@ -157,13 +159,11 @@ def relevance_score(repo: dict) -> int:
     return score
 
 
-# 头像尺寸：GitHub 默认给 460×460 原图（实测单张 12KB~282KB），
-# 而图上最大也就几十像素。统一要 64px（视网膜屏也够），单张降到 1~8KB。
+# GitHub 默认给 460×460 原图（单张可达几百 KB），图上最大才几十像素；要 64px，视网膜屏也够。
 AVATAR_SIZE = 64
 
 
 def sized_avatar(url: str | None) -> str | None:
-    """给 GitHub 头像 URL 补上尺寸参数。非 GitHub 头像（或已带尺寸）原样返回。"""
     if not url or not isinstance(url, str):
         return url or None
     if not url.startswith("https://avatars.githubusercontent.com/"):
@@ -180,15 +180,10 @@ def find_noise_owners(
     strict_min_repos: int = NOISE_OWNER_STRICT_MIN_REPOS,
     max_stars: int = NOISE_OWNER_MAX_STARS,
 ) -> dict[str, dict]:
-    """噪声作者：批量刷标签的垃圾号。两条判据命中任一即可 ——
-
-      1) 收录仓库数 > min_repos，且 0 星仓库占比 > zero_ratio（默认 300 / 98%）
-      2) 收录仓库数 > strict_min_repos，且每个仓库都是 0 星（默认 200，老判据保留）
-
-    第 1 条是"量大且几乎无人关注"：一个人发 300+ 个仓库，几乎全是 0 星。
-    留 2% 的余地，是因为刷号者偶尔会互刷或自己点一两个星（实测样本：1286 个仓库里 15 个有星）。
-    判定结果带上 zeroRatio 与 reason，便于前端与排查时看清"为什么被判"。
-    """
+    """噪声作者：批量刷标签的垃圾号，两条判据命中任一即可 ——
+    1) 仓库数 > min_repos 且 0 星占比 > zero_ratio（默认 300 / 98%）；
+    2) 仓库数 > strict_min_repos 且全部 0 星（默认 200，老判据）。
+    留 2% 余地：刷号者偶尔互刷或自点一两颗星。结果带 zeroRatio 与 reason 便于排查。"""
     groups: dict[str, list[dict]] = {}
     for node in nodes:
         groups.setdefault(node["owner"], []).append(node)
@@ -231,10 +226,7 @@ OTHER_ECOSYSTEM_TAGS = {
 
 def analyze_relevance(repo: dict) -> dict:
     """三档结论：related（有 DSH 专有线索）/ noise（与 DSH 无关、空壳、堆标签）/ manual（需人工）。
-
-    老版本只有一个 review = (相关度 <= 2)，一次把上千个仓库丢进"待复核"，
-    其中一大半一眼就能定性。这里把能定的先定掉，只把真正模糊的留给人工。
-    """
+    能一眼定性的先定掉，只把真正模糊的留给人工队列（否则上千个仓库全进"待复核"）。"""
     name = str(repo.get("name") or "")
     desc = str(repo.get("description") or "").strip()
     topics = [str(t).lower() for t in (repo.get("topics") or [])]
@@ -268,23 +260,16 @@ def build_mesh(
     aliases: dict | None = None,
 ) -> dict:
     """主构图流程：精确命中 -> 剔除黑名单/新识别的噪声作者 -> 去重 -> 分类 -> 连线 -> 裁剪。
-
-    blacklist 是【已判定】的噪声作者（owner -> 说明），来自 data/noise-blacklist.json：
-    一旦判定就长期生效，哪怕下一轮只抓到它几个仓库也不再收录。
-
-    aliases 是改名别名表（旧名 -> 现名）。默认从 data/cache/aliases.json 读，这是生产行为；
-    传 {} 表示不读盘 —— 跨语言一致性校验必须这么传：冻结的 JS 参照物是 --from-raw 产出的，
-    不经过别名表，读盘会把"本机检测过的改名"混进比对（生产机上就撞过这个）。
-    """
+    blacklist 是已判定的噪声作者，一旦判定长期生效（data/noise-blacklist.json）。
+    aliases（旧名 -> 现名）默认读 data/cache/aliases.json；跨语言一致性校验必须传 {} 不读盘 ——
+    冻结的 JS 参照物不经过别名表，读盘会把本机检测过的改名混进比对。"""
     tag_totals = tag_totals or {}
     blacklist = dict(blacklist or {})
     nodes: list[dict] = []
     seen: dict[str, dict] = {}
     skipped_blacklisted = 0
-    # 无信号仓库计数：只有名字命中 dsh、却既没有描述也没有主题标签。
-    # 它们是 v0.4.9「名字收录」带来的长尾（实测 5174 个）：分类器无从下手（谈不上归错类），
-    # 画进图里则是纯噪点 —— 会把「其他」扇区从 2370 撑到 7510，连带把布局重叠顶到 9%。
-    # 不收录，且只计数不逐个记录（excludedNotPlugin 是给"非 DSH 语境"这类需要复核的用的）。
+    # 只有名字命中 dsh、却无描述也无主题标签的仓库不收录：分类器无从下手，画进图里是纯噪点。
+    # 只计数不逐个记录（excludedNotPlugin 留给"非 DSH 语境"这类需要复核的）。
     no_signal_desc_chars = 10  # 与 non_plugin_reason 里"没有描述"的判据保持一致
     skipped_no_signal = 0
     excluded_repos: dict[str, str] = {}
@@ -299,7 +284,6 @@ def build_mesh(
         if owner_of(repo) in blacklist:
             skipped_blacklisted += 1
             continue
-        # 只有名字、没有任何信号的空壳：抓到了也归不了类，画进图里只是噪点
         if not repo["topics"] and len(str(repo.get("description") or "").strip()) < no_signal_desc_chars:
             skipped_no_signal += 1
             continue
@@ -309,14 +293,12 @@ def build_mesh(
             excluded_repos[str(repo.get("id") or repo.get("name") or "?")] = not_plugin
             continue
         matched = [t for t in WHITELIST_TAGS if t in repo["topics"]]
-        # 收录判据：命中白名单 topic，【或】名字本身就带 dsh-（很多插件没打标签，
-        # 名字却是 dsh-xxx；这类仓库由名字收录源抓到，matchedTags 为空）
+        # 命中白名单 topic 或名字带 dsh- 都收录（很多插件没打标签，靠名字收录，matchedTags 为空）
         by_name = bool(_NAME_DASH_RE.search(str(repo.get("name") or "")))
         if (not matched and not by_name) or not repo["id"]:
             continue
         matched.sort(key=WHITELIST_TAGS.index)
-        # 同一个仓库的稳定身份是 githubId（改名不变）；老记录没有它时退回 id。
-        # 两条同名记录并存（改名前后各一条）时，采用"更新"的那条作展示身份。
+        # 稳定身份是 githubId（改名不变），老记录退回 id；改名前后两条并存时，展示采用更新的那条。
         key = str(repo.get("githubId") or repo["id"])
         if key in seen:
             prev = seen[key]
@@ -356,10 +338,8 @@ def build_mesh(
     edge_map: dict[tuple, dict] = {}
 
     def add_edge(a: str, b: str, kind: str, via: str, directed: bool = False) -> None:
-        # 方向：topic / owner / fork 是对等关系，方向没有意义，按字母序归一化以便去重；
-        # resonance 是"基座 → 插件"的**有向**关系，必须保留调用方给的方向 ——
-        # 否则插件 id 恰好字母序在基座前面时会被翻转（v0.4.0 起的老毛病，
-        # 在 3.2 万节点的真实数据上才暴露：78 条边里方向混乱）。
+        # topic/owner/fork 是对等关系，按字母序归一化去重；resonance 是"基座 → 插件"的有向边，
+        # 必须保留方向，否则字母序在前的插件会被翻转成反向边。
         src, dst = (a, b) if (directed or a < b) else (b, a)
         key = (kind, src, dst)
         edge = edge_map.get(key)
@@ -462,20 +442,18 @@ def build_mesh(
             "hubThreshold": HUB_DF,
             "degreeCap": DEGREE_CAP,
             "reviewedAsNoise": sum(1 for n in nodes if n["review"]),
-            # 相关性三档结论的计数：待复核（manual）已从"疑似噪声"里收敛出来
+            # 三档结论计数（manual 已从"疑似噪声"里收敛出来）
             "verdictCounts": {
                 "related": sum(1 for n in nodes if n.get("verdict") == "related"),
                 "noise": sum(1 for n in nodes if n.get("verdict") == "noise"),
                 "manual": sum(1 for n in nodes if n.get("verdict") == "manual"),
             },
-            # 噪声黑名单：长期生效，人工可从 data/noise-blacklist.json 里删条目解除
-            # 非插件语境排除（DSH 是别的意思）：这些仓库不进 nodes，也不进前端
+            # 黑名单长期生效（人工可从 data/noise-blacklist.json 删条目解除）；excludedNotPlugin* 是"非 DSH 语境"排除。
             "resonanceEdges": resonance_edges,
             "ecosystemBases": sorted(k for k, v in ecosystem.items() if v["enabled"]),
             "ecosystemDisabled": sorted(k for k, v in ecosystem.items() if not v["enabled"]),
             "excludedNotPlugin": dict(sorted(excluded_repos.items())),
             "excludedNotPluginCount": len(excluded_repos),
-            # 只有名字、没有描述也没有主题标签的空壳：不收录（它们既无法分类，画出来也只是噪点）
             "noSignalSkipped": skipped_no_signal,
             "noiseBlacklist": dict(sorted(blacklist.items())),
             "noiseBlacklistSize": len(blacklist),

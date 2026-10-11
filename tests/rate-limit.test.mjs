@@ -59,7 +59,12 @@ test("每个 /api 响应都带标准限流头，且成本按接口权重扣", as
   assert.equal(ranking.status, 200);
   assert.equal(ranking.headers.get("x-ratelimit-cost"), "5", "榜单接口要按 5 个令牌计（它要读 mesh + 快照环 + 更新日志 + 版本缓存）");
   const after = Number(ranking.headers.get("x-ratelimit-remaining"));
-  assert.ok(before - after >= 5, "重接口要扣得更多：before=" + before + " after=" + after);
+  // 令牌桶边扣边回填（本测试 2 令牌/秒），而 ranking 要读 mesh + 快照环 + 更新日志，跑一次接近一秒，
+  // 期间会回填一两个令牌 —— 所以"净扣 5 个"这个数字测不准，别拿它当判据。
+  // 判据改成：一次 5 令牌的重请求，必须把 6 的额度打到接近空。
+  // 若权重退化成 1，after 会停在 4 左右，这条立刻红。
+  assert.ok(after <= 2, "按 5 个令牌计的重接口应把额度打到接近空：before=" + before + " after=" + after);
+  assert.ok(before - after >= 1, "重接口必须真的扣掉令牌：before=" + before + " after=" + after);
 });
 
 test("额度打满 → 429 + Retry-After；退避后恢复（令牌桶会回填）", async () => {
