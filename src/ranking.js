@@ -14,6 +14,35 @@ function el(tag, className, text) {
   return node;
 }
 
+/** SVG 节点：浏览器走 createElementNS；DOM 桩只有 createElement 时也能跑 */
+function svgEl(name, attrs = {}) {
+  const node = document.createElementNS
+    ? document.createElementNS("http://www.w3.org/2000/svg", name)
+    : document.createElement(name);
+  for (const [k, v] of Object.entries(attrs)) node.setAttribute?.(k, v);
+  return node;
+}
+
+/** 下载量前缀小图标：与奖杯同款 currentColor SVG，避开 ↓ 基线偏移 */
+function npmDownloadMark() {
+  const mark = el("i", "npm-mark");
+  mark.setAttribute?.("aria-hidden", "true");
+  const svg = svgEl("svg", { viewBox: "0 0 16 16", "aria-hidden": "true", focusable: "false" });
+  // 箭头落入托盘：在 10px 下仍能认，线宽跟 UI 细描边一致
+  svg.append(
+    svgEl("path", {
+      fill: "none",
+      stroke: "currentColor",
+      "stroke-width": "1.6",
+      "stroke-linecap": "round",
+      "stroke-linejoin": "round",
+      d: "M8 2.5v7.2M5.2 7.2 8 10l2.8-2.8M3.5 13.2h9",
+    }),
+  );
+  mark.append(svg);
+  return mark;
+}
+
 /** 千分位星标：12.3k / 1.2M —— 与站点其它地方一致 */
 export function formatStars(value) {
   const v = Number(value) || 0;
@@ -40,7 +69,7 @@ export function timeAgo(iso, now = Date.now()) {
  * opts：{ button, modal, tabs, body, close, fetcher, onPick, noiseToggle, noiseBox, noiseLabel, npmToggle, npmBox, npmLabel }。
  * fetcher 失败时如实显示「拿不到」，onPick 回调仓库 id；
  * noiseToggle / noiseBox / noiseLabel = 弹窗头部那枚「隐藏噪声」开关（可选，没有就只标注不隐藏）；
- * npmToggle / npmBox / npmLabel = 「显示周下载」可选列（默认关，不进排序；取不到显示「未知」）。
+ * npmToggle / npmBox / npmLabel = 「显示周下载」开关（默认关；打开后在名称行挂胶囊，不进排序）。
  */
 export function createRankingBoard({ button, modal, tabs, body, close, fetcher, onPick, noiseToggle, noiseBox, noiseLabel, npmToggle, npmBox, npmLabel }) {
   let data = null;
@@ -53,7 +82,7 @@ export function createRankingBoard({ button, modal, tabs, body, close, fetcher, 
   let hideNoise = false;
   let showNpm = false;
 
-  /** 周下载量展示：有数字就千分位；否则一律「未知」（缺失不能当 0） */
+  /** 周下载量展示：有数字就千分位；没数字时按状态给具体原因（缺失不能当 0） */
   function formatNpm(npm) {
     if (npm && npm.status === "ok" && typeof npm.downloads === "number") {
       const n = npm.downloads;
@@ -61,7 +90,19 @@ export function createRankingBoard({ button, modal, tabs, body, close, fetcher, 
       if (n >= 1e4) return (n / 1e3).toFixed(1).replace(/\.0$/, "") + "k";
       return n.toLocaleString("en-US");
     }
+    if (npm && npm.status === "private") return "未发布";
+    if (npm && npm.status === "no-package") return "无 npm 包";
     return "未知";
+  }
+
+  /** 悬停说明：把「为什么没有数字」讲清楚（unknown=确认无包；error=暂时失败可重试） */
+  function npmReason(npm) {
+    if (!npm) return "本次没有采到这个仓库的 npm 信息";
+    if (npm.status === "private") return "该仓库 package.json 标了 private，未发布到 npm";
+    if (npm.status === "no-package") return "该仓库没有 package.json";
+    if (npm.status === "error") return "未取到下载量（接口暂时失败，稍后会重试）";
+    if (npm.status === "unknown") return "npm 上没有这个包（或包名对不上）";
+    return "未取到下载量";
   }
 
   const STALE_MS = 5 * 60 * 1000;
@@ -154,6 +195,25 @@ export function createRankingBoard({ button, modal, tabs, body, close, fetcher, 
       const newest = versions[0];
       line.append(el("span", "ver" + (newest.pre ? " pre" : ""), newest.tag || "—"));
     }
+    // 周下载：和噪声/版本同一行的胶囊，不另开列、不挤 metric（可选列，默认关）
+    if (showNpm) {
+      const npm = item.npm;
+      const label = formatNpm(npm);
+      const ok = npm && npm.status === "ok" && typeof npm.downloads === "number";
+      // 有数时：小下载 icon + 数字（同 metric「★ 数字」结构，icon 用 SVG 避免字形基线问题）
+      const chip = el("span", "npm-tag" + (ok ? "" : " unk"));
+      if (ok) chip.append(npmDownloadMark(), el("span", "npm-num", label));
+      else chip.textContent = label;
+      const win = npm && npm.window ? npm.window.start + " ~ " + npm.window.end : "";
+      const pkg = npm && npm.package ? npm.package : "";
+      chip.title =
+        (pkg ? "npm:" + pkg : "无包名") +
+        (win ? " · 窗口 " + win : "") +
+        (npm && npm.multiPackage ? " · 多包（只计根 package.json）" : "") +
+        " · " +
+        (ok ? "上周下载 " + label : npmReason(npm));
+      line.append(chip);
+    }
     who.append(line);
     const bits = [item.owner, item.categoryLabel].filter(Boolean);
     who.append(el("span", null, bits.join(" · ") || item.id));
@@ -162,37 +222,22 @@ export function createRankingBoard({ button, modal, tabs, body, close, fetcher, 
 
     const metric = el("div", "metric");
     if (board?.metric === "releases") {
-      // 真实发版数（不是采样下界，所以不加 ≥）；次行给最新那个版本的 tag 与星标
-      const newest = versions.find((v) => v.at && v.at === item.latestReleaseAt) ?? versions[0];
+      // 次行只留星标：版本已在左侧胶囊，避免「最新 v… · ★ …」在窄列里被截断
       metric.append(
         el("b", null, (item.updates ?? 0) + " 个版本"),
-        el("span", null, "最新 " + (newest?.tag ?? "—") + " · ★ " + formatStars(item.stars)),
+        el("span", null, "★ " + formatStars(item.stars)),
       );
     } else if (board?.metric === "updates") {
-      // 主指标是采样到的「推送推进轮次数」，是下界（每轮最多记一次、同一轮多次推送合并），所以数字前加 ≥。
       metric.append(
         el("b", null, "≥" + (item.updates ?? 1) + " 次"),
         el("span", null, timeAgo(item.pushedAt) + " · ★ " + formatStars(item.stars)),
       );
     } else {
-      // 只有"窗口 1 天"却写成周增量会误读，所以把窗口作为数据挂在次行（不是解释文字）
       const w = board?.window?.days;
       metric.append(
         el("b", null, "+" + formatStars(item.delta)),
         el("span", null, "★ " + formatStars(item.starsAfter ?? item.stars) + (typeof w === "number" ? " · " + w + " 天" : "")),
       );
-    }
-    if (showNpm) {
-      const npm = item.npm;
-      const chip = el("span", "npm-dl" + (npm && npm.status === "ok" ? "" : " unk"), formatNpm(npm));
-      const win = npm && npm.window ? npm.window.start + " ~ " + npm.window.end : "";
-      const pkg = npm && npm.package ? npm.package : "";
-      chip.title =
-        (pkg ? "npm:" + pkg : "无包名") +
-        (win ? " · 窗口 " + win : "") +
-        (npm && npm.multiPackage ? " · 多包（只计根 package.json）" : "") +
-        (npm && npm.status === "ok" ? " · 上周下载 " + formatNpm(npm) : " · 周下载未知");
-      metric.append(chip);
     }
     row.append(metric);
     const verText = versions.length
@@ -240,19 +285,32 @@ export function createRankingBoard({ button, modal, tabs, body, close, fetcher, 
     shown.forEach((x) => body.append(renderRow(x.item, x.rank)));
   }
 
-  /** 开关状态与计数：没有噪声行时整枚开关收起（不占位置，也不给一个点了没反应的按钮） */
+  /** 开关状态：没有噪声行时用 visibility 藏起占位，避免「显示周下载」左右跳 */
   function syncNoise() {
     const n = rowsOf().filter((it) => it.verdict === "noise").length;
-    if (noiseBox) noiseBox.checked = hideNoise;
-    if (noiseToggle) noiseToggle.hidden = n === 0;
-    if (noiseLabel) noiseLabel.textContent = n ? "隐藏噪声（" + n + " 条）" : "隐藏噪声";
+    if (noiseBox) {
+      noiseBox.checked = hideNoise;
+      noiseBox.setAttribute?.("aria-checked", hideNoise ? "true" : "false");
+    }
+    if (noiseToggle) {
+      noiseToggle.hidden = false;
+      noiseToggle.classList?.toggle?.("is-idle", n === 0);
+      noiseToggle.setAttribute?.("aria-hidden", n === 0 ? "true" : "false");
+      noiseToggle.title = n ? "隐藏噪声（" + n + " 条）：只藏显示，不重排名次" : "";
+    }
+    if (noiseLabel) noiseLabel.textContent = "隐藏噪声";
   }
 
   function syncNpm() {
-    if (npmBox) npmBox.checked = showNpm;
+    if (npmBox) {
+      npmBox.checked = showNpm;
+      npmBox.setAttribute?.("aria-checked", showNpm ? "true" : "false");
+    }
     if (npmLabel) npmLabel.textContent = "显示周下载";
-    // 有开关就一直露着：覆盖不全是预期，默认关、打开后看得到「未知」
-    if (npmToggle) npmToggle.hidden = false;
+    if (npmToggle) {
+      npmToggle.hidden = false;
+      npmToggle.title = "可选标注：覆盖不全；取不到按状态显示「未发布 / 无 npm 包 / 未知」";
+    }
   }
 
   function render() {

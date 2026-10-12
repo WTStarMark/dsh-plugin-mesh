@@ -514,23 +514,29 @@ export function createApi({ root }) {
     return releasesCache.index;
   }
 
-  /* npm 周下载量（data/cache/npm-downloads.json，采集器写）：可选列，不进默认排序。
-   * 文件不存在 / 损坏 / 单行缺失 → status=unknown、downloads=null，接口绝不崩、也不把缺失写成 0。 */
+  /* npm 周下载量（data/cache/npm-downloads.json，采集器写）：可选标注，不进默认排序。
+   * 文件不存在 / 损坏 / 单行缺失 → status=unknown、downloads=null，接口绝不崩、也不把缺失写成 0。
+   * status=error 表示暂时失败（可重试），与确认无包的 unknown 区分。 */
   const NPM_UNKNOWN = { status: "unknown", package: null, downloads: null, window: null, multiPackage: false };
   let npmCache = { mtimeMs: -2, index: { repos: {}, updatedAt: null } };
 
   function publicNpm(entry) {
     if (!entry || typeof entry !== "object") return { ...NPM_UNKNOWN };
-    const status = entry.status === "ok" || entry.status === "private" || entry.status === "no-package" || entry.status === "unknown"
-      ? entry.status
-      : "unknown";
+    const status =
+      entry.status === "ok" ||
+      entry.status === "private" ||
+      entry.status === "no-package" ||
+      entry.status === "unknown" ||
+      entry.status === "error"
+        ? entry.status
+        : "unknown";
     const downloads = status === "ok" && typeof entry.downloads === "number" ? entry.downloads : null;
     const window =
       entry.window && entry.window.start && entry.window.end
         ? { start: String(entry.window.start).slice(0, 10), end: String(entry.window.end).slice(0, 10) }
         : null;
     return {
-      status: status === "ok" && downloads === null ? "unknown" : status,
+      status: status === "ok" && downloads === null ? "error" : status,
       package: typeof entry.package === "string" ? entry.package : null,
       downloads,
       window,
@@ -653,7 +659,7 @@ export function createApi({ root }) {
     const row = (n) => ({
       id: n.id,
       releases: releasesIndex.repos[n.id] ?? [],
-      // 可选列：周下载量。缺省/失败一律 unknown，不进任何排序
+      // 可选标注：周下载量。缺省 → unknown；暂时失败 → error；都不进排序、不写 0
       npm: publicNpm(npmIndex.repos[n.id]),
       name: n.name,
       owner: n.owner,

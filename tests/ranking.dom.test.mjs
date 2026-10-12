@@ -32,7 +32,10 @@ class FakeNode {
   find(pred) { return this.all.find(pred); }
 }
 
-globalThis.document = { createElement: (tag) => new FakeNode(tag) };
+globalThis.document = {
+  createElement: (tag) => new FakeNode(tag),
+  createElementNS: (_ns, tag) => new FakeNode(tag),
+};
 
 const { createRankingBoard, formatStars, timeAgo } = await import("../src/ranking.js");
 
@@ -269,8 +272,9 @@ test("噪声行：默认只标注不隐藏；开了开关才藏，且名次不�
   assert.ok(chip, "噪声行要有标注：" + list[0].all.map((n) => n.className).join(","));
   assert.equal(chip.textContent, "噪声");
   assert.match(chip.title, /已判定为噪声：/, "悬停要给出判定理由：" + chip.title);
-  assert.equal(ui.noiseLabel.textContent, "隐藏噪声（1 条）", "开关上要写清会藏几条");
-  assert.equal(ui.noiseToggle.hidden, false, "有噪声行时开关才露出来");
+  assert.equal(ui.noiseLabel.textContent, "隐藏噪声", "文案固定；条数进 title，避免撑宽抖动");
+  assert.match(ui.noiseToggle.title, /1 条/, "条数写在悬停里：" + ui.noiseToggle.title);
+  assert.equal(ui.noiseToggle.classList.contains("is-idle"), false, "有噪声行时开关可见");
 
   // 打开开关：只藏这一行，剩下的行保留原来的名次（名次是榜位，不重新编号）
   ui.noiseBox.checked = true;
@@ -285,15 +289,16 @@ test("噪声行：默认只标注不隐藏；开了开关才藏，且名次不�
   assert.equal(rows(ui.body).length, 2, "关掉开关就回来");
 });
 
-test("榜单里没有噪声行时：开关收起（不给一个点了没反应的按钮）", async () => {
+test("榜单里没有噪声行时：开关占位隐藏（visibility），避免周下载开关跳位", async () => {
   const ui = mount();
   ui.button.fire("click");
   await settle();
   assert.equal(ui.noiseLabel.textContent, "隐藏噪声");
-  assert.equal(ui.noiseToggle.hidden, true, "没有噪声行时整枚开关收起");
+  assert.equal(ui.noiseToggle.hidden, false, "不再用 display:none，改用 is-idle 占位");
+  assert.ok(ui.noiseToggle.classList.contains("is-idle"), "没有噪声行时加 is-idle");
 });
 
-test("周下载可选列：默认不显示；打开后有数显示数、取不到显示未知；不改排序", async () => {
+test("周下载可选列：默认不显示；打开后挂名称行胶囊（同版本号/噪声），不改排序", async () => {
   const data = JSON.parse(JSON.stringify(payload));
   data.boards.updated.items[0].npm = {
     status: "ok",
@@ -308,21 +313,53 @@ test("周下载可选列：默认不显示；打开后有数显示数、取不�
   await settle();
 
   let list = rows(ui.body);
-  assert.ok(!list[0].find((n) => String(n.className).includes("npm-dl")), "默认关：不渲染周下载");
+  assert.ok(!list[0].find((n) => String(n.className).includes("npm-tag")), "默认关：无下载胶囊");
   assert.equal(list[0].find((n) => n.className === "rk").textContent, "1");
-  assert.equal(list[1].find((n) => n.className === "rk").textContent, "2");
 
   ui.npmBox.checked = true;
   ui.npmBox.fire("change");
   list = rows(ui.body);
-  const ok = list[0].find((n) => String(n.className).includes("npm-dl"));
-  const unk = list[1].find((n) => String(n.className).includes("npm-dl"));
-  assert.ok(ok, "打开后第一行要有周下载");
-  assert.match(ok.textContent, /112/);
-  assert.equal(unk.textContent, "未知", "取不到显示未知，不能写 0");
-  assert.ok(String(unk.className).includes("unk"));
+  const ok = list[0].find((n) => String(n.className).includes("npm-tag"));
+  const unk = list[1].find((n) => String(n.className).includes("npm-tag"));
+  const mark = ok.find((n) => n.className === "npm-mark");
+  assert.ok(mark, "下载小图标节点");
+  assert.ok(mark.find((n) => n.tagName === "svg"), "图标是 SVG");
+  assert.match(ok.find((n) => n.className === "npm-num").textContent, /112/);
+  assert.equal(unk.textContent, "未知");
+  assert.ok(String(unk.className).includes("unk"), "未知态降对比度");
+  assert.match(ok.title, /dshmarket/);
+  assert.match(unk.title, /没有这个包|未取到|没有采到/);
+  const line = list[0].find((n) => n.className === "line");
+  assert.ok(line && line.children.some((n) => String(n.className).includes("npm-tag")), "胶囊挂在名称行");
   assert.equal(list[0].find((n) => n.className === "rk").textContent, "1", "可选列不重排");
   assert.equal(list[1].find((n) => n.className === "rk").textContent, "2");
+});
+
+test("周下载状态文案：private→未发布，no-package→无 npm 包，error 悬停区分可重试", async () => {
+  const data = JSON.parse(JSON.stringify(payload));
+  const mk = (status, pkg = null) => ({ status, package: pkg, downloads: null, window: null, multiPackage: false });
+  data.boards.updated.items[0].npm = mk("private");
+  data.boards.updated.items[1].npm = mk("no-package");
+  // 第三行借 stars 板不够用；updated 板只有两行，error 覆盖到第 0 行再渲一次
+  const ui = mount({ data });
+  ui.button.fire("click");
+  await settle();
+  ui.npmBox.checked = true;
+  ui.npmBox.fire("change");
+  let list = rows(ui.body);
+  const tag0 = list[0].find((n) => String(n.className).includes("npm-tag"));
+  const tag1 = list[1].find((n) => String(n.className).includes("npm-tag"));
+  assert.equal(tag0.textContent, "未发布");
+  assert.equal(tag1.textContent, "无 npm 包");
+  assert.match(tag0.title, /private/);
+  assert.match(tag1.title, /package\.json/);
+
+  data.boards.updated.items[0].npm = mk("error", "picgo");
+  ui.npmBox.fire("change"); // 触发重渲
+  list = rows(ui.body);
+  const err = list[0].find((n) => String(n.className).includes("npm-tag"));
+  assert.equal(err.textContent, "未知");
+  assert.match(err.title, /暂时失败|重试/);
 });
 
 test("点一行：回调仓库 id 并自动关闭弹窗", async () => {

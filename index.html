@@ -85,16 +85,17 @@
         <button data-tab="updated" class="on">周更新热榜</button>
         <button data-tab="stars">周 star 热榜</button>
       </div>
-      <!-- 只隐藏不重排：名次是榜位，藏一行不会让后面的行往上顶。榜单里没有噪声行时整枚开关收起（src/ranking.js 的 syncNoise） -->
-      <label class="switch rank-noise" id="ranking-noise" hidden>
-        <input type="checkbox" id="ranking-noise-box">
-        <span id="ranking-noise-label">隐藏噪声</span>
-      </label>
-      <!-- 周下载量是可选列：覆盖不全（非 npm / 取不到），默认关，不进排序 -->
-      <label class="switch rank-noise" id="ranking-npm">
-        <input type="checkbox" id="ranking-npm-box">
-        <span id="ranking-npm-label">显示周下载</span>
-      </label>
+      <!-- 两个开关成对放：噪声没有时用 visibility 占位，避免「显示周下载」跳位；窄屏整组换行 -->
+      <div class="modal-toggles" id="ranking-toggles">
+        <label class="switch rank-toggle is-idle" id="ranking-noise" title="">
+          <input type="checkbox" id="ranking-noise-box" role="switch" aria-checked="false">
+          <span id="ranking-noise-label">隐藏噪声</span>
+        </label>
+        <label class="switch rank-toggle" id="ranking-npm" title="可选标注：覆盖不全；取不到按状态显示原因">
+          <input type="checkbox" id="ranking-npm-box" role="switch" aria-checked="false">
+          <span id="ranking-npm-label">显示周下载</span>
+        </label>
+      </div>
       <button id="ranking-close" class="key" aria-label="关闭榜单">✕</button>
     </header>
     <div class="modal-body" id="ranking-body"></div>

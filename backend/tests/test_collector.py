@@ -1631,7 +1631,7 @@ class NpmDownloadsTest(unittest.TestCase):
             raise urllib.error.HTTPError(req.full_url, 404, "Not Found", hdrs=None, fp=None)
 
         miss = npm.fetch_npm_downloads("dsh-market", sleep=sleeps.append, opener=opener_404)
-        self.assertEqual(miss["status"], "unknown")
+        self.assertEqual(miss["status"], "unknown", "404 = 确认无包（终态）")
         self.assertIsNone(miss["downloads"], "取不到不能写 0")
 
         calls = {"n": 0}
@@ -1646,6 +1646,13 @@ class NpmDownloadsTest(unittest.TestCase):
         self.assertEqual(recovered["status"], "ok")
         self.assertEqual(recovered["downloads"], 10)
         self.assertGreaterEqual(len(sleeps), 2, "5xx 要退避重试")
+
+        def opener_down(req, timeout=20):
+            raise OSError("network down")
+
+        err = npm.fetch_npm_downloads("picgo", sleep=lambda *_a: None, opener=opener_down)
+        self.assertEqual(err["status"], "error", "网络耗尽 → error（可重试），不是终态 unknown")
+        self.assertIsNone(err["downloads"])
 
     def test_load_save_and_public_entry_never_fake_zero(self):
         self.assertEqual(npm.load_downloads(self.path)["repos"], {})
@@ -1671,7 +1678,7 @@ class NpmDownloadsTest(unittest.TestCase):
         self.assertEqual(npm.public_entry(None)["status"], "unknown")
         self.assertIsNone(npm.public_entry(None)["downloads"])
         self.assertIsNone(npm.public_entry({"status": "ok", "downloads": "nope"})["downloads"])
-        self.assertEqual(npm.public_entry({"status": "ok", "downloads": "nope"})["status"], "unknown")
+        self.assertEqual(npm.public_entry({"status": "ok", "downloads": "nope"})["status"], "error")
 
     def test_pick_package_candidates_only_new_or_pushed_once_a_day(self):
         now = time.time()
@@ -1711,6 +1718,43 @@ class NpmDownloadsTest(unittest.TestCase):
         }
         picked = npm.pick_download_candidates(payload, limit=10, now_ts=now)
         self.assertEqual(picked, ["a/stale"])
+
+    def test_pick_retries_stale_error_and_legacy_unknown_with_package(self):
+        """回归：首次失败不能永久卡死；status=unknown 且 downloadsAt 是 3 天前 + 有包名 → 必须进候选。"""
+        now = time.time()
+        payload = {
+            "repos": {
+                "a/error": {
+                    "status": "error",
+                    "package": "ghost",
+                    "downloads": None,
+                    "downloadsAt": self._iso(80),  # > 72h
+                },
+                "a/ghost": {
+                    "status": "unknown",
+                    "package": "ghost-legacy",
+                    "downloads": None,
+                    "downloadsAt": self._iso(80),  # 旧版误记；无 terminal
+                },
+                "a/404": {
+                    "status": "unknown",
+                    "package": "gone",
+                    "downloads": None,
+                    "downloadsAt": self._iso(80),
+                    "terminal": True,  # npm 404 终态
+                },
+                "a/fresh-err": {
+                    "status": "error",
+                    "package": "soon",
+                    "downloadsAt": self._iso(10),  # < 72h，先别烦
+                },
+            }
+        }
+        picked = npm.pick_download_candidates(payload, limit=10, now_ts=now)
+        self.assertIn("a/error", picked)
+        self.assertIn("a/ghost", picked, "旧版 unknown+包名必须能重试")
+        self.assertNotIn("a/404", picked, "确认 404 的终态不再刷")
+        self.assertNotIn("a/fresh-err", picked)
 
     def test_file_raw_404_vs_network(self):
         client = GitHubClient(token=None, sleep=lambda *_a: None)

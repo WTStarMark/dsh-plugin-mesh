@@ -22,6 +22,8 @@ from .config import USER_AGENT
 # 刷新：一天一次；GitHub 侧只重读「新入库 / 有新提交」的仓库（包名很少变）。
 # npm 侧对已解析出的包每天刷一次 last-week（不占 GitHub 配额）。
 REFRESH_HOURS = 24.0
+# 暂时失败（error）与旧版误记的 unknown+包名：隔这么久再进下载候选，避免永久卡死。
+ERROR_RETRY_HOURS = 72.0
 DISCOVERY_SHARE = 0.25
 CORE_FLOOR = 300
 NPM_TIMEOUT = 20
@@ -36,7 +38,9 @@ REPO_PACKAGE_OVERRIDES: dict[str, str] = {
     # "dsh-market/dsh-market": "dshmarket",
 }
 
-STATUSES = ("ok", "unknown", "private", "no-package")
+# ok=有下载量；private / no-package=确认终态；
+# unknown=npm 上确认没有该包（404，终态）；error=暂时失败（可重试）。
+STATUSES = ("ok", "unknown", "private", "no-package", "error")
 
 
 def load_downloads(path: Path) -> dict:
@@ -127,8 +131,9 @@ def npm_downloads_url(package: str) -> str:
 
 
 def fetch_npm_downloads(package: str, *, sleep=time.sleep, opener=None) -> dict:
-    """查 npm last-week。成功 → {status:ok, downloads, window:{start,end}}；
-    404 → unknown（包不存在）；网络/5xx 重试后仍失败 → unknown。绝不返回 downloads=0 冒充「没人装」。"""
+    """查 npm last-week。
+    成功 → status=ok；404 → status=unknown（确认无包，终态）；
+    网络/5xx 耗尽重试 → status=error（暂时失败，可再进候选）。绝不返回 downloads=0 冒充「没人装」。"""
     url = npm_downloads_url(package)
     open_fn = opener or urllib.request.urlopen
     last_err = None
@@ -143,7 +148,7 @@ def fetch_npm_downloads(package: str, *, sleep=time.sleep, opener=None) -> dict:
             end = data.get("end")
             if not isinstance(downloads, int) or downloads < 0:
                 return {
-                    "status": "unknown",
+                    "status": "error",
                     "downloads": None,
                     "window": {"start": start, "end": end} if start and end else None,
                 }
@@ -159,13 +164,13 @@ def fetch_npm_downloads(package: str, *, sleep=time.sleep, opener=None) -> dict:
             if err.code in (403, 429) or err.code >= 500:
                 sleep(min(30.0, 2.0 ** attempt))
                 continue
-            return {"status": "unknown", "downloads": None, "window": None}
+            return {"status": "error", "downloads": None, "window": None}
         except (OSError, json.JSONDecodeError, UnicodeError) as err:
             last_err = err
             sleep(min(30.0, 2.0 ** attempt))
             continue
-    _ = last_err  # 留着方便调试；对外一律降级为 unknown
-    return {"status": "unknown", "downloads": None, "window": None}
+    _ = last_err
+    return {"status": "error", "downloads": None, "window": None}
 
 
 def pick_package_candidates(
@@ -213,24 +218,48 @@ def pick_package_candidates(
     return picked
 
 
+def _download_retryable(entry: dict) -> bool:
+    """暂时失败要重试；npm 404（unknown 终态）不重试。
+    旧缓存里「首次失败误记成 unknown 但留着包名」的也要捞回来，否则会永久卡死。"""
+    status = entry.get("status")
+    if status == "error":
+        return True
+    if status == "unknown" and isinstance(entry.get("package"), str) and entry.get("package"):
+        # 新写法：404 会带 terminal=True；没这个字段的旧数据按可重试处理
+        return entry.get("terminal") is not True
+    return False
+
+
 def pick_download_candidates(
     payload: dict,
     *,
     limit: int,
     now_ts: float | None = None,
     refresh_hours: float = REFRESH_HOURS,
+    error_retry_hours: float = ERROR_RETRY_HOURS,
 ) -> list[str]:
-    """已解析出包名、但下载量超过 refresh_hours 没刷的仓库（只打 npm，不占 GitHub 配额）。"""
+    """下载量候选（只打 npm，不占 GitHub 配额）：
+    - status=ok 且超过 refresh_hours → 日常刷新；
+    - status=error（或旧版误记的 unknown+包名）且超过 error_retry_hours → 重试，避免永久「未知」。"""
     now_ts = now_ts if now_ts is not None else time.time()
     out: list[tuple[str, str]] = []
     for repo_id, entry in (payload.get("repos") or {}).items():
         if not isinstance(entry, dict):
             continue
-        if entry.get("status") != "ok" or not entry.get("package"):
+        package = entry.get("package")
+        if not isinstance(package, str) or not package:
             continue
-        if _age_hours(entry.get("downloadsAt"), now_ts) < refresh_hours:
+        status = entry.get("status")
+        age_ref = entry.get("downloadsAt") or entry.get("at")
+        if status == "ok":
+            if _age_hours(age_ref, now_ts) < refresh_hours:
+                continue
+        elif _download_retryable(entry):
+            if _age_hours(age_ref, now_ts) < error_retry_hours:
+                continue
+        else:
             continue
-        out.append((repo_id, str(entry.get("package"))))
+        out.append((repo_id, package))
     out.sort(key=lambda item: item[0])
     return [repo_id for repo_id, _ in out[: max(0, int(limit))]]
 
@@ -244,7 +273,7 @@ def public_entry(entry: dict | None) -> dict:
     if status != "ok" or not isinstance(downloads, int):
         downloads = None
         if status == "ok":
-            status = "unknown"
+            status = "error"
     window = entry.get("window")
     if not (isinstance(window, dict) and window.get("start") and window.get("end")):
         window = None
@@ -264,4 +293,5 @@ def stats(payload: dict) -> dict:
     repos = payload.get("repos") or {}
     ok = sum(1 for e in repos.values() if isinstance(e, dict) and e.get("status") == "ok" and isinstance(e.get("downloads"), int))
     unknown = sum(1 for e in repos.values() if isinstance(e, dict) and e.get("status") == "unknown")
-    return {"repos": len(repos), "withDownloads": ok, "unknown": unknown}
+    errors = sum(1 for e in repos.values() if isinstance(e, dict) and e.get("status") == "error")
+    return {"repos": len(repos), "withDownloads": ok, "unknown": unknown, "errors": errors}

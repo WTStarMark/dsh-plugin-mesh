@@ -448,6 +448,7 @@ def fetch_npm_downloads(args, mesh: dict, log) -> dict:
                 entry["downloads"] = hit["downloads"]
                 entry["window"] = hit["window"]
                 entry["downloadsAt"] = now
+                entry.pop("terminal", None)
             elif isinstance(prev.get("downloads"), int) and prev.get("status") == "ok":
                 # 刷新失败：保留旧下载量与旧窗口，只更新包名侧
                 entry["status"] = "ok"
@@ -455,12 +456,21 @@ def fetch_npm_downloads(args, mesh: dict, log) -> dict:
                 entry["window"] = prev.get("window")
                 entry["downloadsAt"] = prev.get("downloadsAt")
                 failed += 1
-            else:
-                # 从未有过有效下载：记 unknown、downloads=null（不写 0）
+            elif hit["status"] == "unknown":
+                # npm 404：确认无包，终态（不再进下载候选）
                 entry["status"] = "unknown"
                 entry["downloads"] = None
                 entry["window"] = None
                 entry["downloadsAt"] = now
+                entry["terminal"] = True
+                failed += 1
+            else:
+                # 暂时失败：记 error，保留包名，过 ERROR_RETRY_HOURS 再进候选（绝不写 0）
+                entry["status"] = "error"
+                entry["downloads"] = None
+                entry["window"] = None
+                entry["downloadsAt"] = now
+                entry.pop("terminal", None)
                 failed += 1
         npm.put(payload, repo_id, entry, now=now)
         fetched += 1
@@ -472,17 +482,41 @@ def fetch_npm_downloads(args, mesh: dict, log) -> dict:
         if not package:
             continue
         hit = npm.fetch_npm_downloads(str(package), sleep=time.sleep)
-        if hit["status"] != "ok":
-            # 刷新失败：保留旧值，不把缓存打成未知（页面 API 层才对「无缓存」降级）
+        if hit["status"] == "ok":
+            entry = dict(prev)
+            entry["status"] = "ok"
+            entry["downloads"] = hit["downloads"]
+            entry["window"] = hit["window"]
+            entry["downloadsAt"] = now
+            entry.pop("terminal", None)
+            npm.put(payload, repo_id, entry, now=now)
+            fetched += 1
+            time.sleep(NPM_INTERVAL)
+            continue
+        if hit["status"] == "unknown":
+            # 刷新时发现 404：落终态（包已从 registry 消失）
+            entry = dict(prev)
+            entry["status"] = "unknown"
+            entry["downloads"] = None
+            entry["window"] = None
+            entry["downloadsAt"] = now
+            entry["terminal"] = True
+            npm.put(payload, repo_id, entry, now=now)
+            failed += 1
+            time.sleep(NPM_INTERVAL)
+            continue
+        # 暂时失败：若已有 ok 旧值则保留；否则标 error 以便日后重试
+        if isinstance(prev.get("downloads"), int) and prev.get("status") == "ok":
             failed += 1
             continue
         entry = dict(prev)
-        entry["status"] = "ok"
-        entry["downloads"] = hit["downloads"]
-        entry["window"] = hit["window"]
+        entry["status"] = "error"
+        entry["downloads"] = None
+        entry["window"] = None
         entry["downloadsAt"] = now
+        entry.pop("terminal", None)
         npm.put(payload, repo_id, entry, now=now)
-        fetched += 1
+        failed += 1
         time.sleep(NPM_INTERVAL)
 
     size = npm.save_downloads(payload, NPM_DOWNLOADS_CACHE)

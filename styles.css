@@ -618,13 +618,37 @@ input[type="range"]::-moz-range-thumb {
 }
 .modal-head h3 { margin: 0; font-size: 14px; font-weight: 600; flex: none; letter-spacing: .02em; }
 .modal-seg { flex: 1 1 auto; max-width: 300px; margin-left: auto; }
-/* 榜单弹窗头部的「隐藏噪声」/「显示周下载」开关：与标签页同排，margin 归零（.switch 默认带上下 8px） */
-.modal-head .rank-noise { margin: 0 10px 0 0; font-size: 11.5px; white-space: nowrap; }
-.modal-head .rank-noise[hidden] { display: none; }
-/* 周下载可选列：挂在 metric 里，未知态降对比度，绝不把缺失画成 0 */
-.rank-row .npm-dl { display: inline-block; margin-top: 2px; font-size: 11px; opacity: 0.85; }
-.rank-row .npm-dl.unk { opacity: 0.55; font-style: italic; }
-.rank-row .npm-dl::before { content: "↓ "; opacity: 0.7; }
+/* 榜单头部开关组：胶囊样式，与 .seg 同族；成对占位，噪声空时不让「周下载」跳位 */
+.modal-toggles {
+  display: flex; align-items: center; gap: 8px; flex: none; margin-right: 4px;
+}
+.modal-head .rank-toggle {
+  margin: 0; gap: 6px; min-height: 28px; padding: 0 10px 0 8px;
+  border-radius: 999px; background: var(--chip, var(--bg-layer-2));
+  border: 1px solid var(--hairline); font-size: 11.5px; white-space: nowrap;
+  color: var(--label-2); cursor: pointer; user-select: none;
+  min-width: 7.5em; /* 避免「隐藏噪声」宽度抖动 */
+}
+.modal-head .rank-toggle:hover { border-color: var(--border-l2); color: var(--label-1); }
+.modal-head .rank-toggle:has(input:checked) {
+  background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 35%, var(--hairline));
+  color: var(--accent-ink);
+}
+.modal-head .rank-toggle input {
+  appearance: none; -webkit-appearance: none; width: 28px; height: 16px; margin: 0;
+  border-radius: 999px; background: var(--border-l2); position: relative; flex: none;
+  transition: background var(--t);
+}
+.modal-head .rank-toggle input::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px;
+  border-radius: 50%; background: #fff; box-shadow: 0 1px 2px color-mix(in srgb, var(--label-1) 25%, transparent);
+  transition: transform var(--t);
+}
+.modal-head .rank-toggle input:checked { background: var(--accent); }
+.modal-head .rank-toggle input:checked::after { transform: translateX(12px); }
+.modal-head .rank-toggle.is-idle {
+  visibility: hidden; pointer-events: none;
+}
 /* 列表上下都不放文字：口径与数据新旧挂在悬停提示里（见 src/ranking.js 的 boardCaption/footCaption） */
 .modal-body { overflow-y: auto; padding: 10px; flex: 1 1 auto; min-height: 0; overscroll-behavior: contain; }
 
@@ -632,7 +656,7 @@ input[type="range"]::-moz-range-thumb {
 .rank-row {
   /* 列宽必须固定（除"仓库名"那一列）：只要有一列 auto，每行就会被自己的内容挤出不同宽度，
      趋势图随之左右参差。固定列宽 = 所有趋势图严格落在同一竖线上。 */
-  position: relative; display: grid; grid-template-columns: 30px 34px minmax(0, 1fr) 68px 108px;
+  position: relative; display: grid; grid-template-columns: 30px 34px minmax(0, 1fr) 68px 96px;
   align-items: center; gap: 10px; padding: 8px 10px; border-radius: var(--r-sm); cursor: pointer;
   transition: background var(--t);
 }
@@ -653,20 +677,41 @@ input[type="range"]::-moz-range-thumb {
 }
 .rank-row .who { min-width: 0; }
 .rank-row .who .line { display: flex; align-items: center; gap: 6px; min-width: 0; }
-/* 最新版本号：小胶囊，预发布用告警色区分 */
-.rank-row .ver {
-  flex: none; font-family: var(--font-code); font-size: 11px; color: var(--label-2);
-  background: var(--bg-layer-2); border: 1px solid var(--hairline); border-radius: 999px; padding: 0 6px;
+/* 名称可收缩省略，右侧噪声/版本/下载胶囊不被挤换行 */
+.rank-row .who .line > b {
+  min-width: 0; flex: 0 1 auto; font-size: 12.5px; font-weight: 500;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.rank-row .ver.pre { color: var(--warn-ink); border-color: var(--warn-line); }
+/* 最新版本号：小胶囊，预发布用告警色区分 */
+.rank-row .who .line .ver {
+  flex: none; font-family: var(--font-code); font-size: 11px; line-height: 16px;
+  color: var(--label-2); background: var(--bg-layer-2); border: 1px solid var(--hairline);
+  border-radius: 999px; padding: 0 6px; white-space: nowrap;
+}
+.rank-row .who .line .ver.pre { color: var(--warn-ink); border-color: var(--warn-line); }
+/* 周下载：与版本号同款胶囊；前缀为 10px SVG（避开 Unicode 基线问题） */
+.rank-row .who .line .npm-tag {
+  flex: none; display: inline-flex; align-items: center; gap: 3px;
+  font-family: var(--font-code); font-size: 11px; line-height: 16px;
+  font-variant-numeric: tabular-nums; color: var(--label-2); background: var(--bg-layer-2);
+  border: 1px solid var(--hairline); border-radius: 999px; padding: 0 6px; white-space: nowrap;
+}
+.rank-row .who .line .npm-tag.unk { color: var(--label-3); }
+.rank-row .who .line .npm-tag .npm-mark {
+  flex: none; display: inline-flex; align-items: center; font-style: normal; line-height: 0;
+}
+.rank-row .who .line .npm-tag .npm-mark svg { width: 10px; height: 10px; display: block; }
 /* 已判定噪声（verdict = noise）：只标注，不隐藏也不降权 —— 要藏起来由用户点弹窗头部那枚开关 */
 .rank-row .who .line .noise {
-  flex: none; display: inline-block; margin-top: 0; padding: 0 6px; line-height: 16px;
+  flex: none; padding: 0 6px; line-height: 16px; white-space: nowrap;
   font-family: var(--font-code); font-size: 10.5px; color: var(--warn-ink);
   border: 1px solid var(--warn-line); border-radius: 999px; background: transparent;
 }
-.rank-row .who b { display: block; font-size: 12.5px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rank-row .who span { display: block; max-width: 100%; color: var(--label-3); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px; }
+/* 副标题（owner · 类目）：只命中 .line 外的直接子 span，别盖住胶囊 */
+.rank-row .who > span {
+  display: block; max-width: 100%; color: var(--label-3); font-size: 11px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px;
+}
 /* 近 7 日趋势柱：三种状态分得开，且全榜同一把尺子（柱高 = 值 / 全榜峰值 × 18px）
    实心 = 有观测（峰值柱更深）· 浅底座 = 当天 0 次 · 虚线底座 = 当天没观测 */
 .spark {
@@ -701,13 +746,15 @@ input[type="range"]::-moz-range-thumb {
 }
 .rank-empty { padding: 30px 12px; text-align: center; color: var(--label-3); font-size: 12.5px; line-height: 1.7; }
 
-/* 手机端：弹窗几乎占满屏 */
+/* 手机端：弹窗几乎占满屏；开关整组换到第二行，不和标签页抢宽 */
 @media (max-width: 900px) {
   .modal { padding: 12px; }
   .modal-card { width: 100%; max-height: 86vh; }
   .modal-head { flex-wrap: wrap; }
   .modal-seg { max-width: none; }
-  .rank-row { grid-template-columns: 26px 30px minmax(0, 1fr) 58px 96px; gap: 8px; padding: 7px 8px; }
+  .modal-toggles { flex-basis: 100%; order: 3; margin: 2px 0 0; }
+  .modal-head .rank-toggle { min-height: 32px; padding: 0 12px 0 10px; font-size: 12px; }
+  .rank-row { grid-template-columns: 26px 30px minmax(0, 1fr) 58px 88px; gap: 8px; padding: 7px 8px; }
   .spark { width: 54px; height: 24px; }
 }
 
