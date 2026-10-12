@@ -34,6 +34,14 @@
 | 管理后台 | 与站点同进程同端口，六个标签页；改完黑名单或共鸣清单点「应用变更」离线重建 |
 | 数据出口 | 只读查询 API + 每个仓库一张自包含 SVG 卡片 |
 
+## 赞赏支持
+
+业余时间做的项目，服务器和采集一直在自己掏钱跑。如果它对你有用，可以扫码请作者喝杯咖啡（微信赞赏码）：
+
+<img src="docs/screenshots/donate-wechat.jpg" alt="微信赞赏码" width="200">
+
+赞赏完全自愿，不解锁任何功能 —— 图、数据、API 保持原样开放。
+
 ## 本地跑起来
 
 只需要 Node ≥ 22（见 `package.json` 的 `engines`）和 Python 3，没有第三方依赖：
@@ -300,14 +308,6 @@ curl -s "$BASE/api/ranking?limit=10" | jq '.boards.updated.items[] | {id, update
 | `link` | `https://www.moc-chen.cn/` | 点击去处，只接受 `http` / `https`（其他协议回落默认） |
 
 打开 `https://www.moc-chen.cn/card/<owner>/<name>`，可实时预览两版并复制 Markdown / HTML 代码。换默认去处用环境变量：`SITE_URL=https://your-site.example pm2 restart dsh-plugin-mesh --update-env`。
-
-## 赞赏支持
-
-业余时间做的项目，服务器和采集一直在自己掏钱跑。如果它对你有用，可以扫码请作者喝杯咖啡（微信赞赏码）：
-
-<img src="docs/screenshots/donate-wechat.jpg" alt="微信赞赏码" width="240">
-
-赞赏完全自愿，不解锁任何功能 —— 图、数据、API 保持原样开放。
 
 ## 许可
 
