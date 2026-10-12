@@ -23,6 +23,7 @@ sys.path.insert(0, str(BACKEND))
 
 from dsh_mesh import snapshot as snap  # noqa: E402
 from dsh_mesh import releases as rel  # noqa: E402
+from dsh_mesh import npm_downloads as npm  # noqa: E402
 from dsh_mesh import admin_config as admin_cfg  # noqa: E402
 from dsh_mesh.build import build_mesh, limit_for_frontend, relevance_score  # noqa: E402
 from dsh_mesh import build as build_mod  # noqa: E402
@@ -1562,6 +1563,220 @@ class ReleasesTest(unittest.TestCase):
         rel.put(payload, "a/b", [{"tag": "v1", "name": "", "at": "2026-10-01", "pre": False}])
         rel.put(payload, "a/c", [])
         self.assertEqual(rel.stats(payload), {"repos": 2, "withReleases": 1, "versions": 1})
+
+
+class NpmDownloadsTest(unittest.TestCase):
+    """npm 周下载量：包名映射、private/多包、缺失=未知、一天一次只刷新提交/新入库。"""
+
+    def setUp(self):
+        shutil.rmtree(TMP, ignore_errors=True)
+        TMP.mkdir(parents=True, exist_ok=True)
+        self.path = TMP / "npm-downloads.json"
+
+    def tearDown(self):
+        shutil.rmtree(TMP, ignore_errors=True)
+
+    @staticmethod
+    def _iso(hours_ago: float) -> str:
+        return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(time.time() - hours_ago * 3600))
+
+    def test_parse_package_json_scoped_private_rename_and_workspaces(self):
+        self.assertEqual(
+            npm.parse_package_json('{"name":"@deepseek-harness-tui/dsh-tui"}'),
+            {"status": "ok", "package": "@deepseek-harness-tui/dsh-tui", "multiPackage": False},
+        )
+        self.assertEqual(
+            npm.parse_package_json('{"name":"secret","private":true}'),
+            {"status": "private", "package": None, "multiPackage": False},
+        )
+        self.assertEqual(
+            npm.parse_package_json('{"name":"dsh-market"}'),
+            {"status": "ok", "package": "dshmarket", "multiPackage": False},
+            "改名表：dsh-market → dshmarket",
+        )
+        self.assertEqual(
+            npm.parse_package_json('{"name":"root","workspaces":["packages/*"]}'),
+            {"status": "ok", "package": "root", "multiPackage": True},
+            "有 workspaces 只取根，标多包",
+        )
+        self.assertEqual(npm.parse_package_json(None)["status"], "no-package")
+        self.assertEqual(npm.parse_package_json("{bad")["status"], "unknown")
+        self.assertEqual(npm.parse_package_json("{}")["status"], "unknown")
+
+    def test_fetch_npm_downloads_ok_404_and_retry(self):
+        class FakeResp:
+            def __init__(self, body: bytes):
+                self._body = body
+
+            def read(self):
+                return self._body
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        sleeps: list[float] = []
+
+        def opener_ok(req, timeout=20):
+            return FakeResp(b'{"downloads":112438,"start":"2026-10-03","end":"2026-10-09","package":"dshmarket"}')
+
+        hit = npm.fetch_npm_downloads("dshmarket", sleep=sleeps.append, opener=opener_ok)
+        self.assertEqual(hit["status"], "ok")
+        self.assertEqual(hit["downloads"], 112438)
+        self.assertEqual(hit["window"], {"start": "2026-10-03", "end": "2026-10-09"})
+
+        def opener_404(req, timeout=20):
+            raise urllib.error.HTTPError(req.full_url, 404, "Not Found", hdrs=None, fp=None)
+
+        miss = npm.fetch_npm_downloads("dsh-market", sleep=sleeps.append, opener=opener_404)
+        self.assertEqual(miss["status"], "unknown")
+        self.assertIsNone(miss["downloads"], "取不到不能写 0")
+
+        calls = {"n": 0}
+
+        def opener_flaky(req, timeout=20):
+            calls["n"] += 1
+            if calls["n"] < 3:
+                raise urllib.error.HTTPError(req.full_url, 500, "boom", hdrs=None, fp=None)
+            return FakeResp(b'{"downloads":10,"start":"2026-10-04","end":"2026-10-10"}')
+
+        recovered = npm.fetch_npm_downloads("picgo", sleep=sleeps.append, opener=opener_flaky)
+        self.assertEqual(recovered["status"], "ok")
+        self.assertEqual(recovered["downloads"], 10)
+        self.assertGreaterEqual(len(sleeps), 2, "5xx 要退避重试")
+
+    def test_load_save_and_public_entry_never_fake_zero(self):
+        self.assertEqual(npm.load_downloads(self.path)["repos"], {})
+        self.path.write_text("不是 json", encoding="utf-8")
+        self.assertEqual(npm.load_downloads(self.path)["repos"], {})
+        payload = npm.load_downloads(self.path)
+        npm.put(
+            payload,
+            "a/ok",
+            {
+                "status": "ok",
+                "package": "dshmarket",
+                "downloads": 100,
+                "window": {"start": "2026-10-03", "end": "2026-10-09"},
+                "multiPackage": False,
+                "packageAt": "2026-10-11T00:00:00Z",
+                "downloadsAt": "2026-10-11T00:00:00Z",
+            },
+        )
+        npm.save_downloads(payload, self.path)
+        loaded = npm.load_downloads(self.path)
+        self.assertEqual(loaded["repos"]["a/ok"]["downloads"], 100)
+        self.assertEqual(npm.public_entry(None)["status"], "unknown")
+        self.assertIsNone(npm.public_entry(None)["downloads"])
+        self.assertIsNone(npm.public_entry({"status": "ok", "downloads": "nope"})["downloads"])
+        self.assertEqual(npm.public_entry({"status": "ok", "downloads": "nope"})["status"], "unknown")
+
+    def test_pick_package_candidates_only_new_or_pushed_once_a_day(self):
+        now = time.time()
+        nodes = [
+            {"id": "new/one", "stars": 10, "pushedAt": self._iso(1), "archived": False},
+            {"id": "pushed/again", "stars": 50, "pushedAt": self._iso(1), "archived": False},
+            {"id": "fresh/today", "stars": 99, "pushedAt": self._iso(1), "archived": False},
+            {"id": "stale/quiet", "stars": 80, "pushedAt": self._iso(48), "archived": False},
+            {"id": "gone/archived", "stars": 900, "pushedAt": self._iso(1), "archived": True},
+        ]
+        payload = {
+            "repos": {
+                "pushed/again": {"at": self._iso(48), "packageAt": self._iso(48), "status": "ok", "package": "x"},
+                "fresh/today": {"at": self._iso(2), "packageAt": self._iso(2), "status": "ok", "package": "y"},
+                "stale/quiet": {"at": self._iso(48), "packageAt": self._iso(48), "status": "ok", "package": "z"},
+            }
+        }
+        # pushed/again：上次抓之后又推过，且已超过 24h → 进候选
+        # fresh/today：又推过但 2 小时前刚抓过 → 跳过（一天一次）
+        # stale/quiet：超过 24h 但没有新提交 → 不重读 package.json
+        # new/one：从没抓过 → 进候选
+        picked = npm.pick_package_candidates(payload, nodes, limit=10, now_ts=now)
+        self.assertIn("new/one", picked)
+        self.assertIn("pushed/again", picked)
+        self.assertNotIn("fresh/today", picked)
+        self.assertNotIn("stale/quiet", picked)
+        self.assertNotIn("gone/archived", picked)
+
+    def test_pick_download_candidates_daily_for_known_packages(self):
+        now = time.time()
+        payload = {
+            "repos": {
+                "a/stale": {"status": "ok", "package": "a", "downloadsAt": self._iso(30)},
+                "a/fresh": {"status": "ok", "package": "b", "downloadsAt": self._iso(2)},
+                "a/priv": {"status": "private", "package": None, "downloadsAt": self._iso(30)},
+            }
+        }
+        picked = npm.pick_download_candidates(payload, limit=10, now_ts=now)
+        self.assertEqual(picked, ["a/stale"])
+
+    def test_file_raw_404_vs_network(self):
+        client = GitHubClient(token=None, sleep=lambda *_a: None)
+        with mock.patch.object(client, "_open", side_effect=RuntimeError("GitHub 返回 404：missing")):
+            self.assertIsNone(client.file_raw("a/b", "package.json"))
+        with mock.patch.object(client, "_open", side_effect=RuntimeError("GitHub 连接失败（Timeout）：x")):
+            with self.assertRaises(RuntimeError):
+                client.file_raw("a/b", "package.json")
+
+    def test_npm_failure_never_raises_and_offline_skips(self):
+        import collect
+
+        fake_args = type("A", (), {"npm_budget": 300, "dry_run": False, "from_raw": False, "from_store": False})()
+        with mock.patch.object(collect, "fetch_npm_downloads", side_effect=RuntimeError("boom")):
+            out = collect.fetch_npm_safe(fake_args, {"nodes": []}, lambda *_a: None)
+        self.assertTrue(out.get("enabled"))
+        self.assertIn("boom", out.get("error", ""))
+
+        offline = type("A", (), {"npm_budget": 300, "dry_run": False, "from_raw": True, "from_store": False})()
+        skipped = collect.fetch_npm_downloads(offline, {"nodes": [{"id": "a/b"}]}, lambda *_a: None)
+        self.assertEqual(skipped.get("enabled"), False)
+
+    def test_pkg_resolve_keeps_old_downloads_when_npm_blips(self):
+        """回归：重读 package.json 后 npm 挂了，不得把已有周下载量抹成 unknown。"""
+        import collect
+
+        cache = TMP / "npm-downloads.json"
+        npm.save_downloads(
+            {
+                "updatedAt": "2026-10-10T00:00:00Z",
+                "repos": {
+                    "a/ok": {
+                        "status": "ok",
+                        "package": "dshmarket",
+                        "downloads": 112438,
+                        "window": {"start": "2026-10-03", "end": "2026-10-09"},
+                        "multiPackage": False,
+                        "packageAt": self._iso(48),
+                        "downloadsAt": self._iso(48),
+                    }
+                },
+            },
+            cache,
+        )
+        nodes = [{"id": "a/ok", "stars": 10, "pushedAt": self._iso(1), "archived": False}]
+        args = type("A", (), {"npm_budget": 10, "dry_run": False, "from_raw": False, "from_store": False})()
+
+        class FakeClient:
+            stats = type("S", (), {"core_remaining": 5000})()
+
+            def file_raw(self, repo_id, path):
+                return '{"name":"dshmarket"}'
+
+        with mock.patch.object(collect, "NPM_DOWNLOADS_CACHE", cache), \
+             mock.patch.object(collect, "GitHubClient", return_value=FakeClient()), \
+             mock.patch.object(collect, "load_token", return_value=None), \
+             mock.patch.object(npm, "fetch_npm_downloads", return_value={"status": "unknown", "downloads": None, "window": None}), \
+             mock.patch.object(collect.time, "sleep", lambda *_a: None):
+            out = collect.fetch_npm_downloads(args, {"nodes": nodes}, lambda *_a: None)
+
+        loaded = npm.load_downloads(cache)["repos"]["a/ok"]
+        self.assertEqual(loaded["status"], "ok", "npm 短暂失败不能改写 status")
+        self.assertEqual(loaded["downloads"], 112438, "旧下载量必须保留")
+        self.assertEqual(loaded["window"], {"start": "2026-10-03", "end": "2026-10-09"})
+        self.assertEqual(loaded["package"], "dshmarket")
+        self.assertGreaterEqual(out.get("failed", 0), 1)
 
 
 class InclusionAndDirectionTest(unittest.TestCase):

@@ -37,11 +37,12 @@ export function timeAgo(iso, now = Date.now()) {
 }
 
 /**
- * opts：{ button, modal, tabs, body, close, fetcher, onPick, noiseToggle, noiseBox, noiseLabel }。
+ * opts：{ button, modal, tabs, body, close, fetcher, onPick, noiseToggle, noiseBox, noiseLabel, npmToggle, npmBox, npmLabel }。
  * fetcher 失败时如实显示「拿不到」，onPick 回调仓库 id；
- * noiseToggle / noiseBox / noiseLabel = 弹窗头部那枚「隐藏噪声」开关（可选，没有就只标注不隐藏）。
+ * noiseToggle / noiseBox / noiseLabel = 弹窗头部那枚「隐藏噪声」开关（可选，没有就只标注不隐藏）；
+ * npmToggle / npmBox / npmLabel = 「显示周下载」可选列（默认关，不进排序；取不到显示「未知」）。
  */
-export function createRankingBoard({ button, modal, tabs, body, close, fetcher, onPick, noiseToggle, noiseBox, noiseLabel }) {
+export function createRankingBoard({ button, modal, tabs, body, close, fetcher, onPick, noiseToggle, noiseBox, noiseLabel, npmToggle, npmBox, npmLabel }) {
   let data = null;
   let loadedAt = 0;
   let tab = "updated";
@@ -50,6 +51,18 @@ export function createRankingBoard({ button, modal, tabs, body, close, fetcher, 
   let error = null;
   // 只隐藏、不重排：被藏起来的行仍然占着它原来的名次，后面的行不会被顶上来（名次是榜位，不是显示序号）
   let hideNoise = false;
+  let showNpm = false;
+
+  /** 周下载量展示：有数字就千分位；否则一律「未知」（缺失不能当 0） */
+  function formatNpm(npm) {
+    if (npm && npm.status === "ok" && typeof npm.downloads === "number") {
+      const n = npm.downloads;
+      if (n >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, "") + "M";
+      if (n >= 1e4) return (n / 1e3).toFixed(1).replace(/\.0$/, "") + "k";
+      return n.toLocaleString("en-US");
+    }
+    return "未知";
+  }
 
   const STALE_MS = 5 * 60 * 1000;
 
@@ -169,6 +182,18 @@ export function createRankingBoard({ button, modal, tabs, body, close, fetcher, 
         el("span", null, "★ " + formatStars(item.starsAfter ?? item.stars) + (typeof w === "number" ? " · " + w + " 天" : "")),
       );
     }
+    if (showNpm) {
+      const npm = item.npm;
+      const chip = el("span", "npm-dl" + (npm && npm.status === "ok" ? "" : " unk"), formatNpm(npm));
+      const win = npm && npm.window ? npm.window.start + " ~ " + npm.window.end : "";
+      const pkg = npm && npm.package ? npm.package : "";
+      chip.title =
+        (pkg ? "npm:" + pkg : "无包名") +
+        (win ? " · 窗口 " + win : "") +
+        (npm && npm.multiPackage ? " · 多包（只计根 package.json）" : "") +
+        (npm && npm.status === "ok" ? " · 上周下载 " + formatNpm(npm) : " · 周下载未知");
+      metric.append(chip);
+    }
     row.append(metric);
     const verText = versions.length
       ? " · 版本：" + versions.map((v) => (v.tag || "—") + (v.at ? "@" + String(v.at).slice(5) : "") + (v.pre ? "（预发布）" : "")).join("、")
@@ -223,9 +248,17 @@ export function createRankingBoard({ button, modal, tabs, body, close, fetcher, 
     if (noiseLabel) noiseLabel.textContent = n ? "隐藏噪声（" + n + " 条）" : "隐藏噪声";
   }
 
+  function syncNpm() {
+    if (npmBox) npmBox.checked = showNpm;
+    if (npmLabel) npmLabel.textContent = "显示周下载";
+    // 有开关就一直露着：覆盖不全是预期，默认关、打开后看得到「未知」
+    if (npmToggle) npmToggle.hidden = false;
+  }
+
   function render() {
     syncTabs();
     syncNoise();
+    syncNpm();
     renderBody();
     // 前端不再展示任何口径解释（列表、标签页都不挂）：口径在接口字段里（updatesSource / window.days / dataAgeHours / seriesSource / note），文档里也写着。
   }
@@ -279,6 +312,12 @@ export function createRankingBoard({ button, modal, tabs, body, close, fetcher, 
   if (noiseBox) {
     noiseBox.addEventListener?.("change", () => {
       hideNoise = !!noiseBox.checked;
+      render();
+    });
+  }
+  if (npmBox) {
+    npmBox.addEventListener?.("change", () => {
+      showNpm = !!npmBox.checked;
       render();
     });
   }

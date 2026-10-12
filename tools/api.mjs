@@ -514,6 +514,48 @@ export function createApi({ root }) {
     return releasesCache.index;
   }
 
+  /* npm 周下载量（data/cache/npm-downloads.json，采集器写）：可选列，不进默认排序。
+   * 文件不存在 / 损坏 / 单行缺失 → status=unknown、downloads=null，接口绝不崩、也不把缺失写成 0。 */
+  const NPM_UNKNOWN = { status: "unknown", package: null, downloads: null, window: null, multiPackage: false };
+  let npmCache = { mtimeMs: -2, index: { repos: {}, updatedAt: null } };
+
+  function publicNpm(entry) {
+    if (!entry || typeof entry !== "object") return { ...NPM_UNKNOWN };
+    const status = entry.status === "ok" || entry.status === "private" || entry.status === "no-package" || entry.status === "unknown"
+      ? entry.status
+      : "unknown";
+    const downloads = status === "ok" && typeof entry.downloads === "number" ? entry.downloads : null;
+    const window =
+      entry.window && entry.window.start && entry.window.end
+        ? { start: String(entry.window.start).slice(0, 10), end: String(entry.window.end).slice(0, 10) }
+        : null;
+    return {
+      status: status === "ok" && downloads === null ? "unknown" : status,
+      package: typeof entry.package === "string" ? entry.package : null,
+      downloads,
+      window,
+      multiPackage: !!entry.multiPackage,
+    };
+  }
+
+  async function loadNpmDownloads() {
+    const file = join(root, "data", "cache", "npm-downloads.json");
+    const info = await stat(file).catch(() => null);
+    if (!info) return { repos: {}, updatedAt: null };
+    if (npmCache.mtimeMs === info.mtimeMs) return npmCache.index;
+    try {
+      const data = JSON.parse(await readFile(file, "utf8"));
+      const repos = {};
+      for (const [id, entry] of Object.entries(data.repos ?? {})) {
+        if (entry && typeof entry === "object") repos[id] = entry;
+      }
+      npmCache = { mtimeMs: info.mtimeMs, index: { repos, updatedAt: data.updatedAt ?? null } };
+    } catch {
+      npmCache = { mtimeMs: info.mtimeMs, index: { repos: {}, updatedAt: null } };
+    }
+    return npmCache.index;
+  }
+
   /* 逐日星标台账（data/cache/star-daily.json，采集器每轮写）：star 榜逐日趋势柱与窗口增量的【唯一来源】，
    * 两者同源同窗口，所以「行内增量 == 逐日柱加总 + 宽条」由构造成立。
    * 不再用星标环推：环一天只留一个点（同日覆盖），「两个日点的差」只能落在后一天，攒不出逐日形状；而且两个来源各算各的（线上实测 20/20 行的逐日加总都不等于行内增量）。 */
@@ -606,10 +648,13 @@ export function createApi({ root }) {
     const limit = Math.min(RANKING_LIMIT, Math.max(1, Number(params.get("limit") ?? 20) || 20));
     const wantAll = params.get("fields") === "all";
     const releasesIndex = await loadReleases();
+    const npmIndex = await loadNpmDownloads();
 
     const row = (n) => ({
       id: n.id,
       releases: releasesIndex.repos[n.id] ?? [],
+      // 可选列：周下载量。缺省/失败一律 unknown，不进任何排序
+      npm: publicNpm(npmIndex.repos[n.id]),
       name: n.name,
       owner: n.owner,
       avatar: n.avatar ?? null,
@@ -898,6 +943,11 @@ export function createApi({ root }) {
       noise: { filter: noiseFilter, matched: noiseMatched },
       history: { points: points.map((p) => ({ at: p.at, repos: Object.keys(p.stars).length, source: p.source ?? "history" })), latestAt: newest?.at ?? null },
       releases: { cached: Object.keys(releasesIndex.repos).length, updatedAt: releasesIndex.updatedAt ?? null },
+      npm: {
+        cached: Object.keys(npmIndex.repos).length,
+        withDownloads: Object.values(npmIndex.repos).filter((e) => e && e.status === "ok" && typeof e.downloads === "number").length,
+        updatedAt: npmIndex.updatedAt ?? null,
+      },
       starDaily: {
         days: starDailyIndex.days.size,
         sampledDays: starDailyIndex.sampled.size,
@@ -1235,7 +1285,7 @@ export function apiIndex(version) {
     endpoints: [
       { method: "GET", path: "/api", desc: "本清单" },
       { method: "GET", path: "/api/health", desc: "健康检查与数据概况（含 README 索引规模）" },
-      { method: "GET", path: "/api/ranking?days=7&limit=50&fields=all&noise=all|hide|only", desc: "榜单：周更新热榜（本周发过 release 的项目，最多 50 行，含 updates / updatesSource / releases）+ 周 star 热榜（星标历史增量，最多 50 行；历史不足时如实返回实际窗口）。每行带 verdict（related/noise/manual）；noise=hide 排除已判定噪声，only 只看噪声，默认 all（只标注不过滤）" },
+      { method: "GET", path: "/api/ranking?days=7&limit=50&fields=all&noise=all|hide|only", desc: "榜单：周更新热榜（本周发过 release 的项目，最多 50 行，含 updates / updatesSource / releases）+ 周 star 热榜（星标历史增量，最多 50 行；历史不足时如实返回实际窗口）。每行带 verdict（related/noise/manual）与 npm（周下载量可选列：status/package/downloads/window；缺省或失败为 unknown，不进排序）；noise=hide 排除已判定噪声，only 只看噪声，默认 all（只标注不过滤）" },
       { method: "GET", path: "/api/categories", desc: "扇区（功能分类）与细枝及各自数量" },
       { method: "GET", path: "/api/repos?q=&category=&subcategory=&tag=&language=&minStars=&archived=&noise=&sort=stars|pushed|created|name&limit=&offset=&fields=all", desc: "检索仓库（默认 20 条，最多 100 条）。行带 verdict；noise=hide|only 按三档判定过滤，默认 all 只标注" },
       { method: "GET", path: "/api/search?q=&limit=", desc: "紧凑检索：只回命中 id 与计数（含 README 正文命中）" },

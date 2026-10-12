@@ -82,6 +82,9 @@ function mount({ data = payload, fail = false } = {}) {
     noiseToggle: new FakeNode("label"),
     noiseBox: new FakeNode("input"),
     noiseLabel: new FakeNode("span"),
+    npmToggle: new FakeNode("label"),
+    npmBox: new FakeNode("input"),
+    npmLabel: new FakeNode("span"),
   };
   nodes.modal.hidden = true;
   const mask = new FakeNode("div");
@@ -288,6 +291,38 @@ test("榜单里没有噪声行时：开关收起（不给一个点了没反应�
   await settle();
   assert.equal(ui.noiseLabel.textContent, "隐藏噪声");
   assert.equal(ui.noiseToggle.hidden, true, "没有噪声行时整枚开关收起");
+});
+
+test("周下载可选列：默认不显示；打开后有数显示数、取不到显示未知；不改排序", async () => {
+  const data = JSON.parse(JSON.stringify(payload));
+  data.boards.updated.items[0].npm = {
+    status: "ok",
+    package: "dshmarket",
+    downloads: 112438,
+    window: { start: "2026-10-03", end: "2026-10-09" },
+    multiPackage: false,
+  };
+  data.boards.updated.items[1].npm = { status: "unknown", package: null, downloads: null, window: null, multiPackage: false };
+  const ui = mount({ data });
+  ui.button.fire("click");
+  await settle();
+
+  let list = rows(ui.body);
+  assert.ok(!list[0].find((n) => String(n.className).includes("npm-dl")), "默认关：不渲染周下载");
+  assert.equal(list[0].find((n) => n.className === "rk").textContent, "1");
+  assert.equal(list[1].find((n) => n.className === "rk").textContent, "2");
+
+  ui.npmBox.checked = true;
+  ui.npmBox.fire("change");
+  list = rows(ui.body);
+  const ok = list[0].find((n) => String(n.className).includes("npm-dl"));
+  const unk = list[1].find((n) => String(n.className).includes("npm-dl"));
+  assert.ok(ok, "打开后第一行要有周下载");
+  assert.match(ok.textContent, /112/);
+  assert.equal(unk.textContent, "未知", "取不到显示未知，不能写 0");
+  assert.ok(String(unk.className).includes("unk"));
+  assert.equal(list[0].find((n) => n.className === "rk").textContent, "1", "可选列不重排");
+  assert.equal(list[1].find((n) => n.className === "rk").textContent, "2");
 });
 
 test("点一行：回调仓库 id 并自动关闭弹窗", async () => {

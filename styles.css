@@ -618,9 +618,13 @@ input[type="range"]::-moz-range-thumb {
 }
 .modal-head h3 { margin: 0; font-size: 14px; font-weight: 600; flex: none; letter-spacing: .02em; }
 .modal-seg { flex: 1 1 auto; max-width: 300px; margin-left: auto; }
-/* 榜单弹窗头部的「隐藏噪声」开关：与标签页同排，margin 归零（.switch 默认带上下 8px） */
+/* 榜单弹窗头部的「隐藏噪声」/「显示周下载」开关：与标签页同排，margin 归零（.switch 默认带上下 8px） */
 .modal-head .rank-noise { margin: 0 10px 0 0; font-size: 11.5px; white-space: nowrap; }
 .modal-head .rank-noise[hidden] { display: none; }
+/* 周下载可选列：挂在 metric 里，未知态降对比度，绝不把缺失画成 0 */
+.rank-row .npm-dl { display: inline-block; margin-top: 2px; font-size: 11px; opacity: 0.85; }
+.rank-row .npm-dl.unk { opacity: 0.55; font-style: italic; }
+.rank-row .npm-dl::before { content: "↓ "; opacity: 0.7; }
 /* 列表上下都不放文字：口径与数据新旧挂在悬停提示里（见 src/ranking.js 的 boardCaption/footCaption） */
 .modal-body { overflow-y: auto; padding: 10px; flex: 1 1 auto; min-height: 0; overscroll-behavior: contain; }
 

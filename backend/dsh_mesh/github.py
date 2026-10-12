@@ -9,6 +9,7 @@ import gzip
 import json
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -170,6 +171,19 @@ class GitHubClient:
             return self._open(url, accept="application/vnd.github.raw").decode("utf-8", "replace")
         except RuntimeError:
             return None
+
+    def file_raw(self, repo_id: str, path: str) -> str | None:
+        """取仓库内文件原文（raw accept，1 仓库 1 次 core 配额；与 readme() 同路）。
+        返回 None = 文件不存在（404）；网络/限流抛 RuntimeError —— 调用方不得把失败写成「无包」。"""
+        # path 里的斜杠要保留层级，所以只 quote 每一段；repo_id 与 readme() 一样原样拼。
+        quoted = "/".join(urllib.parse.quote(part) for part in str(path).split("/"))
+        url = f"{API_ROOT}/repos/{repo_id}/contents/{quoted}"
+        try:
+            return self._open(url, accept="application/vnd.github.raw").decode("utf-8", "replace")
+        except RuntimeError as err:
+            if "GitHub 返回 404" in str(err):
+                return None
+            raise
 
     # ---------- 版本（releases）----------
     def releases(self, repo_id: str, per_page: int = 20, page: int = 1) -> list[dict] | None:

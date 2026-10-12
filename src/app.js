@@ -39,6 +39,9 @@ const dom = {
   rankingNoise: document.getElementById("ranking-noise"),
   rankingNoiseBox: document.getElementById("ranking-noise-box"),
   rankingNoiseLabel: document.getElementById("ranking-noise-label"),
+  rankingNpm: document.getElementById("ranking-npm"),
+  rankingNpmBox: document.getElementById("ranking-npm-box"),
+  rankingNpmLabel: document.getElementById("ranking-npm-label"),
 };
 
 // 采集状态圆环已迁到管理后台（公开页不再暴露采集进度）：见 admin/status.js 与 tools/admin.mjs。
@@ -53,6 +56,9 @@ const rankingBoard = createRankingBoard({
   noiseToggle: dom.rankingNoise,
   noiseBox: dom.rankingNoiseBox,
   noiseLabel: dom.rankingNoiseLabel,
+  npmToggle: dom.rankingNpm,
+  npmBox: dom.rankingNpmBox,
+  npmLabel: dom.rankingNpmLabel,
   fetcher:
     typeof fetch === "function"
       ? () => fetch("/api/ranking?limit=50").then((res) => (res.ok ? res.json() : null))

@@ -321,6 +321,77 @@ test("榜单行带版本列表：读采集器抓的 data/cache/releases.json（�
   }
 });
 
+test("榜单行带 npm 周下载量：读 data/cache/npm-downloads.json；缺省/损坏 → unknown，不写 0", async () => {
+  const hoursAgo = (h) => new Date(Date.now() - h * 3600000).toISOString();
+  const daysAgo = (d) => new Date(Date.now() - d * 86400000).toISOString().slice(0, 10);
+  const tmp = await mkdtemp(join(tmpdir(), "mesh-npm-"));
+  try {
+    await mkdir(join(tmp, "data", "cache"), { recursive: true });
+    await writeFile(
+      join(tmp, "data", "mesh.json"),
+      JSON.stringify({
+        meta: { generatedAt: hoursAgo(1) },
+        tags: [], clusters: [], hubs: [], edges: [],
+        nodes: [
+          { id: "a/ok", name: "ok", owner: "a", stars: 5, pushedAt: hoursAgo(2), archived: false, fork: false, matchedTags: ["dsh"], topics: [] },
+          { id: "a/miss", name: "miss", owner: "a", stars: 4, pushedAt: hoursAgo(2), archived: false, fork: false, matchedTags: ["dsh"], topics: [] },
+        ],
+      }),
+    );
+    // 用 releases 把两行送进周更新热榜（否则没历史时 stars 板也可能是空的）
+    await writeFile(
+      join(tmp, "data", "cache", "releases.json"),
+      JSON.stringify({
+        updatedAt: hoursAgo(0.2),
+        keep: 5,
+        repos: {
+          "a/ok": { at: hoursAgo(0.2), releases: [{ tag: "v1", name: "", at: daysAgo(1), pre: false }] },
+          "a/miss": { at: hoursAgo(0.2), releases: [{ tag: "v1", name: "", at: daysAgo(1), pre: false }] },
+        },
+      }),
+    );
+    await writeFile(
+      join(tmp, "data", "cache", "npm-downloads.json"),
+      JSON.stringify({
+        updatedAt: hoursAgo(0.2),
+        repos: {
+          "a/ok": {
+            status: "ok",
+            package: "dshmarket",
+            downloads: 112438,
+            window: { start: "2026-10-03", end: "2026-10-09" },
+            multiPackage: false,
+          },
+        },
+      }),
+    );
+    const local = createApi({ root: tmp });
+    const out = await local.ranking(new URLSearchParams("limit=5"));
+    assert.equal(out.npm.cached, 1);
+    assert.equal(out.npm.withDownloads, 1);
+    const items = out.boards.updated.items;
+    const anyOk = items.find((r) => r.id === "a/ok");
+    const anyMiss = items.find((r) => r.id === "a/miss");
+    assert.ok(anyOk, "周更新热榜要带上 a/ok");
+    assert.equal(anyOk.npm.status, "ok");
+    assert.equal(anyOk.npm.downloads, 112438);
+    assert.deepEqual(anyOk.npm.window, { start: "2026-10-03", end: "2026-10-09" });
+    assert.ok(anyMiss);
+    assert.equal(anyMiss.npm.status, "unknown", "缓存没有的行是未知");
+    assert.equal(anyMiss.npm.downloads, null, "缺失不能当 0");
+
+    // 损坏文件：整表降级，接口不崩
+    await writeFile(join(tmp, "data", "cache", "npm-downloads.json"), "不是 json");
+    const broken = createApi({ root: tmp });
+    const out2 = await broken.ranking(new URLSearchParams("limit=5"));
+    const again = out2.boards.updated.items[0];
+    assert.equal(again.npm.status, "unknown");
+    assert.equal(again.npm.downloads, null);
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("周更新热榜：窗口与横轴对齐（最左那天的版本必须被画出来）", async () => {
   // 复现过的线上 bug：窗口按"现在往前 7x24 小时"（起点比横轴早一天），
   // 于是最早那天的版本被算进总数却不画柱子（实测第 5 行 12 个版本 vs 柱子和 6）。

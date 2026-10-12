@@ -31,6 +31,7 @@ from dsh_mesh.config import (
     SAMPLE_RAW,
     SEGMENT_STATE,
     SNAPSHOT_DIR,
+    NPM_DOWNLOADS_CACHE,
     RELEASES_CACHE,
     STAR_DAILY,
     STAR_HISTORY,
@@ -39,6 +40,7 @@ from dsh_mesh.config import (
 )
 from dsh_mesh.readmes import ReadmeIndex, fetch_batch as fetch_readmes
 from dsh_mesh import releases as rel
+from dsh_mesh import npm_downloads as npm
 from dsh_mesh.status import STATUS_FILE, next_run_at, write_status
 from dsh_mesh.segments import SegmentStore, segment_query
 from dsh_mesh.github import GitHubClient, load_token
@@ -46,6 +48,8 @@ from dsh_mesh.github import GitHubClient, load_token
 
 RELEASES_BUDGET = 300  # 每轮默认抓 300 个仓库的 releases（core 配额 5000/小时，留足余量）
 RELEASES_INTERVAL = 0.12  # 每次请求之间歇一下，别撞二级限流
+NPM_BUDGET = 300  # 每轮最多处理多少个仓库的 npm 下载量（含重读 package.json + 刷 last-week）
+NPM_INTERVAL = 0.05  # npm 接口不占 GitHub 配额，但仍歇一下避免连不上
 
 
 def tag_totals_from(state: dict) -> dict[str, int]:
@@ -377,6 +381,138 @@ def fetch_releases(args, mesh: dict, log) -> dict:
     }
 
 
+def fetch_npm_safe(args, mesh: dict, log) -> dict:
+    """跑 npm 下载量采集，但永不抛异常：可选列失败不该让前端数据不落盘。"""
+    try:
+        return fetch_npm_downloads(args, mesh, log)
+    except Exception as exc:  # noqa: BLE001 - 这里就是要吞掉它，见上
+        log("⚠ npm 下载量本轮失败（不阻塞前端数据）：" + str(exc)[:120])
+        return {"enabled": True, "error": str(exc)[:120]}
+
+
+def fetch_npm_downloads(args, mesh: dict, log) -> dict:
+    """按预算解析根 package.json + 刷 npm last-week，写回 data/cache/npm-downloads.json。
+    离线模式与 dry-run 跳过，测试因此完全不碰网络。取不到 / 失败一律记 unknown，不写 0。"""
+    budget = int(getattr(args, "npm_budget", 0) or 0)
+    if budget <= 0 or args.dry_run or args.from_raw or getattr(args, "from_store", False):
+        return {"enabled": False, "budget": budget}
+    payload = npm.load_downloads(NPM_DOWNLOADS_CACHE)
+    nodes = mesh.get("nodes") or []
+    pkg_ids = npm.pick_package_candidates(payload, nodes, limit=budget)
+    # 下载量刷新不占 GitHub：用剩余预算刷已解析包；与包名候选去重
+    remain = max(0, budget - len(pkg_ids))
+    dl_ids = [rid for rid in npm.pick_download_candidates(payload, limit=remain + len(pkg_ids)) if rid not in set(pkg_ids)]
+    dl_ids = dl_ids[:remain]
+    if not pkg_ids and not dl_ids:
+        log("npm：本轮没有需要刷新的仓库（缓存里已有 " + str(len(payload.get("repos") or {})) + " 个）")
+        return {"enabled": True, "budget": budget, "picked": 0, "fetched": 0, "failed": 0, **npm.stats(payload)}
+
+    client = GitHubClient(token=load_token(), sleep=time.sleep) if pkg_ids else None
+    fetched = failed = 0
+    streak = 0
+    now = utcnow()
+
+    for repo_id in pkg_ids:
+        if client is not None and client.stats.core_remaining is not None and client.stats.core_remaining < npm.CORE_FLOOR:
+            log("npm：core 配额只剩 " + str(client.stats.core_remaining) + "，本轮提前收手（下一轮接着抓）")
+            break
+        try:
+            assert client is not None
+            text = client.file_raw(repo_id, "package.json")
+        except Exception as err:  # noqa: BLE001 - 单个仓库失败就跳过
+            failed += 1
+            streak += 1
+            log("npm：" + repo_id + " 读 package.json 失败（跳过）：" + str(err)[:80])
+            if streak >= 5:
+                log("npm：连续 " + str(streak) + " 个仓库抓取失败，判断为网络/配额异常，本轮提前收手")
+                break
+            continue
+        streak = 0
+        parsed = npm.parse_package_json(text, repo_id=repo_id)
+        prev = (payload.get("repos") or {}).get(repo_id) or {}
+        # 包名元数据本次一定更新；下载量只有查到才覆盖——npm 挂了保留旧值（与 dl_ids 一致）
+        entry = {
+            "status": parsed["status"],
+            "package": parsed["package"],
+            "multiPackage": parsed["multiPackage"],
+            "packageAt": now,
+            "downloads": prev.get("downloads") if isinstance(prev.get("downloads"), int) else None,
+            "window": prev.get("window") if isinstance(prev.get("window"), dict) else None,
+            "downloadsAt": prev.get("downloadsAt"),
+        }
+        if parsed["status"] == "ok" and parsed["package"]:
+            hit = npm.fetch_npm_downloads(parsed["package"], sleep=time.sleep)
+            entry["package"] = parsed["package"]
+            if hit["status"] == "ok":
+                entry["status"] = "ok"
+                entry["downloads"] = hit["downloads"]
+                entry["window"] = hit["window"]
+                entry["downloadsAt"] = now
+            elif isinstance(prev.get("downloads"), int) and prev.get("status") == "ok":
+                # 刷新失败：保留旧下载量与旧窗口，只更新包名侧
+                entry["status"] = "ok"
+                entry["downloads"] = prev["downloads"]
+                entry["window"] = prev.get("window")
+                entry["downloadsAt"] = prev.get("downloadsAt")
+                failed += 1
+            else:
+                # 从未有过有效下载：记 unknown、downloads=null（不写 0）
+                entry["status"] = "unknown"
+                entry["downloads"] = None
+                entry["window"] = None
+                entry["downloadsAt"] = now
+                failed += 1
+        npm.put(payload, repo_id, entry, now=now)
+        fetched += 1
+        time.sleep(NPM_INTERVAL)
+
+    for repo_id in dl_ids:
+        prev = (payload.get("repos") or {}).get(repo_id) or {}
+        package = prev.get("package")
+        if not package:
+            continue
+        hit = npm.fetch_npm_downloads(str(package), sleep=time.sleep)
+        if hit["status"] != "ok":
+            # 刷新失败：保留旧值，不把缓存打成未知（页面 API 层才对「无缓存」降级）
+            failed += 1
+            continue
+        entry = dict(prev)
+        entry["status"] = "ok"
+        entry["downloads"] = hit["downloads"]
+        entry["window"] = hit["window"]
+        entry["downloadsAt"] = now
+        npm.put(payload, repo_id, entry, now=now)
+        fetched += 1
+        time.sleep(NPM_INTERVAL)
+
+    size = npm.save_downloads(payload, NPM_DOWNLOADS_CACHE)
+    info = npm.stats(payload)
+    log(
+        "npm：本轮处理 "
+        + str(fetched)
+        + " 个仓库（失败 "
+        + str(failed)
+        + "）· 缓存 "
+        + str(info["repos"])
+        + " 个 / 有下载量 "
+        + str(info["withDownloads"])
+        + " · "
+        + str(size // 1024)
+        + "KB"
+    )
+    return {
+        "enabled": True,
+        "budget": budget,
+        "picked": len(pkg_ids) + len(dl_ids),
+        "packageCandidates": len(pkg_ids),
+        "downloadCandidates": len(dl_ids),
+        "fetched": fetched,
+        "failed": failed,
+        "coreRemaining": client.stats.core_remaining if client is not None else None,
+        **info,
+    }
+
+
 def run_once(args, log) -> dict:
     started = time.time()
     log(f"=== 采集开始 {utcnow()} ===")
@@ -540,6 +676,9 @@ def run_once(args, log) -> dict:
     # 版本（releases）：搜索接口不返回，只能按仓库单独取（1 个仓库 = 1 次 core 配额）
     summary["releases"] = fetch_releases_safe(args, mesh, log)
 
+    # npm 周下载量：可选列；写 data/cache/npm-downloads.json，失败不阻塞前端数据
+    summary["npmDownloads"] = fetch_npm_safe(args, mesh, log)
+
     limit_for_frontend(mesh, args.frontend_limit)
     mesh["meta"]["note"] = (
         f"每小时自动更新一次的快照（{utcnow()}）。"
@@ -598,6 +737,12 @@ def main(argv=None) -> int:
         type=int,
         default=RELEASES_BUDGET,
         help="每轮最多抓多少个仓库的 releases（1 个仓库 = 1 次 core 配额；0 = 关闭）",
+    )
+    parser.add_argument(
+        "--npm-budget",
+        type=int,
+        default=NPM_BUDGET,
+        help="每轮最多处理多少个仓库的 npm 周下载量（读 package.json + last-week；0 = 关闭）",
     )
     parser.add_argument("--from-raw", action="store_true", help="用 data/sample-raw.json 离线复算，不发网络请求")
     parser.add_argument("--from-store", action="store_true", help="用累积索引 data/cache/repos.json 离线重建前端契约（改规则后立刻重算，不联网）")
