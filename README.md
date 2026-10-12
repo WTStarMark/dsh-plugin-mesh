@@ -301,6 +301,14 @@ curl -s "$BASE/api/ranking?limit=10" | jq '.boards.updated.items[] | {id, update
 
 打开 `https://www.moc-chen.cn/card/<owner>/<name>`，可实时预览两版并复制 Markdown / HTML 代码。换默认去处用环境变量：`SITE_URL=https://your-site.example pm2 restart dsh-plugin-mesh --update-env`。
 
+## 赞赏支持
+
+业余时间做的项目，服务器和采集一直在自己掏钱跑。如果它对你有用，可以扫码请作者喝杯咖啡（微信赞赏码）：
+
+<img src="docs/screenshots/donate-wechat.jpg" alt="微信赞赏码" width="240">
+
+赞赏完全自愿，不解锁任何功能 —— 图、数据、API 保持原样开放。
+
 ## 许可
 
 代码以 MIT 许可发布，见 [LICENSE](LICENSE)。数据来自 GitHub 公开搜索接口，版权归各仓库作者所有。
