@@ -81,6 +81,8 @@ def _report_progress(store, fetched: int, added: int, client, args, **extra) -> 
             "requests": client.stats.requests if client is not None else None,
             "budget": getattr(args, "budget", 0),
             "quotaRemaining": client.stats.rate_limit_remaining if client is not None else None,
+            "collectorArgs": getattr(args, "collector", None),
+            "collectorSource": getattr(args, "collector_source", None),
         }
         payload.update(extra)
         _write_status(**payload)
@@ -568,11 +570,19 @@ def run_once(args, log) -> dict:
             requests=0,
             budget=None if offline_round else getattr(args, "budget", 0),
             quotaRemaining=None,
+            # 生效的采集参数与来源（cli / config / default）：后台设置页据此标注
+            # "这一项被命令行占着，改配置也不生效"，否则用户改完配置会白纳闷。
+            collectorArgs=getattr(args, "collector", None),
+            collectorSource=getattr(args, "collector_source", None),
         )
-    # 噪声作者黑名单长期生效：命中者不进累积索引、也不进前端契约。
+    # 噪声黑名单长期生效：命中者不进累积索引、也不进前端契约。
+    # 两档语义不同：作者级 = 整账号不可信；单仓库级 = 这个仓库不可信（那人还有真项目）。
     blacklist = snap.load_blacklist(NOISE_BLACKLIST)
+    blacklist_repos = snap.load_blacklist_repos(NOISE_BLACKLIST)
     if blacklist:
         log("噪声黑名单：" + str(len(blacklist)) + " 个作者（" + "、".join(sorted(blacklist)[:5]) + ("…" if len(blacklist) > 5 else "") + "）")
+    if blacklist_repos:
+        log("单仓库黑名单：" + str(len(blacklist_repos)) + " 个仓库（" + "、".join(sorted(blacklist_repos)[:3]) + ("…" if len(blacklist_repos) > 3 else "") + "）")
     if args.from_raw:
         raws, tag_totals, stats, env = load_from_raw(log)
     elif getattr(args, "from_store", False):
@@ -582,7 +592,15 @@ def run_once(args, log) -> dict:
 
     if not args.dry_run:
         _write_status(state="building", phase="build")
-    mesh = build_mesh(raws, tag_totals, blacklist=blacklist)
+    # 白名单别名组：匹配层展开（仓库只打了同义标签也能归到规范标签上）。
+    # 抓取层不用它 —— args.tags 仍然只有规范标签，GitHub 只认精确 topic。
+    mesh = build_mesh(
+        raws,
+        tag_totals,
+        blacklist=blacklist,
+        blacklist_repos=blacklist_repos,
+        whitelist_aliases=admin_config.whitelist_aliases(),
+    )
     noise_now = mesh["meta"].get("noiseBlacklist") or {}
     new_noise = {owner: info for owner, info in noise_now.items() if owner not in blacklist}
     if env.get("readme"):
@@ -638,12 +656,14 @@ def run_once(args, log) -> dict:
     # 落盘前重读磁盘再取并集：后台可能在采集期间往 noise-blacklist.json 加条目，
     # 只写本轮结果会把人工条目抹掉（冲突时以磁盘为准）。
     previous_noise = snap.load_blacklist(NOISE_BLACKLIST)
+    previous_repos = snap.load_blacklist_repos(NOISE_BLACKLIST)
     merged_noise = {**noise_now, **previous_noise}
     new_count = sum(1 for owner in merged_noise if owner not in previous_noise)
     kept_count = len(merged_noise) - new_count
     summary["noiseBlacklistSize"] = len(merged_noise)
+    # 单仓库条目来自后台/手改，采集器只负责原样保留：合并写回时绝不能丢（丢了就等于静默解除拉黑）。
     if merged_noise and merged_noise != previous_noise:
-        snap.write_blacklist(merged_noise, NOISE_BLACKLIST)
+        snap.write_blacklist(merged_noise, NOISE_BLACKLIST, repos=previous_repos)
         log(
             "噪声黑名单已写入 data/noise-blacklist.json（新增拉黑 " + str(new_count)
             + " 个 / 保留既有（含人工）" + str(kept_count) + " 个，共 " + str(len(merged_noise)) + " 个作者）"
@@ -758,39 +778,100 @@ def run_once(args, log) -> dict:
     return summary
 
 
+# CLI 参数名 ↔ 后台配置键名。两侧的键名必须一致（decision: config.json 里就用 camelCase，
+# 前端设置页直接照抄，不做命名转换），改这里就要顺手改 admin_config.DEFAULT_COLLECTOR。
+COLLECTOR_ARG_MAP = {
+    "budget": "budget",
+    "max_pages": "maxPages",
+    "refresh_hours": "refreshHours",
+    "readme_budget": "readmeBudget",
+    "readme_max_chars": "readmeMaxChars",
+    "readme_min_stars": "readmeMinStars",
+    "releases_budget": "releasesBudget",
+    "npm_budget": "npmBudget",
+    "interval": "interval",
+    "min_ratio": "minRatio",
+    "frontend_limit": "frontendLimit",
+}
+
+
+def resolve_collector_args(args, config_path=None, log=None) -> dict:
+    """把采集参数定下来：**后台配置 > 启动参数 > 内置默认值**。
+
+    为什么是这个顺序（而不是常见的"命令行最高"）：这些参数只服务本机这一个采集进程，
+    而后台才是给人用的入口 —— 启动参数里的 --budget 600 是当初写死部署命令留下的，
+    若让它压过后台，用户就会遇到"后台改了不生效"。所以启动参数退居"初始化默认值"：
+    配置里有这个键就听配置的；没写过的键才用启动参数（再没有就用内置默认）。
+
+    返回 {effective, source}；调用方把它挂到 args.collector / args.collector_source，
+    由采集器每轮写进状态文件，后台设置页据此标注每一项当前值是从哪来的。
+    """
+    configured = admin_config.configured_collector_keys(config_path)  # 用户真写过的键
+    config = admin_config.collector_config(config_path)
+    source: dict[str, str] = {}
+    effective: dict[str, int | float] = {}
+    for attr, key in COLLECTOR_ARG_MAP.items():
+        cli = getattr(args, attr, None)
+        if key in configured:
+            value = config[key]
+            source[key] = "config"
+        elif cli is not None:
+            value = cli
+            source[key] = "cli"
+        else:
+            value = admin_config.DEFAULT_COLLECTOR.get(key)
+            source[key] = "default"
+        setattr(args, attr, value)
+        effective[key] = value
+    if log:
+        parts = []
+        for label, tag in (("后台配置", "config"), ("启动参数", "cli"), ("内置默认", "default")):
+            keys = [k for k, v in source.items() if v == tag]
+            parts.append(label + " " + (str(len(keys)) + " 项（" + "、".join(keys) + "）" if keys else "无"))
+        log("采集参数：" + " | ".join(parts))
+    return {"effective": effective, "source": source}
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="DSH 插件生态索引采集器（纯脚本）")
     parser.add_argument("--once", action="store_true", help="只跑一次（默认）")
     parser.add_argument("--watch", "--loop", dest="watch", action="store_true", help="常驻，按 --interval 周期执行（pm2 下必须用 --loop：pm2 会把 --watch 认成它自己的文件监听开关，导致每次落盘都重启进程）")
-    parser.add_argument("--interval", type=int, default=DEFAULT_INTERVAL, help="周期秒数，默认 3600（每小时）")
-    parser.add_argument("--readme-budget", type=int, default=150, help="每轮抓多少个仓库的 README（供搜索 README 内容；0 = 完全关闭）")
-    parser.add_argument("--readme-max-chars", type=int, default=2000, help="每个仓库保留的 README 摘要字符数（越大越全、索引越大）")
-    parser.add_argument("--readme-min-stars", type=int, default=1, help="只索引星标 ≥ N 的仓库（默认 1：跳过 0 星长尾，索引约减半；设 0 = 全量）")
+    parser.add_argument("--interval", type=int, default=None, help="周期秒数（默认：读后台配置；内置 3600）")
+    parser.add_argument("--readme-budget", type=int, default=None, help="每轮抓多少个仓库的 README（默认：读后台配置；0 = 完全关闭）")
+    parser.add_argument("--readme-max-chars", type=int, default=None, help="每个仓库保留的 README 摘要字符数（默认：读后台配置）")
+    parser.add_argument("--readme-min-stars", type=int, default=None, help="只索引星标 ≥ N 的仓库（默认：读后台配置；0 = 全量）")
     parser.add_argument(
         "--releases-budget",
         type=int,
-        default=RELEASES_BUDGET,
-        help="每轮最多抓多少个仓库的 releases（1 个仓库 = 1 次 core 配额；0 = 关闭）",
+        default=None,
+        help="每轮最多抓多少个仓库的 releases（默认：读后台配置；0 = 关闭）",
     )
     parser.add_argument(
         "--npm-budget",
         type=int,
-        default=NPM_BUDGET,
-        help="每轮最多处理多少个仓库的 npm 周下载量（读 package.json + last-week；0 = 关闭）",
+        default=None,
+        help="每轮最多处理多少个仓库的 npm 周下载量（默认：读后台配置；0 = 关闭）",
     )
     parser.add_argument("--from-raw", action="store_true", help="用 data/sample-raw.json 离线复算，不发网络请求")
     parser.add_argument("--from-store", action="store_true", help="用累积索引 data/cache/repos.json 离线重建前端契约（改规则后立刻重算，不联网）")
     parser.add_argument("--dry-run", action="store_true", help="只算不写")
-    parser.add_argument("--max-pages", type=int, default=10, help="每个分段最多翻几页（GitHub 上限 10 页 = 1000 条）")
-    parser.add_argument("--budget", type=int, default=DEFAULT_BUDGET, help="每轮最多消耗多少次搜索请求（0 = 不限）")
-    parser.add_argument("--refresh-hours", type=float, default=REFRESH_HOURS, help="超过这个时长没刷新的分段会重新排队")
+    parser.add_argument("--max-pages", type=int, default=None, help="每个分段最多翻几页（默认：读后台配置；GitHub 上限 10）")
+    parser.add_argument("--budget", type=int, default=None, help="每轮最多消耗多少次搜索请求（默认：读后台配置；0 = 不限）")
+    parser.add_argument("--refresh-hours", type=float, default=None, help="超过这个时长没刷新的分段会重新排队（默认：读后台配置）")
     parser.add_argument("--no-slice", action="store_true", help="（已废弃）分段模式一律按星标切片")
-    parser.add_argument("--frontend-limit", type=int, default=FRONTEND_LIMIT, help="前端快照保留多少个节点（0 = 不限）")
-    parser.add_argument("--min-ratio", type=float, default=0.8, help="低于现有索引的这个比例时拒绝覆盖前端数据")
+    parser.add_argument("--frontend-limit", type=int, default=None, help="前端快照保留多少个节点（默认：读后台配置；0 = 不限）")
+    parser.add_argument("--min-ratio", type=float, default=None, help="低于现有索引的这个比例时拒绝覆盖前端数据（默认：读后台配置）")
     parser.add_argument("--tags", nargs="*", default=None, help="要抓取的标签（默认读 data/admin/config.json，缺失/为空时回退内置白名单）")
     parser.add_argument("--quiet", action="store_true", help="少打印")
     args = parser.parse_args(argv)
     log = (lambda *a, **k: None) if args.quiet else (lambda *a, **k: print(*a, **k, flush=True))
+
+    # 采集参数：显式命令行 > 后台配置 > 内置默认值（以前只认命令行，后台改了不生效）。
+    # 只能解析一次：这一步会把结果写回 args，再解析一遍会把"来自配置"误判成"来自命令行"。
+    resolved = resolve_collector_args(args, log=log)
+    args.collector = resolved["effective"]
+    args.collector_source = resolved["source"]
+    log("本轮生效：预算 " + str(args.budget) + " 次 / 间隔 " + str(args.interval) + " 秒 / 翻页 " + str(args.max_pages))
 
     # 抓取标签以 data/admin/config.json 为准（缺失/损坏/为空回退白名单），显式 --tags 优先；各入口共用这份解析。
     args.tags = args.tags or admin_config.whitelist_tags()

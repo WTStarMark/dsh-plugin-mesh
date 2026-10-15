@@ -6,10 +6,12 @@
 
 from __future__ import annotations
 
+import argparse
 import contextlib
 import io
 import json
 import os
+import re
 import shutil
 import sys
 import time
@@ -28,7 +30,7 @@ from dsh_mesh import admin_config as admin_cfg  # noqa: E402
 from dsh_mesh.build import build_mesh, limit_for_frontend, relevance_score  # noqa: E402
 from dsh_mesh import build as build_mod  # noqa: E402
 from dsh_mesh.classify import apply_categories, classify_node  # noqa: E402
-from dsh_mesh.config import HUB_ID, SAMPLE_MESH, SAMPLE_RAW, WHITELIST_TAGS  # noqa: E402
+from dsh_mesh.config import HUB_ID, ROOT, SAMPLE_MESH, SAMPLE_RAW, WHITELIST_TAGS  # noqa: E402
 from dsh_mesh.github import GitHubClient, load_token  # noqa: E402
 from collect import seconds_until_next  # noqa: E402
 
@@ -369,8 +371,56 @@ class NoiseBlacklistTest(unittest.TestCase):
             snap.write_blacklist({"spammer": {"repos": 201, "maxStars": 0}}, path)
             loaded = snap.load_blacklist(path)
             self.assertEqual(loaded, {"spammer": {"repos": 201, "maxStars": 0}})
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            # repos 是单仓库级名单（issue#5 第1条）：外壳也必须带它，且与 owners 一起参与 count
+            self.assertEqual(sorted(payload), ["count", "note", "owners", "repos", "updatedAt"], "外壳键位是前后端的硬契约")
+            self.assertEqual(payload["count"], len(payload["owners"]) + len(payload["repos"]), "count = 两个名单的条目总数")
+            # Node 侧 tools/admin-config.mjs 的 BLACKLIST_NOTE 与本文件必须一字不差：
+            # 两边各存一份文案，分叉了也没人会发现，所以在这里钉死。
+            js = (ROOT / "tools" / "admin-config.mjs").read_text(encoding="utf-8")
+            match = re.search(r'const BLACKLIST_NOTE = "(.*?)";', js)
+            self.assertIsNotNone(match, "admin-config.mjs 里应定义 BLACKLIST_NOTE")
+            self.assertEqual(match.group(1), snap.BLACKLIST_NOTE, "JS 与 Python 的黑名单文案必须一致")
             path.write_text("{ 坏掉的 json", encoding="utf-8")
             self.assertEqual(snap.load_blacklist(path), {}, "文件损坏时不能拖垮采集")
+            self.assertEqual(snap.load_blacklist_repos(path), {}, "损坏时单仓库名单同样当空表")
+
+    def test_repo_level_blacklist_round_trip_and_merge(self):
+        """单仓库级名单：写出去能读回来；只改作者名单时不能把仓库条目抹掉（静默解除拉黑）。"""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "noise-blacklist.json"
+            snap.write_blacklist(
+                {"spammer": {"repos": 900}},
+                path,
+                repos={"xing-shuyin/noise-one": {"note": "手工", "addedAt": "2026-10-14T00:00:00Z"}},
+            )
+            self.assertEqual(
+                snap.load_blacklist_repos(path),
+                {"xing-shuyin/noise-one": {"note": "手工", "addedAt": "2026-10-14T00:00:00Z"}},
+            )
+            # 采集器只更新作者名单时必须原样保留仓库条目
+            snap.write_blacklist({"spammer": {"repos": 900}, "other": {"repos": 1}}, path, repos=snap.load_blacklist_repos(path))
+            self.assertIn("xing-shuyin/noise-one", snap.load_blacklist_repos(path))
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["count"], 3, "2 个作者 + 1 个仓库")
+            self.assertEqual(payload["owners"]["spammer"]["repos"], 900)
+
+    def test_build_mesh_skips_repo_and_owner_blacklists(self):
+        """两种黑名单都要在构图时被剔掉，并各自计数（作者级 / 单仓库级分开记）。"""
+        raws = [
+            fake_repo("good", "dsh-keep", stars=5),
+            fake_repo("good", "dsh-drop", stars=4),
+            fake_repo("bad", "dsh-gone", stars=3),
+        ]
+        mesh = build_mesh(raws, {}, blacklist={"bad": {"repos": 9}}, blacklist_repos={"good/dsh-drop": {"note": "手工"}})
+        ids = {n["id"] for n in mesh["nodes"]}
+        self.assertEqual(ids, {"good/dsh-keep"}, "作者级与单仓库级都要生效，且不能连累同作者的别的仓库")
+        self.assertEqual(mesh["meta"]["noiseSkipped"], 1, "作者级剔掉 1 个")
+        self.assertEqual(mesh["meta"]["noiseReposSkipped"], 1, "单仓库级剔掉 1 个")
+        self.assertEqual(mesh["meta"]["noiseBlacklistReposSize"], 1)
+        self.assertIn("good/dsh-drop", mesh["meta"]["noiseBlacklistRepos"])
 
 
 class SegmentBlacklistTest(unittest.TestCase):
@@ -2173,6 +2223,165 @@ class AdminConfigTest(unittest.TestCase):
             self.assertEqual(seen["tags"], list(WHITELIST_TAGS), "后台配置缺失时回退内置白名单")
 
 
+    # ---------- 采集参数（issue#5 第4条）：显式命令行 > 后台配置 > 内置默认 ----------
+
+    def _null_args(self, **overrides):
+        import collect  # backend/collect.py（sys.path 已含 backend）
+
+        args = argparse.Namespace()
+        for attr in collect.COLLECTOR_ARG_MAP:
+            setattr(args, attr, None)  # 命令行 default 必须是 None："没写"与"写了 0"才分得开
+        for key, value in overrides.items():
+            setattr(args, key, value)
+        return args
+
+    def test_collector_args_precedence_config_beats_cli(self):
+        """后台配置 > 启动参数 > 内置默认值：后台是给人用的入口，启动参数只当初始化默认。
+
+        反面教材：线上部署命令写着 --budget 600，若让它压过配置，用户在后台把预算改成 200
+        会毫无效果 —— 那正是 issue#5 第4条要解决的"改了不生效"。
+        """
+        import collect
+
+        cfg = self._write({"collector": {"budget": 200}})
+        # 配置写了 budget=200，启动参数是 --budget 600：必须听配置的
+        with mock.patch.object(admin_cfg, "CONFIG_FILE", cfg):
+            resolved = collect.resolve_collector_args(self._null_args(budget=600), log=None)
+        self.assertEqual(resolved["effective"]["budget"], 200, "配置要压过启动参数")
+        self.assertEqual(resolved["source"]["budget"], "config")
+
+        # 配置里没写过的键：启动参数当初始化默认值
+        with mock.patch.object(admin_cfg, "CONFIG_FILE", cfg):
+            resolved = collect.resolve_collector_args(self._null_args(interval=1800), log=None)
+        self.assertEqual(resolved["effective"]["interval"], 1800, "没配置的项用启动参数")
+        self.assertEqual(resolved["source"]["interval"], "cli")
+
+        # 既没配置也没启动参数：内置默认值
+        with mock.patch.object(admin_cfg, "CONFIG_FILE", cfg):
+            resolved = collect.resolve_collector_args(self._null_args(), log=None)
+        self.assertEqual(resolved["effective"]["maxPages"], 10)
+        self.assertEqual(resolved["source"]["maxPages"], "default")
+
+        # 配置损坏：整份当没配置，启动参数 + 内置默认兜底，绝不炸
+        cfg = self._write("{ 坏掉的 json")
+        with mock.patch.object(admin_cfg, "CONFIG_FILE", cfg):
+            resolved = collect.resolve_collector_args(self._null_args(budget=42), log=None)
+        self.assertEqual(resolved["effective"]["budget"], 42, "配置坏了退回启动参数")
+        self.assertEqual(resolved["source"]["budget"], "cli")
+        self.assertEqual(resolved["effective"]["maxPages"], 10)
+
+        # 坏值/越界：值回退默认，但来源照样记 config（用户确实写过，只是值没被采纳）
+        cfg = self._write({"collector": {"budget": -5, "maxPages": 99}})
+        with mock.patch.object(admin_cfg, "CONFIG_FILE", cfg):
+            resolved = collect.resolve_collector_args(self._null_args(), log=None)
+        self.assertEqual(resolved["effective"]["budget"], 120, "越界值回退内置默认")
+        self.assertEqual(resolved["source"]["budget"], "config")
+        self.assertEqual(resolved["effective"]["maxPages"], 10)
+
+    # ---------- 白名单别名组（issue#5 第3条）：匹配层展开，抓取层不展开 ----------
+
+    def test_whitelist_aliases_expand_for_matching_only(self):
+        groups = admin_cfg.normalize_aliases(
+            [
+                {"tag": "dsh", "aliases": ["awesome-dsh", "dsh-awesome", "dsh", "bad tag!"]},
+                {"tag": "not-in-whitelist", "aliases": ["x"]},
+            ],
+            ["dsh", "dsh-plugin"],
+        )
+        self.assertEqual(groups, [{"tag": "dsh", "aliases": ["awesome-dsh", "dsh-awesome"]}], "非法/重复/等于规范名/不在白名单的组都要丢掉")
+
+        effective, alias_to_canon = admin_cfg.effective_tags(["dsh", "dsh-plugin"], groups)
+        self.assertEqual(effective, ["dsh", "dsh-plugin", "awesome-dsh", "dsh-awesome"], "匹配集合含别名")
+        self.assertEqual(alias_to_canon, {"awesome-dsh": "dsh", "dsh-awesome": "dsh"})
+        # 抓取层永远只用规范标签：GitHub 搜索只认精确 topic，拿别名去搜等于白烧配额
+        self.assertEqual(admin_cfg.whitelist_tags.__name__, "whitelist_tags")
+        self.assertNotIn("awesome-dsh", ["dsh", "dsh-plugin"])
+
+    def test_build_mesh_matches_alias_but_keeps_canonical_tags(self):
+        raws = [
+            fake_repo("aliasco", "some-tool", stars=3),  # topics 只有别名
+            fake_repo("plainco", "dsh-plain", stars=2),
+        ]
+        raws[0]["topics"] = ["awesome-dsh"]
+        with mock.patch.object(build_mod, "WHITELIST_TAGS", ["dsh", "dsh-plugin"]):
+            mesh = build_mesh(raws, {}, whitelist_aliases=[{"tag": "dsh", "aliases": ["awesome-dsh"]}])
+        by_id = {n["id"]: n for n in mesh["nodes"]}
+        self.assertIn("aliasco/some-tool", by_id, "打了别名标签的仓库要能进索引")
+        self.assertEqual(by_id["aliasco/some-tool"]["matchedTags"], ["dsh"], "别名要归到规范标签上")
+        self.assertEqual(by_id["aliasco/some-tool"]["primaryTag"], "dsh", "主标签也要是规范标签")
+        # 不传别名组 = 老行为（精确命中），冻结的跨语言参照物靠这个默认值保持原样
+        with mock.patch.object(build_mod, "WHITELIST_TAGS", ["dsh", "dsh-plugin"]):
+            old = build_mesh(raws, {})
+        self.assertNotIn("aliasco/some-tool", {n["id"] for n in old["nodes"]}, "不传别名组时别名不算命中")
+
+    def test_offline_round_records_collector_args_and_source(self):
+        """状态文件要带上"本轮生效值 + 它来自哪"：后台设置页靠它标注每一项的来源。
+
+        用 main(--from-store --dry-run) 走一遍：dry-run 在开头写完状态就返回，
+        既不用碰真实 data/，也不会真的重建数据，正好验证那次写入。
+        """
+        import collect
+
+        captured = {}
+        real_write = collect._write_status
+
+        def spying_status(**fields):
+            if "collectorArgs" in fields:
+                captured.update(fields)
+            return real_write(**fields)
+
+        fake_store = type("S", (), {
+            "drop_owners": lambda self, owners: 0,
+            "ensure_seeded": lambda self, tags: 0,
+            "requeue_truncated": lambda self, log=None: 0,
+            "coverage": lambda self: {"repos": 0, "segments": {"total": 0, "done": 0, "pending": 0, "split": 0}},
+            "save": lambda self: None,
+        })()
+        # 输出路径全部指向临时目录：run_once 会真的写 mesh/快照，绝不能碰仓库里的 data/
+        patches = [
+            mock.patch.object(collect, "STATUS_FILE", TMP / "params-status.json"),
+            mock.patch.object(collect, "MESH_JSON", TMP / "mesh.json"),
+            mock.patch.object(collect, "SNAPSHOT_DIR", TMP / "snapshots"),
+            mock.patch.object(collect, "LAST_CRAWL", TMP / "last-crawl.json"),
+            mock.patch.object(collect, "STAR_HISTORY", TMP / "star-history.json"),
+            mock.patch.object(collect, "UPDATE_LOG", TMP / "update-log.json"),
+            mock.patch.object(collect, "STAR_DAILY", TMP / "star-daily.json"),
+            mock.patch.object(collect, "run_precompute", lambda *_a, **_k: None),
+            mock.patch.object(collect, "SegmentStore", lambda *a, **k: fake_store),
+            mock.patch.object(
+                collect,
+                "load_from_store",
+                lambda a, log: (
+                    [],
+                    {},
+                    type("St", (), {
+                        "requests": 0,
+                        "retries": 0,
+                        "rate_limit_remaining": None,
+                        "truncated_slices": [],
+                        # 采集统计以后还会加字段；测试关心的是状态写入，不该被每个新字段绊倒
+                        "__getattr__": lambda self, name: None,
+                        "as_dict": lambda self: {},
+                    })(),
+                    {"mode": "store-rebuild", "token": "-"},
+                ),
+            ),
+            mock.patch.object(collect, "_write_status", spying_status),
+        ]
+        for p in patches:
+            p.start()
+        try:
+            code = collect.main(["--from-store", "--quiet"])
+        finally:
+            for p in reversed(patches):
+                p.stop()
+        self.assertEqual(code, 0)
+        self.assertTrue(captured, "开头那次状态写入要带上采集参数")
+        self.assertEqual(captured.get("state"), "crawling")
+        self.assertEqual(set(captured["collectorArgs"]), set(collect.COLLECTOR_ARG_MAP.values()), "11 项参数都要记")
+        self.assertIn("collectorSource", captured, "状态里必须记录每个值的来源")
+
+
 class ResonanceOverrideTest(unittest.TestCase):
     """后台启停覆盖：enabled=false 的基座不建共鸣边，但仍归入协议基座。"""
 
@@ -2217,6 +2426,8 @@ class ResonanceOverrideTest(unittest.TestCase):
         self.assertTrue(by_id["yyy/base"].get("categoryCurated"), "后台关掉的基座仍要归入协议基座")
         self.assertEqual(by_id["yyy/base"]["category"], "spec")
         self.assertNotIn("nope/missing", mesh["meta"]["ecosystemBases"], "覆盖里不存在的基座不能凭空造出来")
+
+    # ---------- 采集参数（issue#5 第4条）：显式命令行 > 后台配置 > 内置默认 ----------
 
     def test_missing_admin_config_leaves_curated_state(self):
         raws = [fake_repo("zzz", "base", stars=100), fake_repo("aaa", "plugin", stars=5)]

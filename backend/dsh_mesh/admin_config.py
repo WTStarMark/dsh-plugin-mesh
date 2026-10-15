@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 from pathlib import Path
 
 from .config import DATA_DIR, ROOT, WHITELIST_TAGS
@@ -19,18 +20,163 @@ CONFIG_FILE = ADMIN_DIR / "config.json"
 MANAGED_ECOSYSTEM_FILE = ADMIN_DIR / "ecosystem.json"
 ECOSYSTEM_FILE = ROOT / "tools" / "ecosystem.json"
 
+# 采集参数（collector 块）的默认值与取值范围。tools/admin-config.mjs 的 DEFAULT_COLLECTOR /
+# COLLECTOR_NUM 必须与本表逐键一致 —— 两侧各写一份，靠 backend/tests 与 tests/admin.test.mjs 对表盯住。
+# 键名用 camelCase：它同时出现在 config.json 里，前端直接照着渲染，不做命名转换。
+DEFAULT_COLLECTOR: dict = {
+    "budget": 120,        # 每轮最多消耗多少次搜索请求（0 = 不限）
+    "maxPages": 10,       # 每个分段最多翻几页（GitHub 搜索单查询硬上限 10）
+    "refreshHours": 6,    # 超过这个时长没刷新的分段重新排队
+    "readmeBudget": 150,  # 每轮抓多少篇 README
+    "readmeMaxChars": 2000,
+    "readmeMinStars": 1,
+    "releasesBudget": 300,
+    "npmBudget": 300,
+    "interval": 3600,     # 常驻模式轮询间隔（秒）
+    "minRatio": 0.8,      # 低于现有索引的这个比例时拒绝覆盖前端数据
+    "frontendLimit": 0,   # 0 = 不限
+}
+
+_COLLECTOR_RANGE: dict = {
+    "budget": ("int", 0, 100000),
+    "maxPages": ("int", 1, 10),
+    "refreshHours": ("float", 0.5, 720),
+    "readmeBudget": ("int", 0, 100000),
+    "readmeMaxChars": ("int", 200, 20000),
+    "readmeMinStars": ("int", 0, 1000000),
+    "releasesBudget": ("int", 0, 100000),
+    "npmBudget": ("int", 0, 100000),
+    "interval": ("int", 60, 86400),
+    "minRatio": ("float", 0, 1),
+    "frontendLimit": ("int", 0, 1000000),
+}
+
 # 默认配置：文件缺失/损坏/类型不对时返回它的深拷贝；resonance.overrides 为空表示按策展清单走。
 DEFAULT_CONFIG: dict = {
     "version": 1,
     "updatedAt": None,
     "whitelistTags": list(WHITELIST_TAGS),
     "resonance": {"overrides": {}},
+    "collector": dict(DEFAULT_COLLECTOR),
 }
+
+
+def _num(raw, spec):
+    """按范围校验一个数值设置；字符串数字也认（JSON 里手写成 "600" 很常见），坏值返回 None。"""
+    kind, low, high = spec
+    if isinstance(raw, bool) or raw is None:
+        return None
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            return None
+        try:
+            value: float = float(text)
+        except ValueError:
+            return None
+    elif isinstance(raw, (int, float)):
+        value = float(raw)
+    else:
+        return None
+    if value != value or value in (float("inf"), float("-inf")):  # NaN / 无穷
+        return None
+    if kind == "int":
+        if value != int(value):
+            return None
+        value = int(value)
+    if value < low or value > high:
+        return None
+    return value
+
+
+def normalize_collector(raw) -> dict:
+    """采集参数规范化：逐键校验，坏键静默回退默认值（配置坏不能拖垮采集）。"""
+    source = raw if isinstance(raw, dict) else {}
+    out: dict = {}
+    for key, spec in _COLLECTOR_RANGE.items():
+        value = _num(source.get(key), spec)
+        out[key] = DEFAULT_COLLECTOR[key] if value is None else value
+    return out
+
+
+def _deep_merge(base: dict, patch: dict) -> dict:
+    """一层深合并：嵌套 dict（resonance / collector）也合，浅 merge 会把整块换掉。"""
+    out = dict(base)
+    for key, value in patch.items():
+        current = out.get(key)
+        if isinstance(current, dict) and isinstance(value, dict):
+            out[key] = _deep_merge(current, value)
+        else:
+            out[key] = value
+    return out
+
+
+# 别名组上限（与 Node 侧 MAX_ALIAS_GROUPS / MAX_ALIASES_PER_GROUP 一致）
+MAX_ALIAS_GROUPS = 50
+MAX_ALIASES_PER_GROUP = 20
+
+
+def whitelist_aliases(path=None) -> list[dict]:
+    """后台配置的白名单别名组（已规范化）。"""
+    return list(load_admin_config(path).get("whitelistAliases") or [])
 
 
 def default_config() -> dict:
     """默认配置的深拷贝：调用方随便改都不会污染模块级常量。"""
     return copy.deepcopy(DEFAULT_CONFIG)
+
+
+TAG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,49}$")
+
+
+def normalize_aliases(raw, whitelist_tags=None) -> list[dict]:
+    """规范化别名组 [{tag, aliases}]。与 Node tools/admin-config.mjs 的 normalizeAliases 同规则：
+    tag 必须本身就在白名单里（否则等于凭空扩大抓取口径，而抓取层又抓不到它）。
+    非法字符、重复、别名等于规范名、别名已在白名单里 —— 一律丢弃，绝不写进配置。
+    """
+    allowed = {str(t).strip() for t in (whitelist_tags or []) if str(t).strip()}
+    out: list[dict] = []
+    seen_tag: set = set()
+    for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, dict):
+            continue
+        tag = str(item.get("tag") or "").strip()
+        if not TAG_RE.match(tag) or tag not in allowed or tag in seen_tag:
+            continue
+        aliases: list[str] = []
+        seen_alias: set = set()
+        for value in item.get("aliases") if isinstance(item.get("aliases"), list) else []:
+            alias = str(value or "").strip()
+            if not TAG_RE.match(alias) or alias == tag or alias in seen_alias or alias in allowed:
+                continue
+            seen_alias.add(alias)
+            aliases.append(alias)
+            if len(aliases) >= MAX_ALIASES_PER_GROUP:
+                break
+        if not aliases:
+            continue
+        seen_tag.add(tag)
+        out.append({"tag": tag, "aliases": aliases})
+        if len(out) >= MAX_ALIAS_GROUPS:
+            break
+    return out
+
+
+def effective_tags(whitelist_tags, aliases) -> tuple[list[str], dict]:
+    """匹配用的标签集合 = 白名单 + 展开出来的别名；以及 别名 -> 规范标签 的映射。
+    抓取层【绝不】用它去搜 GitHub —— GitHub 只认精确 topic，拿别名去搜纯属白烧配额。
+    """
+    tags = [str(t).strip() for t in (whitelist_tags or []) if str(t).strip()]
+    effective = list(tags)
+    allowed = set(tags)
+    alias_to_canon: dict[str, str] = {}
+    for group in normalize_aliases(aliases, tags):
+        for alias in group["aliases"]:
+            alias_to_canon.setdefault(alias, group["tag"])
+            if alias not in allowed:
+                allowed.add(alias)
+                effective.append(alias)
+    return effective, alias_to_canon
 
 
 def load_admin_config(path=None) -> dict:
@@ -43,9 +189,25 @@ def load_admin_config(path=None) -> dict:
         return default_config()
     if not isinstance(data, dict):
         return default_config()
-    merged = default_config()
-    merged.update(data)
+    merged = _deep_merge(default_config(), data)
+    merged["collector"] = normalize_collector(merged.get("collector"))
+    if not isinstance(merged.get("whitelistTags"), list):
+        merged["whitelistTags"] = list(WHITELIST_TAGS)
+    merged["whitelistAliases"] = normalize_aliases(merged.get("whitelistAliases"), merged["whitelistTags"])
     return merged
+
+
+def _read_raw_config(path=None) -> dict:
+    """读**原始**配置（不补默认值）。唯一的用途是分辨"用户真写过哪些键"：
+    load_admin_config 会把缺的键全部补上，拿它判断"没写过"就永远判不出来。
+    与 load_admin_config 同一条铁律：文件缺失/损坏/类型不对一律当空对象，绝不抛异常。
+    """
+    target = Path(path) if path is not None else CONFIG_FILE
+    try:
+        data = json.loads(target.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 - 见模块 docstring
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def _clean_tags(raw) -> list[str]:
@@ -70,6 +232,17 @@ def whitelist_tags(path=None) -> list[str]:
     if tags:
         return tags
     return _clean_tags(WHITELIST_TAGS)
+
+
+def collector_config(path=None) -> dict:
+    """后台配置的采集参数（已按范围校验、缺键补默认值）。"""
+    return normalize_collector(_read_raw_config(path).get("collector"))
+
+
+def configured_collector_keys(path=None) -> set:
+    """用户在 config.json 里**真写过**的采集参数键（不是补默认值补出来的）。"""
+    raw = _read_raw_config(path).get("collector")
+    return set(raw) if isinstance(raw, dict) else set()
 
 
 def ecosystem_path(curated=None) -> Path:

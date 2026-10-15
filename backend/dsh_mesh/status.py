@@ -3,7 +3,7 @@
 写入是"合并式"的：只更新传入字段，值为 None 表示删除该键（采集流程各处不必拼全量对象）。
 典型字段：state（crawling/building/precomputing/idle/error）、roundStartedAt/roundSeconds/nextRunAt、
 phase（segments/readme/build/precompute）、segments、fetched/indexed/added、requests/budget/quotaRemaining、
-readme、lastRound、updatedAt。
+readme、lastRound、collectorArgs/collectorSource（本轮生效的采集参数与它来自哪里：cli/config/default）、updatedAt。
 """
 
 from __future__ import annotations
