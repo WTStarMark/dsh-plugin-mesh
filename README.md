@@ -3,7 +3,7 @@
 插件生态图是一个网页：把 GitHub 上带 `dsh` 系列标签的仓库，按功能画成一张可交互的关系图。圆心固定是官方仓库 `deepseek-ai/deepseek-harness`，往外分成 21 个功能扇区（扇区就是功能分区），数据每小时自动更新。
 
 [![在线访问](https://img.shields.io/badge/在线访问-www.moc--chen.cn-2f7df6?style=flat-square)](https://www.moc-chen.cn/)
-[![测试](https://img.shields.io/badge/tests-241%20JS%20%2B%20133%20Python-3fb8a8?style=flat-square)](#测试与-ci)
+[![测试](https://img.shields.io/badge/tests-253%20JS%20%2B%20148%20Python-3fb8a8?style=flat-square)](#测试与-ci)
 [![依赖](https://img.shields.io/badge/dependencies-0-57b894?style=flat-square)](#技术选型)
 [![版本](https://img.shields.io/badge/version-v0.5.2-9b8cf0?style=flat-square)]()
 
@@ -31,8 +31,10 @@
 | 生态榜单 | 顶栏奖杯弹窗两个榜，各最多 50 行：周更新热榜（本周真发过 release 的项目）与周 star 热榜 |
 | 搜索与筛选 | 搜仓库名 / 作者 / 描述 / topics，README 正文走后端检索；筛选只淡化、不改变位置 |
 | 三类连线 | 同作者（完整关系）、主题共现（琥珀虚线）、生态共鸣（紫罗兰实线，基座 → 插件） |
-| 管理后台 | 与站点同进程同端口，六个标签页；改完黑名单或共鸣清单点「应用变更」离线重建 |
+| 管理后台 | 与站点同进程同端口，七个标签页；改完两份黑名单或共鸣清单点「应用变更」离线重建，采集参数下一轮自动生效 |
 | 数据出口 | 只读查询 API + 每个仓库一张自包含 SVG 卡片 |
+| 名单两档粒度 | 作者级（整个账号不可信）与单仓库级（那人有真项目，只剔这一个）；列表里能直接看到"加了他会少几个仓库" |
+| 白名单别名组 | 同义标签（如 `dsh-theme`）显式登记为某个规范标签的别名，匹配时归并，抓取口径不变 |
 
 ## 赞赏支持
 
@@ -88,8 +90,8 @@ GitHub 搜索 API
   └─ 分段扫描（segments.py）
        ├─ 把抓取空间切成「标签 × 星标区间」的小段
        ├─ 一段超过 1000 条（接口上限）就按创建时间继续细分：年 → 季度 → 月 → 半月 → 日
-       ├─ 每轮只刷新最久没动的一批（默认预算 120 次搜索请求）
-       ├─ 命中噪声黑名单的作者直接跳过，不消耗配额、不进索引
+       ├─ 每轮只刷新最久没动的一批（预算默认 120 次搜索请求，后台「设置」页可改）
+       ├─ 命中噪声黑名单的仓库/作者直接跳过，不消耗配额、不进索引
        └─ 结果并入累积索引 data/cache/repos.json，跨轮次累加
   └─ 构建（build.py）
        ├─ 噪声判定、相关性三档结论、功能分类
@@ -106,7 +108,8 @@ GitHub 搜索 API
 - 缩水保护：某轮构建出的索引不足现有规模的 80% 时，拒绝覆盖前端数据与快照；落盘用临时文件 + 原子替换，写到一半被杀也不会留下半截 JSON。
 - 白名单标签放在 `data/admin/config.json`（后台改过才有，没有就用内置默认）。采集器与前端工具读同一份。
 - 生态共鸣清单优先读后台副本 `data/admin/ecosystem.json`；没有它才用策展产物 `tools/ecosystem.json`。
-- 噪声黑名单就是 `data/noise-blacklist.json`，后台可直接增删。采集器写盘前会重读并合并人工条目。
+- 噪声黑名单就是 `data/noise-blacklist.json`，后台可直接增删。它是**两个键**：`owners`（作者级，整个账号不可信）和 `repos`（单仓库级，那人还有真项目、只剔这一个）。采集器写盘前会重读并**原样保留**人工条目与单仓库条目。
+- 白名单别名组放在 `data/admin/config.json` 的 `whitelistAliases`。它只影响**匹配**（别名归到规范标签上），**不影响抓取**：GitHub 搜索只认精确 topic，别名只对已经在索引里的仓库起作用。默认不内置任何别名组。
 - 共鸣边是有向边（基座 → 插件）；同作者、主题共现是对等关系，按字母序归一化去重。
 - 星标环、更新日志、逐日星标、版本日期统一按北京时间 00:00 切天（`DAY_TZ_OFFSET_HOURS = 8`）。
 
@@ -122,10 +125,13 @@ node tools/admin-setup.mjs --show   # 查看后台地址
 npm run serve                       # 然后访问 http://127.0.0.1:8788/<ADMIN_PATH>/
 ```
 
-打开后有六个标签页：状态、数据、工作流、名单、共鸣、审计。
+打开后有七个标签页：状态、数据、工作流、名单、**设置**、共鸣、审计。
 
-- 能改：噪声黑名单、白名单标签、生态共鸣清单（含每个基座的锚定条件与子项）。
+- 能改：两份黑名单（作者级 / 单仓库级）、白名单标签与**别名组**、生态共鸣清单（含每个基座的锚定条件与子项）、以及**采集参数**。
+- **设置页**能改预算、翻页、刷新窗口、README / releases / npm 预算、轮询间隔等 11 项参数。优先级是 **后台配置 > 启动参数 > 内置默认值**：启动命令里的 `--budget 600` 只在该项**从没在后台配置过**时生效，所以后台改完**下一轮采集自动按新值跑，不用重启**。页面会标出每一项当前值是从哪来的。
 - 「应用变更」= 跑一次 `python3 backend/collect.py --from-store`。它不联网，用本机累积索引重算 `mesh.json` 并刷新预计算产物。任务异步执行，页面轮询进度。
+- 名单页加人时会先算**影响预估**：这个作者当前收录了几个仓库、点应用后会少几个；**一个都没有就直说"他当前不在数据里，加名单不会有可见变化"**——避免"加了没反应"的错觉。
+- 单仓库级拉黑要写 `owner/repo`（例如 `xing-shuyin/some-noise-repo`），只剔这一个仓库，不动他名下别的项目。
 - 界面配色可切「清爽 / 粉黛」，选择记在浏览器本地。
 - 安全：口令以 scrypt 哈希存 `.env`；会话 Cookie 是 HttpOnly + SameSite=Strict；写操作要 CSRF 令牌；连错 5 次锁 10 分钟；访问日志不写后台路径。
 
@@ -145,7 +151,7 @@ npm run serve                       # 然后访问 http://127.0.0.1:8788/<ADMIN_
 ## 测试与 CI
 
 ```bash
-npm test                           # 前端 + 后端（本机实测：前端 241 项、后端 133 项）
+npm test                           # 前端 + 后端（本机实测：前端 253 项、后端 148 项）
 npm run test:js                    # 只跑前端（node:test）
 npm run test:py                    # 只跑后端（unittest）
 npm run seed:fixture               # 用 data/sample-raw.json 生成夹具数据集（npm test 会自动调用）
@@ -182,7 +188,7 @@ tools/                   服务与工具：serve（静态服务 + API + 后台�
 backend/                 Python 采集器：collect.py（--once / --loop / --from-store / --from-raw /
                          --budget / --readme-budget / --releases-budget）、dsh_mesh/（github / segments /
                          classify / build / snapshot / releases / readmes / status / admin_config / config）、
-                         verify_parity.py、check_token.py、tests/（133 项后端测试）
+                         verify_parity.py、check_token.py、tests/（148 项后端测试）
 docs/                    data-contract.md、admin.md、frontend-design.md 与预览图
 ```
 

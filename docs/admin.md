@@ -60,7 +60,9 @@ npm run serve                        # 本地：http://127.0.0.1:8788/<ADMIN_PAT
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | POST | `/api/lists/blacklist` | `{action:"add"\|"remove", owner, note?}` |
-| POST | `/api/lists/whitelist` | `{tags:[...]}` |
+| POST | `/api/lists/whitelist` | `{tags:[...], whitelistAliases?:[{tag,aliases:[...]}]}`（不传别名组时保留原值） |
+| POST | `/api/lists/blacklist` | `{action:"add-repo"\|"remove-repo", repoId:"owner/repo", note?}` —— 单仓库级拉黑 |
+| GET/POST | `/api/settings` | 采集参数（预算/翻页/间隔…）：读当前值+默认值+范围；POST `{collector:{...}}` 保存 |
 | GET | `/api/resonance` | 生态共鸣清单（管理副本优先）+ 每个基座的**锚定条件** + 每个子项的归属证据 + 是否在当前图里、画了几条边 |
 | POST | `/api/resonance/base` | `{action:"add"\|"update"\|"remove"\|"reset", id, label?, tag?, enabled?}` |
 | POST | `/api/resonance/child` | `{action:"add"\|"remove", baseId, childId}` |
@@ -79,8 +81,8 @@ npm run serve                        # 本地：http://127.0.0.1:8788/<ADMIN_PAT
 
 | 能力 | 写在哪 | 生效方式 |
 |---|---|---|
-| **噪声黑名单** | `data/noise-blacklist.json`（外壳 `owners/count/note`，人工条目 `reason:"manual"`） | 点「应用变更」→ 离线重建，采集管道与前端契约同时剔除 |
-| **白名单标签** | `data/admin/config.json` 的 `whitelistTags` | JS 工具（categories / relevance / seed-sample）与 Python 采集器**读同一份**；改的是**抓取口径**，必须等下一轮真实采集 |
+| **噪声黑名单** | `data/noise-blacklist.json`（外壳 `owners/count/note`，人工条目 `reason:"manual"`） | 点「应用变更」→ 离线重建，采集管道与前端契约同时剔除。加人时后台会先算**影响预估**：该作者在累积索引里有几个仓库、点应用后会少几个；**一个都没有就直说"他当前不在数据里，加名单不会有可见变化"** |
+| **白名单标签 + 别名组** | `data/admin/config.json` 的 `whitelistTags` 与 `whitelistAliases` | JS 工具（categories / relevance / seed-sample）与 Python 采集器**读同一份**；改的是**抓取口径**，必须等下一轮真实采集。别名组只影响**匹配**，不影响抓取（见下） |
 | **生态共鸣清单 + 锚定条件** | `data/admin/ecosystem.json`（后台管理副本，可增删改查） | 点「应用变更」→ 离线重建时由 `build.load_ecosystem()` 读取；重跑 `tools/curate-ecosystem.mjs` 时也会**按后台改过的锚定条件**重新发现子节点 |
 | **状态 / 数据 / 工作流** | 只读 | 直接读 `data/cache/status.json`、`data/last-crawl.json` 等 |
 
@@ -92,6 +94,26 @@ npm run serve                        # 本地：http://127.0.0.1:8788/<ADMIN_PAT
 2. 否则用 `tools/ecosystem.json`（策展产物，只读展示）。
 
 所以：**不编辑就完全等同于以前的行为**。编辑之后，部署与策展复跑都动不了你的改动。想回到策展版本，点后台的「还原策展版本」（会用 `tools/ecosystem.json` 覆盖副本）。
+
+### 别名组是什么、为什么不是"模糊匹配"
+
+白名单标签默认是**精确命中**（仓库的 topics 里得完整写着这个标签）。可生态里同一个意思有好几种写法：`dsh`、`awesome-dsh`、`dsh-tui`……
+
+直接把匹配改成"包含 dsh 就算"会撞上一个已经存在的判据：**挂了 ≥3 个 DSH 标签、正文又没有插件线索的仓库会被判成噪声**（`backend/dsh_mesh/build.py`）。用包含匹配时，一个仓库的 `dsh-plugin-desktop` 会同时命中 `dsh`、`dsh-plugin`、`dsh-plugin-desktop` 三个 → `matchedTags` 从 1 变 3 → **直接误杀**。而且任意正则能把常驻采集器拖死（回溯爆炸），项目早就有结论不开放。
+
+所以走**显式登记**：在名单页的「别名组」里一行写一组：
+
+```
+dsh = awesome-dsh, dsh-awesome
+dsh-plugin = dsh-plugin-x
+```
+
+- 左边是**规范标签**，必须已经在白名单里；不在白名单里的组会被**忽略**（否则等于凭空扩大抓取口径，而抓取层又抓不到它）。
+- 右边是**别名**，匹配时把它归到左边的规范标签上：仓库只打了 `awesome-dsh`，也算 `dsh` 标签的仓库。
+- **抓取层只抓规范标签**：GitHub 搜索只认精确 topic，拿别名去搜纯属白烧配额。
+- 全组去重、每组最多 20 个、最多 50 组；别名必须满足标签字符规则（字母数字开头，含 `._-`）。
+
+**默认不内置任何别名组** —— 每加一个标签就多一份抓取口径，由你自己按需填。
 
 ## 锚定条件（每个基座的四件套）
 
