@@ -13,7 +13,7 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -25,11 +25,29 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const TMP = mkdtempSync(join(tmpdir(), "dsh-mesh-admin-"));
 const ADMIN_DIR = join(TMP, "admin");
 const BLACKLIST_FILE = join(TMP, "noise-blacklist.json");
+// 累积索引也指向临时目录：影响预估必须用可控的假数据测，不能跟着真实采集结果漂
+const CACHE_DIR = join(TMP, "cache");
 process.env.ADMIN_DIR = ADMIN_DIR;
 process.env.BLACKLIST_FILE = BLACKLIST_FILE;
+process.env.CACHE_DIR = CACHE_DIR;
+
+// 假累积索引：spam-owner 2 个仓库共 7 星（影响预估 = 点应用后会被剔出图的数）
+mkdirSync(CACHE_DIR, { recursive: true });
+writeFileSync(
+  join(CACHE_DIR, "repos.json"),
+  JSON.stringify({
+    updatedAt: "2026-01-01T00:00:00Z",
+    count: 3,
+    repos: {
+      "spam-owner/repo-a": { id: "spam-owner/repo-a", owner: "spam-owner", name: "repo-a", stars: 7 },
+      "spam-owner/repo-b": { id: "spam-owner/repo-b", owner: "spam-owner", name: "repo-b", stars: 0 },
+      "other-owner/repo-c": { id: "other-owner/repo-c", owner: "other-owner", name: "repo-c", stars: 1 },
+    },
+  }),
+);
 
 const { hashPassword } = await import("../tools/admin-auth.mjs");
-const { normalizeConfig, readBlacklist, writeBlacklist, adminPathFrom } = await import("../tools/admin-config.mjs");
+const { normalizeConfig, normalizeCollector, readBlacklist, writeBlacklist, adminPathFrom, estimateOwnerImpact, ownerImpactFromIndex, expandTags, matchRepo } = await import("../tools/admin-config.mjs");
 const { anchorsDiffer, collectorBusy, resonanceIsPending } = await import("../tools/admin.mjs");
 
 const P = "TestAdminPath0123456789abcdef"; // 32 位字母数字，形状与线上一致
@@ -80,6 +98,7 @@ before(async () => {
       ADMIN_PASSWORD_HASH: await hashPassword(PASSWORD),
       ADMIN_DIR,
       BLACKLIST_FILE,
+      CACHE_DIR,
       STATS_FILE: join(TMP, "stats.json"),
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -151,7 +170,7 @@ test("前后端不漂移：后台脚本引用的元素 id 与接口都必须真�
 
   const routes = new Set([
     "session", "login", "logout", "status", "overview", "repos", "workflow",
-    "lists", "lists/blacklist", "lists/whitelist",
+    "lists", "lists/blacklist", "lists/whitelist", "settings",
     "resonance", "resonance/base", "resonance/child",
     "apply", "audit", "logs", "log",
   ]);
@@ -284,6 +303,162 @@ test("黑名单：增删都保持外壳，且留备份；作者名要校验", as
   assert.ok(!JSON.parse(readFileSync(BLACKLIST_FILE, "utf8")).owners["spam-owner"], "删除后条目必须消失");
 });
 
+test("黑名单：加人时给出影响预估，重复添加要能分辨；不在数据里要如实说", async () => {
+  // 首次添加：created=true，并带回"这人在累积索引里有几个仓库、合计多少星"
+  const first = await json(await call("lists/blacklist", { method: "POST", body: { action: "add", owner: "spam-owner" }, csrfToken: csrf }));
+  assert.equal(first.status ?? 200, 200);
+  assert.equal(first.ok, true);
+  assert.equal(first.created, true, "首次加入要标 created=true");
+  assert.ok(first.impact, "必须带回 impact，否则前端只能瞎回一句『已加入』");
+  assert.equal(first.impact.repos, 2, "spam-owner 在假索引里有 2 个仓库");
+  assert.equal(first.impact.totalStars, 7, "星标要合计");
+  assert.equal(first.impact.inData, true);
+  assert.equal(first.impact.before, false, "之前没在名单里");
+
+  // 重复添加：必须能分辨（created=false + before=true），前端才不会又说一次"已加入"
+  const again = await json(await call("lists/blacklist", { method: "POST", body: { action: "add", owner: "spam-owner", note: "补一句备注" }, csrfToken: csrf }));
+  assert.equal(again.created, false, "已在名单里要标 created=false");
+  assert.equal(again.impact.before, true);
+  assert.equal(JSON.parse(readFileSync(BLACKLIST_FILE, "utf8")).owners["spam-owner"].note, "补一句备注", "备注仍要更新");
+
+  // 索引里没有的作者：repos=0 / inData=false —— "加了也不会有可见变化"要说得出口
+  const ghost = await json(await call("lists/blacklist", { method: "POST", body: { action: "add", owner: "nobody-here" }, csrfToken: csrf }));
+  assert.equal(ghost.impact.repos, 0);
+  assert.equal(ghost.impact.inData, false, "不在数据里必须能被识别，这正是『加了没反应』的根因");
+
+  // 删除：契约不变，不返回 impact
+  const removed = await json(await call("lists/blacklist", { method: "POST", body: { action: "remove", owner: "spam-owner" }, csrfToken: csrf }));
+  assert.equal(removed.ok, true);
+  assert.equal(removed.impact, null, "删除不需要影响预估");
+});
+
+test("影响预估：索引投影的计数规则与缓存", () => {
+  // 注入式投影：多人多仓、无 owner 字段回退到 id 前缀、空作者、空索引
+  const raw = {
+    repos: {
+      "a/one": { owner: "a", stars: 3 },
+      "a/two": { owner: "a", stars: 0 },
+      "a/three": { id: "a/three", stars: "5" }, // 无 owner 必须退回 id 前缀，且字符串星标要能算
+      "b/one": { owner: "b", stars: 9 },
+      "": {},
+    },
+  };
+  const a = ownerImpactFromIndex(raw, "a");
+  assert.equal(a.repos, 3);
+  assert.equal(a.totalStars, 8, "0+3+5");
+  assert.equal(a.inData, true);
+  assert.equal(ownerImpactFromIndex(raw, "b").repos, 1);
+  assert.equal(ownerImpactFromIndex(raw, "missing").repos, 0);
+  assert.equal(ownerImpactFromIndex(raw, "").repos, 0, "空作者名不能把所有人的仓库都算上");
+  assert.equal(ownerImpactFromIndex(null, "a").repos, 0, "索引损坏要回退空表而不是抛异常");
+
+  // 磁盘路径：读的是 CACHE_DIR 下那份假索引
+  const real = estimateOwnerImpact("spam-owner");
+  assert.equal(real.repos, 2);
+  assert.equal(real.indexedAt, "2026-01-01T00:00:00Z", "要带上索引时间，用户才知道数据有多新");
+});
+
+test("采集参数：可读、可写、坏值被拒，且写入不丢别的键", async () => {
+  const initial = await json(await call("settings"));
+  assert.equal(initial.status ?? 200, 200);
+  assert.equal(initial.collector.budget, 120, "没配置时读内置默认值");
+  assert.ok(Array.isArray(initial.fields) && initial.fields.length > 0, "要带字段元数据，前端才能渲染");
+  assert.ok(initial.ranges.budget && initial.ranges.budget.max > 0, "要带范围，前端才能先挡一轮");
+  // 真实环境里 CONFIG_FILE 在仓库内，会显示成相对路径；测试把 ADMIN_DIR 挂到 /tmp，所以这里两种都算对
+  assert.ok(/(^data\/admin\/config\.json$)|config\.json$/.test(initial.configPath), "要告诉用户配置写在哪个文件，实际：" + initial.configPath);
+
+  // 合法值：写进去、落盘、原样读回来
+  const saved = await json(await call("settings", { method: "POST", body: { collector: { budget: 600, interval: 1800 } }, csrfToken: csrf }));
+  assert.deepEqual(saved.rejected, [], "合法值不该出现在 rejected 里");
+  assert.equal(saved.collector.budget, 600);
+  assert.equal(saved.collector.interval, 1800);
+  assert.equal(JSON.parse(readFileSync(join(ADMIN_DIR, "config.json"), "utf8")).collector.budget, 600);
+
+  // 越界与类型错：不报错，但必须回退默认值并如实列进 rejected
+  const bad = await json(await call("settings", { method: "POST", body: { collector: { budget: "abc", maxPages: 99 } }, csrfToken: csrf }));
+  assert.deepEqual([...bad.rejected].sort(), ["budget", "maxPages"], "坏值要能指出来，不能悄悄改成默认值还说成功");
+  assert.equal(bad.collector.budget, 120);
+  assert.equal(bad.collector.maxPages, 10);
+
+  // 未知键：不认识就不写进去
+  const unknown = await json(await call("settings", { method: "POST", body: { collector: { nonsense: 1 } }, csrfToken: csrf }));
+  assert.ok(unknown.rejected.includes("nonsense"));
+  assert.ok(!("nonsense" in unknown.collector));
+});
+
+test("单仓库黑名单：加/删都要写进 repos，且不动作者级条目（issue#5 第1条）", async () => {
+  // 必须用服务实际读写的那个文件（BLACKLIST_FILE），否则验的是另一份文件
+  const file = BLACKLIST_FILE;
+  const existing = readBlacklist(file);
+  writeFileSync(file, JSON.stringify({ ...existing, owners: { ...existing.owners, "someone-else": { repos: 5, reason: "manual" } } }));
+  const baseOwners = readBlacklist(file).ownerCount; // 加完自己的夹具再记基线
+  const added = await json(await call("lists/blacklist", { method: "POST", body: { action: "add-repo", repoId: "spam-owner/noise-one", note: "手工" }, csrfToken: csrf }));
+  assert.equal(added.ok, true);
+  const afterAdd = readBlacklist(file);
+  assert.ok(afterAdd.repos["spam-owner/noise-one"], "条目要落进 repos");
+  assert.equal(afterAdd.repos["spam-owner/noise-one"].note, "手工");
+  // 前面的测试也在用同一个名单文件，所以只查我们自己加的那条在不在，不比绝对条数
+  assert.ok(afterAdd.owners["someone-else"], "作者级条目一个不能动");
+  assert.equal(afterAdd.repos["spam-owner/noise-one"] != null, true);
+  assert.equal(afterAdd.repoCount >= 1, true);
+  assert.equal(afterAdd.count, afterAdd.ownerCount + afterAdd.repoCount, "count 是两级名单的合计");
+
+  // 二级黑名单只剔这一个仓库：与作者级是两回事，同一个仓库可以同时出现在两边而不互相干扰
+  const both = await call("lists/blacklist", { method: "POST", body: { action: "remove-repo", repoId: "spam-owner/noise-one" }, csrfToken: csrf });
+  assert.equal(both.status, 200);
+  assert.ok(!readBlacklist(file).repos["spam-owner/noise-one"], "删除后 repos 里不能还有它");
+  assert.ok(readBlacklist(file).owners["someone-else"], "删仓库不能顺手把作者条目也删了");
+
+  const missing = await call("lists/blacklist", { method: "POST", body: { action: "remove-repo", repoId: "a/never-added" }, csrfToken: csrf });
+  assert.equal(missing.status, 404, "删不存在的条目要 404，不能静默成功");
+  const badId = await call("lists/blacklist", { method: "POST", body: { action: "add-repo", repoId: "not-a-repo-id" }, csrfToken: csrf });
+  assert.equal(badId.status, 400, "必须写成 owner/repo");
+
+  // 外壳完整性：两个键都在，且能原样读回来（少了 repos 键 = 采集器当成没拉黑过）
+  const shell = readBlacklist(file);
+  assert.deepEqual(Object.keys(shell.repos), []);
+  assert.equal(shell.note.length > 0, true);
+  delete shell.owners["someone-else"]; // 清掉夹具
+  writeBlacklist(shell, file);
+});
+
+test("黑名单外壳：丢失或损坏时两级都当空表，绝不抛异常", () => {
+  const bad = join(TMP, "bl-bad.json");
+  writeFileSync(bad, "{ 这不是 JSON");
+  assert.deepEqual(readBlacklist(bad).owners, {});
+  assert.deepEqual(readBlacklist(bad).repos, {}, "坏文件时 repos 也要安全回退");
+  assert.equal(readBlacklist(bad).count, 0);
+  writeFileSync(bad, JSON.stringify({ owners: { "a/b": 1 }, repos: "不是对象" }));
+  assert.deepEqual(readBlacklist(bad).owners, { "a/b": 1 });
+  assert.deepEqual(readBlacklist(bad).repos, {}, "repos 类型不对时当空表，不影响 owners");
+});
+
+test("共享配置：手工加的键不会被后台保存抹掉（曾经会）", async () => {
+  const file = join(ADMIN_DIR, "config.json");
+  // 显式带上 collector：这样"保存白名单不能把采集参数打回默认值"这条才有意义
+  mkdirSync(ADMIN_DIR, { recursive: true });
+  writeFileSync(
+    file,
+    JSON.stringify({ version: 1, whitelistTags: ["dsh", "dsh-plugin"], segmentation: { starSlices: ["stars:>=5000"] }, collector: { budget: 600 } }, null, 2),
+  );
+  const ok = await call("lists/whitelist", { method: "POST", body: { tags: ["dsh", "dsh-plugin"] }, csrfToken: csrf });
+  assert.equal(ok.status, 200);
+  const after = JSON.parse(readFileSync(file, "utf8"));
+  assert.deepEqual(after.segmentation, { starSlices: ["stars:>=5000"] }, "未知键必须原样保留");
+  assert.equal(after.collector.budget, 600, "保存别的键不能把采集参数打回默认值");
+});
+
+test("采集参数默认值：Node 与 Python 必须逐键相等", () => {
+  const py = JSON.parse(
+    execFileSync("python3", ["-c", "import sys,json;sys.path.insert(0,'backend');from dsh_mesh.admin_config import DEFAULT_COLLECTOR as d;print(json.dumps(d))"], {
+      cwd: ROOT,
+      encoding: "utf8",
+    }),
+  );
+  assert.deepEqual(Object.keys(py).sort(), Object.keys(normalizeCollector(null)).sort(), "两侧键集合必须一致");
+  assert.deepEqual(py, normalizeCollector(null), "两侧默认值必须逐键相等，否则线上行为随实现漂移");
+});
+
 test("白名单标签：落到共享配置，非法标签被拒", async () => {
   const bad = await call("lists/whitelist", { method: "POST", body: { tags: ["ok-tag", "bad tag!"] }, csrfToken: csrf });
   assert.equal(bad.status, 400);
@@ -295,6 +470,53 @@ test("白名单标签：落到共享配置，非法标签被拒", async () => {
   assert.equal(restore.status, 200);
   assert.ok(existsSync(join(ADMIN_DIR, "config.json.bak")), "第二次覆盖配置时要留备份");
   assert.deepEqual(JSON.parse(readFileSync(join(ADMIN_DIR, "config.json"), "utf8")).whitelistTags, ["dsh-plugin-desktop", "dsh-desktop", "dsh-plugin-market", "dsh-plugins", "dsh-plugin", "dsh"]);
+});
+
+test("白名单别名组：只放行白名单里的规范标签，别名不改变抓取口径（issue#5 第3条）", () => {
+  const cfg = normalizeConfig({
+    whitelistTags: ["dsh", "dsh-plugin"],
+    whitelistAliases: [
+      { tag: "dsh", aliases: ["awesome-dsh", "dsh-awesome", "dsh", "bad tag!"] },
+      { tag: "not-in-whitelist", aliases: ["x"] },
+      { tag: "dsh-plugin", aliases: ["awesome-dsh"] },
+    ],
+  });
+  assert.equal(cfg.whitelistAliases.length, 2, "规范标签不在白名单里的组要丢掉");
+  assert.deepEqual(cfg.whitelistAliases[0].aliases, ["awesome-dsh", "dsh-awesome"], "别名不能等于规范名、不能含空格");
+
+  // 匹配层展开、抓取层不展开 —— 这正是"字符匹配"不能直接做成"包含"的原因
+  const ex = expandTags(cfg.whitelistTags, cfg.whitelistAliases);
+  assert.deepEqual(ex.tags, ["dsh", "dsh-plugin", "awesome-dsh", "dsh-awesome"], "匹配集合要含别名");
+  assert.deepEqual(cfg.whitelistTags, ["dsh", "dsh-plugin"], "抓取集合仍然只有规范标签");
+
+  // 命中别名要归到规范标签上：仓库只打 awesome-dsh，也得算 dsh 标签的仓库
+  assert.deepEqual(matchRepo({ topics: ["awesome-dsh"] }, cfg.whitelistTags, cfg.whitelistAliases).canonical, ["dsh"]);
+  assert.deepEqual(matchRepo({ topics: ["dsh", "dsh-awesome"] }, cfg.whitelistTags, cfg.whitelistAliases).canonical, ["dsh"]);
+  assert.deepEqual(matchRepo({ topics: ["unrelated"] }, cfg.whitelistTags, cfg.whitelistAliases).canonical, [], "没命中就是空");
+  assert.equal(matchRepo({ topics: ["dsh"] }, cfg.whitelistTags, cfg.whitelistAliases).broadOnly, true, "只挂最宽泛的 dsh");
+});
+
+test("别名组：后台可保存、能读回，不带别名保存时不会把已有别名抹掉", async () => {
+  const first = await json(
+    await call("lists/whitelist", {
+      method: "POST",
+      body: { tags: ["dsh", "dsh-plugin"], whitelistAliases: [{ tag: "dsh", aliases: ["awesome-dsh"] }] },
+      csrfToken: csrf,
+    }),
+  );
+  assert.equal(first.status ?? 200, 200);
+  assert.deepEqual(first.lists.whitelistAliases, [{ tag: "dsh", aliases: ["awesome-dsh"] }]);
+  assert.ok(first.lists.settings, "别名字段和 settings 一起下发，前端不用多打一次接口");
+
+  // 老前端只传 tags：已有别名组必须原样保留（否则升级后台就等于清空配置）
+  const second = await json(await call("lists/whitelist", { method: "POST", body: { tags: ["dsh", "dsh-plugin"] }, csrfToken: csrf }));
+  assert.deepEqual(second.lists.whitelistAliases, [{ tag: "dsh", aliases: ["awesome-dsh"] }], "只传 tags 时别名组不能被抹掉");
+
+  // 规范标签被移出白名单后，它的别名组应当自动失效（不然会留下永远匹配不上的配置）
+  const third = await json(await call("lists/whitelist", { method: "POST", body: { tags: ["dsh-plugin"] }, csrfToken: csrf }));
+  assert.deepEqual(third.lists.whitelistAliases, [], "规范标签不在白名单里时该组失效");
+
+  await call("lists/whitelist", { method: "POST", body: { tags: ["dsh-plugin-desktop", "dsh-desktop", "dsh-plugin-market", "dsh-plugins", "dsh-plugin", "dsh"], whitelistAliases: [] }, csrfToken: csrf });
 });
 
 test("共鸣：可编辑（增删改查），只写后台管理副本，策展产物一个字节都不动", async () => {

@@ -48,6 +48,8 @@ const state = {
   overview: null,
   workflow: null,
   lists: null,
+  settings: null, // GET api/settings：采集参数当前值 + 默认值 + 范围
+  settingsDraft: null, // 设置页的编辑草稿（未保存）
   resonance: null,
   audit: null,
   repos: { items: [], total: 0, limit: 20, offset: 0, q: "", loaded: false },
@@ -60,7 +62,7 @@ const state = {
 };
 
 /** 已挂载视图的 DOM 引用；null = 还没建过 */
-const V = { status: null, data: null, workflow: null, lists: null, resonance: null, audit: null };
+const V = { status: null, data: null, workflow: null, lists: null, settings: null, resonance: null, audit: null };
 
 let widget = null;
 let tickTimer = null;
@@ -869,7 +871,7 @@ async function switchTab(name) {
     stopStatusAuto();
     // 名单 / 共鸣页的"未应用改动"提示来自 api/status：切过来时强制补一次，
     // 免得要等顶栏圆环那 15 秒；一次切页最多一个请求
-    if (name === "lists" || name === "resonance") refreshStatusQuiet(true).catch(() => {});
+    if (name === "lists" || name === "settings" || name === "resonance") refreshStatusQuiet(true).catch(() => {});
   }
   const tabs = $("tabs");
   if (tabs) {
@@ -887,6 +889,7 @@ async function switchTab(name) {
   else if (name === "data") await loadDataView();
   else if (name === "workflow") await loadWorkflowView();
   else if (name === "lists") await loadListsView();
+  else if (name === "settings") await loadSettingsView();
   else if (name === "resonance") await loadResonanceView();
   else if (name === "audit") await loadAuditView();
 }
@@ -1382,6 +1385,7 @@ async function refreshCurrentTab() {
     if (state.tab === "data") await loadDataView();
     else if (state.tab === "workflow") await loadWorkflowView();
     else if (state.tab === "lists") await loadListsView();
+    else if (state.tab === "settings") await loadSettingsView();
     else if (state.tab === "resonance") await loadResonanceView();
   } catch (e) {
   }
@@ -2322,6 +2326,23 @@ function buildListsView(root) {
   }
   sec1.append(blForm);
 
+  // 单仓库级：那个人还有真项目，只想剔掉他名下某一个仓库时用这条（作者级会连真项目一起删）
+  refs.blRepo = el("input", "input owner");
+  refs.blRepo.type = "text";
+  refs.blRepo.placeholder = "仓库（owner/repo，只剔这一个）";
+  refs.blRepoNote = el("input", "input note");
+  refs.blRepoNote.type = "text";
+  refs.blRepoNote.placeholder = "备注（可选）";
+  const blRepoForm = el("div", "form-row");
+  refs.blRepoAdd = btn("添加仓库", null, onAddBlacklistRepo);
+  blRepoForm.append(refs.blRepo, refs.blRepoNote, refs.blRepoAdd);
+  for (const input of [refs.blRepo, refs.blRepoNote]) {
+    input.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") onAddBlacklistRepo(ev);
+    });
+  }
+  sec1.append(blRepoForm);
+
   refs.blBody = el("tbody");
   const blWrap = tableWrap();
   blWrap.append(
@@ -2359,6 +2380,20 @@ function buildListsView(root) {
   sec2.append(wlForm);
   refs.wlNote = el("div", "hint", "");
   sec2.append(refs.wlNote);
+
+  // 别名组（issue#5 第3条）：白名单条目仍是精确 topic，这里登记同义标签。
+  // 一行一组：[规范标签] = [别名1, 别名2]。规范标签必须已经在白名单里，否则忽略（防止凭空扩大抓取口径）。
+  sec2.append(el("div", "sec-sub", "别名组：匹配时把它当同义标签归到规范标签上（不改变抓取口径）。一行一组，如 dsh = awesome-dsh, dsh-awesome"));
+  refs.wlAlias = el("textarea", "input alias-input");
+  refs.wlAlias.rows = 4;
+  refs.wlAlias.placeholder = "dsh = awesome-dsh, dsh-tui";
+  refs.wlAlias.addEventListener("input", () => {
+    refs.wlAlias.dataset.dirty = "1"; // 有未保存的输入时不要被渲染回填冲掉
+    renderLists();
+  });
+  sec2.append(refs.wlAlias);
+  refs.wlAliasNote = el("div", "hint", "");
+  sec2.append(refs.wlAliasNote);
   root.append(sec2);
 
   return refs;
@@ -2390,14 +2425,42 @@ async function reloadLists() {
   renderLists();
 }
 
-function adoptLists(data) {
-  if (data && data.lists && typeof data.lists === "object") {
-    state.lists = data.lists;
-    state.whitelistDraft = null;
-    renderLists();
-    return true;
+/**
+ * 就地把响应里的名单挂上（不再多打一次 api/lists）。
+ * 带 impact 的响应（黑名单加/删）走"追加"而不是"替换"：不需要重建 DOM，
+ * 调用方也就不会拿到已经被 renderLists() 换掉的 refs.notice 旧节点。
+ */
+function adoptLists(data, opts) {
+  if (!(data && data.lists && typeof data.lists === "object")) return false;
+  const append = !!(opts && opts.append);
+  state.lists = append ? { ...(state.lists || {}), ...data.lists } : data.lists;
+  state.whitelistDraft = null;
+  renderLists();
+  return true;
+}
+
+/** 别名组的文本格式解析：[规范标签] = [别名, 别名]。空行、# 开头都忽略；没写 = 那组不生效。 */
+function parseAliasText(text) {
+  const groups = [];
+  for (const rawLine of String(text || "").split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const eq = line.indexOf("=");
+    if (eq <= 0) continue;
+    const tag = line.slice(0, eq).trim();
+    const aliases = line
+      .slice(eq + 1)
+      .split(/[,\s]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (!tag || !aliases.length) continue;
+    groups.push({ tag, aliases });
   }
-  return false;
+  return groups;
+}
+
+function aliasTextOf(groups) {
+  return (Array.isArray(groups) ? groups : []).map((g) => g.tag + " = " + (g.aliases || []).join(", ")).join("\n");
 }
 
 function ensureDraft() {
@@ -2408,6 +2471,15 @@ function ensureDraft() {
 }
 
 function removeOwnerButton(owner) {
+  return removeBlacklistButton({ action: "remove", payload: { owner } }, owner);
+}
+
+function removeBlacklistRepoButton(repoId) {
+  return removeBlacklistButton({ action: "remove-repo", payload: { repoId } }, repoId);
+}
+
+/** 两级黑名单的删除按钮：两段式确认（先"确认删除"再真删），避免误点。 */
+function removeBlacklistButton({ action, payload }, label) {
   const b = btn("删除", "danger small");
   let armed = false;
   let timer = null;
@@ -2429,13 +2501,13 @@ function removeOwnerButton(owner) {
     b.textContent = "删除中…";
     b.disabled = true;
     try {
-      const data = await apiPost("api/lists/blacklist", { action: "remove", owner });
-      if (!adoptLists(data)) await reloadLists();
+      const data = await apiPost("api/lists/blacklist", { action, ...payload });
+      if (!adoptLists(data, { append: true })) await reloadLists();
       applyHintNotice();
-      toast("已移除 " + owner, "ok");
+      toast("已移除 " + label, "ok");
     } catch (e) {
       reportError(e);
-      setNotice(V.lists.notice, (e && e.message) || "移除 " + owner + " 失败", "err");
+      setNotice(V.lists.notice, (e && e.message) || "移除 " + label + " 失败", "err");
       reset();
     }
   });
@@ -2448,6 +2520,9 @@ function renderLists() {
   const data = state.lists && typeof state.lists === "object" ? state.lists : {};
   const blacklist = data.blacklist && typeof data.blacklist === "object" ? data.blacklist : {};
   const owners = blacklist.owners && typeof blacklist.owners === "object" ? blacklist.owners : {};
+  const repoEntries = Object.entries(blacklist.repos && typeof blacklist.repos === "object" ? blacklist.repos : {}).sort(
+    (a, b) => (a[0] < b[0] ? -1 : 1),
+  );
   const entries = Object.entries(owners);
   entries.sort((a, b) => {
     const ra = a[1] && typeof a[1] === "object" ? numOrNull(a[1].repos) ?? -1 : -1;
@@ -2455,12 +2530,17 @@ function renderLists() {
     return rb - ra;
   });
 
+  const totalBlacklisted = entries.length + repoEntries.length;
   refs.blInfo.textContent =
-    "共 " + fmtNum(entries.length) + " 个作者" +
+    "共 " + fmtNum(entries.length) + " 个作者 + " + fmtNum(repoEntries.length) + " 个仓库" +
     (blacklist.updatedAt ? " · 更新于 " + fmtDateTime(blacklist.updatedAt) : "");
   clear(refs.blBody);
-  if (!entries.length) {
+  // 仓库级条目接在同一张表下面：两段 <tbody> 共享一套列，加一行分隔标注不会串位
+  const repoBody = el("tbody");
+  if (!totalBlacklisted) {
     emptyRow(refs.blBody, 7, "黑名单是空的。");
+  } else if (!entries.length) {
+    emptyRow(refs.blBody, 7, "没有作者级条目（下面只有单仓库条目）。");
   } else {
     for (const [owner, info] of entries) {
       const rec = info && typeof info === "object" ? info : {};
@@ -2480,6 +2560,33 @@ function renderLists() {
       tr.append(actTd);
       refs.blBody.append(tr);
     }
+  }
+
+  if (repoEntries.length) {
+    const head = el("tr");
+    const headTd = el("td", "wrap", "单仓库级（只剔这一个仓库，不动他名下别的项目）");
+    headTd.colSpan = 7;
+    head.append(headTd);
+    const headRow = el("tbody");
+    headRow.append(head);
+    refs.blBody.parentNode.append(headRow);
+    for (const [repoId, info] of repoEntries) {
+      const rec = info && typeof info === "object" ? info : {};
+      const tr = el("tr");
+      tr.append(el("td", "mono", repoId));
+      tr.append(el("td", "num", "—"));
+      tr.append(el("td", "num", "—"));
+      tr.append(el("td", "num", "—"));
+      tr.append(el("td", "wrap", rec.note ? String(rec.note) : "单仓库拉黑"));
+      const manualTd = el("td");
+      manualTd.append(el("span", "badge hot", "是"));
+      tr.append(manualTd);
+      const actTd = el("td", "cell-actions");
+      actTd.append(removeBlacklistRepoButton(repoId));
+      tr.append(actTd);
+      repoBody.append(tr);
+    }
+    refs.blBody.parentNode.append(repoBody);
   }
 
   ensureDraft();
@@ -2517,7 +2624,255 @@ function renderLists() {
     ? "已与保存值一致（共 " + draft.length + " 个标签）。"
     : "有未保存的改动（" + draft.length + " 个标签），点『保存』写入。";
 
+  if (refs.wlAlias) {
+    const aliasDirty = refs.wlAlias.dataset.dirty === "1";
+    if (!aliasDirty) refs.wlAlias.value = aliasTextOf(data.whitelistAliases);
+    const parsed = parseAliasText(refs.wlAlias.value);
+    const known = new Set([...draft, ...defaults]);
+    const unknown = parsed.filter((g) => !known.has(g.tag)).map((g) => g.tag);
+    const tagCount = parsed.reduce((n, g) => n + g.aliases.length, 0);
+    refs.wlAliasNote.className = "hint" + (unknown.length ? " warn" : "");
+    refs.wlAliasNote.textContent = !parsed.length
+      ? "没有别名组（匹配只认精确标签）。"
+      : parsed.length + " 组 / " + tagCount + " 个别名" + (unknown.length ? "；这些规范标签不在白名单里，会被忽略：" + unknown.join("、") : "");
+  }
+
   renderListsApply();
+}
+
+async /**
+ * 设置页：采集参数（以前只活在命令行/代码里，后台看不见也改不了）。
+ * 三件事必须同时摆在界面上，否则用户改完只会更迷惑：当前值、默认值、以及"这一项是不是被命令行占着"。
+ */
+function buildSettingsView(root) {
+  const refs = {};
+  refs.notice = noticeEl();
+  refs.applyNote = noticeEl();
+  root.append(refs.notice, refs.applyNote);
+
+  refs.badge = el("span", "badge", "与默认值一致");
+  const sec = card("采集参数", [refs.badge, btn("保存", "primary", onSaveSettings), btn("还原默认", null, onResetSettings)]);
+  refs.body = el("div", "settings");
+  sec.append(refs.body);
+  root.append(sec);
+
+  const sec2 = card("采集器当前生效值");
+  refs.cLive = el("div", "kv");
+  refs.cPath = el("div", "hint", "");
+  refs.cNote = el("div", "hint", "");
+  sec2.append(refs.cLive, refs.cPath, refs.cNote);
+  root.append(sec2);
+
+  return refs;
+}
+
+function mountSettingsView() {
+  if (!V.settings) V.settings = buildSettingsView($("view-settings"));
+  return V.settings;
+}
+
+async function loadSettingsView() {
+  const refs = mountSettingsView();
+  const restore = busyStart(refs.badge, "读取中…");
+  try {
+    state.settings = await apiGet("api/settings");
+    state.settingsDraft = null;
+    hideNotice(refs.notice);
+  } catch (e) {
+    if (!e || e.status !== 401) setNotice(refs.notice, (e && e.message) || "读取采集参数失败", "err");
+  } finally {
+    restore();
+  }
+  renderSettings();
+  renderSettingsLive();
+}
+
+function ensureSettingsDraft() {
+  if (!state.settingsDraft && state.settings) {
+    const values = {};
+    for (const field of state.settings.fields) values[field.key] = state.settings.collector[field.key];
+    state.settingsDraft = values;
+  }
+  return state.settingsDraft;
+}
+
+/** 数值输入：字符串（空/半截数字）原样留着，交给保存时校验，别边打字边抹掉用户输入 */
+function settingsInputValue(v) {
+  return typeof v === "number" && Number.isFinite(v) ? String(v) : "";
+}
+
+function rangeText(spec) {
+  if (!spec) return "";
+  return spec.type === "float" ? spec.min + " ~ " + spec.max : spec.min + " ~ " + spec.max;
+}
+
+function renderSettings() {
+  const refs = V.settings;
+  const view = state.settings;
+  if (!refs || !view || !Array.isArray(view.fields)) return;
+  if (!state.settingsDraft) ensureSettingsDraft();
+  const draft = state.settingsDraft || {};
+  const defaults = view.defaults || {};
+  const ranges = view.ranges || {};
+  refs.body.textContent = "";
+  const draftKeys = [];
+  for (const field of view.fields) {
+    const spec = ranges[field.key] || {};
+    const row = el("div", "set-item");
+    const head = el("div", "set-head");
+    const label = el("label", "set-label", field.label);
+    label.htmlFor = "set-" + field.key;
+    const input = el("input", "input set-value");
+    input.id = "set-" + field.key;
+    input.type = "number";
+    input.step = spec.type === "float" ? "0.05" : "1";
+    if (spec.min !== undefined) input.min = String(spec.min);
+    if (spec.max !== undefined) input.max = String(spec.max);
+    input.value = settingsInputValue(draft[field.key]);
+    input.addEventListener("input", () => {
+      draft[field.key] = input.value;
+      settingsSetStatus(refs, field.key, "");
+    });
+    head.append(label, el("span", "set-unit", field.unit || ""), input);
+    row.append(head);
+    row.append(el("div", "hint", field.hint || ""));
+    const foot = el("div", "set-foot");
+    foot.append(el("span", "set-status", ""));
+    foot.append(el("span", "set-range", "范围 " + rangeText(spec) + " · 默认 " + fmtSetting(defaults[field.key])));
+    row.append(foot);
+    refs.body.append(row);
+    draftKeys.push(field.key);
+  }
+  refs.draftKeys = draftKeys;
+  renderSettingsBadge();
+}
+
+function renderSettingsBadge() {
+  const refs = V.settings;
+  const view = state.settings;
+  if (!refs || !view || !refs.badge) return;
+  const draft = state.settingsDraft || {};
+  const changed = Object.keys(draft).filter((key) => settingsNum(draft[key]) !== settingsNum(view.collector[key]));
+  const differsFromDefault = Object.keys(view.defaults || {}).some((key) => settingsNum(view.collector[key]) !== settingsNum(view.defaults[key]));
+  refs.badge.className = "badge" + (differsFromDefault ? " warn" : "");
+  refs.badge.textContent = changed.length ? "有 " + changed.length + " 项未保存" : differsFromDefault ? "与默认值不同" : "与默认值一致";
+}
+
+function settingsNum(raw) {
+  if (typeof raw === "number") return raw;
+  if (typeof raw === "string" && raw.trim() !== "") {
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+function fmtSetting(v) {
+  if (typeof v !== "number" || !Number.isFinite(v)) return "—";
+  return Number.isInteger(v) ? String(v) : String(Math.round(v * 100) / 100);
+}
+
+/** 单格结果：kind 空字符串 = 清掉（含正在输入中的合法值，别一直红着） */
+function settingsSetStatus(refs, key, kind, text) {
+  const input = refs.body && refs.body.querySelector("#set-" + key);
+  if (!input) return;
+  const row = input.closest(".set-item");
+  const el2 = row ? row.querySelector(".set-status") : null;
+  if (el2) {
+    el2.textContent = text || "";
+    el2.className = "set-status" + (kind ? " " + kind : "");
+  }
+  input.classList.toggle("bad", kind === "bad");
+}
+
+/** 采集器侧：本轮真正生效的参数，以及它来自哪里（cli / config / default） */
+function renderSettingsLive() {
+  const refs = V.settings;
+  if (!refs || !refs.cLive) return;
+  const view = state.settings;
+  refs.cPath.textContent = view ? "配置文件：" + view.configPath : "";
+  refs.cNote.textContent = view && view.note ? view.note : "";
+  const status = state.status || {};
+  const live = status.collectorArgs && typeof status.collectorArgs === "object" ? status.collectorArgs : null;
+  const source = status.collectorSource && typeof status.collectorSource === "object" ? status.collectorSource : {};
+  refs.cLive.textContent = "";
+  if (!live) {
+    refs.cLive.append(el("div", "hint", "采集器还没上报过（它每轮开始时写一次）。保存的配置下一轮自动生效。"));
+    return;
+  }
+  for (const field of (view && view.fields) || []) {
+    const value = live[field.key];
+    if (value === undefined) continue;
+    const from = source[field.key] || "default";
+    const row = el("div", "kv-row");
+    row.append(el("span", "kv-k", field.label));
+    row.append(el("span", "kv-v", fmtSetting(value) + (field.unit ? " " + field.unit : "")));
+    const chip = el("span", "badge" + (from === "cli" ? " warn" : ""), from === "cli" ? "命令行" : from === "config" ? "后台配置" : "内置默认");
+    row.append(chip);
+    refs.cLive.append(row);
+  }
+  refs.cLive.append(el("div", "hint", "「后台配置」= 这一页保存的值（优先）；「启动参数」= 只在这一项没配置时生效；「内置默认」= 出厂值。"));
+}
+
+async function onSaveSettings(ev) {
+  if (ev && ev.preventDefault) ev.preventDefault();
+  const refs = V.settings;
+  if (!refs || !state.settings) return;
+  const draft = ensureSettingsDraft() || {};
+  const patch = {};
+  let bad = 0;
+  for (const key of refs.draftKeys || []) {
+    const spec = (state.settings.ranges || {})[key] || {};
+    const n = settingsNum(draft[key]);
+    if (n === null) {
+      settingsSetStatus(refs, key, "bad", "必须是数字");
+      bad += 1;
+      continue;
+    }
+    if (spec.type === "int" && !Number.isInteger(n)) {
+      settingsSetStatus(refs, key, "bad", "必须是整数");
+      bad += 1;
+      continue;
+    }
+    if ((spec.min !== undefined && n < spec.min) || (spec.max !== undefined && n > spec.max)) {
+      settingsSetStatus(refs, key, "bad", "超出范围 " + rangeText(spec));
+      bad += 1;
+      continue;
+    }
+    settingsSetStatus(refs, key, "");
+    patch[key] = n;
+  }
+  if (bad) {
+    setNotice(refs.notice, "有 " + bad + " 项不合法，先改好再保存。", "err");
+    return;
+  }
+  const restore = busyStart($("tabs"), "保存中…");
+  try {
+    const data = await apiPost("api/settings", { collector: patch });
+    state.settings = data;
+    state.settingsDraft = null;
+    renderSettings();
+    renderSettingsLive();
+    if (Array.isArray(data.rejected) && data.rejected.length) {
+      setNotice(refs.notice, "这些项没被接受（超出范围或不是数字）：" + data.rejected.join("、") + "。它们已回退到默认值。", "warn");
+    } else {
+      setNotice(refs.notice, "已保存。下一轮采集自动按新值跑（不必重启）。", "ok");
+    }
+  } catch (e) {
+    reportError(e);
+    setNotice(refs.notice, (e && e.message) || "保存失败", "err");
+  } finally {
+    restore();
+  }
+}
+
+function onResetSettings(ev) {
+  if (ev && ev.preventDefault) ev.preventDefault();
+  const refs = V.settings;
+  if (!refs || !state.settings) return;
+  state.settingsDraft = { ...state.settings.defaults };
+  renderSettings();
+  setNotice(refs.notice, "已填回内置默认值，点『保存』才会写进配置。", "warn");
 }
 
 async function onAddBlacklist(ev) {
@@ -2544,9 +2899,71 @@ async function onAddBlacklist(ev) {
     const data = await apiPost("api/lists/blacklist", { action: "add", owner, note });
     refs.blOwner.value = "";
     refs.blNote.value = "";
-    if (!adoptLists(data)) await reloadLists();
+    // 追加式挂载：保住函数开头拿到的 refs.notice，后面 hideNotice 才清得掉旧红条
+    if (!adoptLists(data, { append: true })) await reloadLists();
     applyHintNotice();
-    toast("已加入黑名单：" + owner, "ok");
+    return reportBlacklistAdded(refs, owner, data);
+  } catch (e) {
+    reportError(e);
+    setNotice(refs.notice, (e && e.message) || "添加失败", "err");
+  } finally {
+    restore();
+  }
+}
+
+/**
+ * 加完黑名单后的反馈。三条铁律（issue#5 第2条）：
+ *  ① 旧的红条必须先清掉 —— 否则"上一次失败 + 这一次成功"同屏，看着就像又失败了；
+ *  ② 一定要说清"要等『立即应用』才生效"—— 文件是立刻落盘的，图不是；
+ *  ③ repos=0 必须直说"他当前不在数据里" —— 这才叫如实反馈，回一句"已加入"是骗人。
+ */
+function reportBlacklistAdded(refs, owner, data) {
+  const impact = data && data.impact ? data.impact : null;
+  const repos = impact && Number.isFinite(impact.repos) ? impact.repos : null;
+  const stars = impact && Number.isFinite(impact.totalStars) ? impact.totalStars : 0;
+  if (data && data.created === false) {
+    setNotice(refs.notice, owner + " 已在黑名单里，本次只更新了备注" + (repos ? "；" + affectedReposText(repos, stars) : "") + "。", "warn");
+    toast("已更新备注：" + owner, "ok");
+    return;
+  }
+  if (repos === null) {
+    toast("已加入黑名单：" + owner + "（需点『立即应用』才生效）", "ok");
+    return;
+  }
+  if (repos === 0) {
+    setNotice(refs.notice, "已加入黑名单：" + owner + " —— 但他当前不在数据里（累积索引 0 个仓库），加名单不会有可见变化。", "warn");
+    toast("已加入黑名单：" + owner + "（当前不在数据里）", "warn");
+    return;
+  }
+  toast("已加入黑名单：" + owner + "（" + affectedReposText(repos, stars) + "）", "ok");
+}
+
+/** 影响预估的统一措辞：影响的是"点应用之后会被剔出图"的仓库数。 */
+function affectedReposText(repos, stars) {
+  return "点『立即应用』后将移除 " + repos + " 个仓库" + (stars ? "（合计 " + stars + " star）" : "");
+}
+
+/** 单仓库级黑名单：目标明确（就这一个），不需要作者级那样的影响预估，但同样要等『立即应用』才进图。 */
+async function onAddBlacklistRepo(ev) {
+  if (ev && ev.preventDefault) ev.preventDefault();
+  const refs = V.lists;
+  if (!refs || !refs.blRepo) return;
+  const repoId = refs.blRepo.value.trim();
+  const note = refs.blRepoNote ? refs.blRepoNote.value.trim() : "";
+  if (!/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(repoId)) {
+    setNotice(refs.notice, "要写成 owner/repo，例如 deepseek-ai/deepseek-harness", "err");
+    refs.blRepo.focus();
+    return;
+  }
+  const restore = busyStart(refs.blRepoAdd, "添加中…");
+  try {
+    const data = await apiPost("api/lists/blacklist", { action: "add-repo", repoId, note });
+    refs.blRepo.value = "";
+    if (refs.blRepoNote) refs.blRepoNote.value = "";
+    if (!adoptLists(data, { append: true })) await reloadLists();
+    applyHintNotice();
+    hideNotice(refs.notice);
+    toast("已加入仓库黑名单：" + repoId + "（点『立即应用』后从图里移除）", "ok");
   } catch (e) {
     reportError(e);
     setNotice(refs.notice, (e && e.message) || "添加失败", "err");
@@ -2587,7 +3004,12 @@ async function onSaveWhitelist() {
   whitelistSaving = true;
   const restore = busyStart(refs.wlSave, "保存中…");
   try {
-    const data = await apiPost("api/lists/whitelist", { tags: state.whitelistDraft.slice() });
+    const payload = { tags: state.whitelistDraft.slice() };
+    if (refs.wlAlias) {
+      payload.whitelistAliases = parseAliasText(refs.wlAlias.value);
+      refs.wlAlias.dataset.dirty = "0"; // 保存成功后允许服务端规范化结果回填
+    }
+    const data = await apiPost("api/lists/whitelist", payload);
     if (!adoptLists(data)) await reloadLists();
     applyHintNotice();
     toast("白名单已保存", "ok");

@@ -27,13 +27,21 @@ import {
   ensureDir,
   fileInfo,
   listDir,
+  COLLECTOR_FIELDS,
+  collectorRanges,
+  DEFAULT_COLLECTOR,
   loadAdminConfig,
+  normalizeAliases,
+  normalizeCollector,
+  numSettingFor,
   readAudit,
+  relFromRoot,
   readBlacklist,
   CONTEXTS,
   MANAGED_ECOSYSTEM_FILE,
   cleanList,
   effectiveAnchors,
+  estimateOwnerImpact,
   fileMtimeMs,
   listLogs,
   readEcosystem,
@@ -51,6 +59,8 @@ import {
 import { CONTEXT_IDS, CONTEXT_RULES, DEFAULT_CONTEXT, builtinBase } from "./ecosystem-bases.mjs";
 
 const BODY_LIMIT = 256 * 1024;
+// 采集参数的合法键集合：POST 时用来分辨"这个键我们不认识"
+const COLLECTOR_RANGES_KEYS = collectorRanges();
 const ASSETS = {
   "admin.css": "text/css; charset=utf-8",
   "app.js": "text/javascript; charset=utf-8",
@@ -513,9 +523,28 @@ export function createAdmin({ version, api, securityHeaders }) {
     return {
       blacklist: readBlacklist(),
       whitelistTags: config.whitelistTags,
+      whitelistAliases: (config.whitelistAliases || []).map((g) => ({ tag: g.tag, aliases: [...g.aliases] })),
       defaultWhitelistTags: [...DEFAULT_WHITELIST_TAGS],
       whitelistNeedsCrawl: true,
-      note: "黑名单改动点『应用变更』即可生效；白名单标签改的是抓取口径，要等下一轮真实采集才会改口径。",
+      note: "黑名单/共鸣改动点『应用变更』（离线重算）即可生效；白名单标签改的是抓取口径，要等下一轮真实采集才会改口径。",
+      settings: settingsPayload(),
+    };
+  }
+
+  /**
+   * 采集参数（settings 页）。三件事必须一起给前端，否则界面只能瞎猜：
+   *  collector 当前值 · 内置默认值 · 每项的合法范围与说明。
+   * 「命令行是否覆盖了它」得由采集器自己报告（它才知道启动参数），见 status 里的 collectorArgs。
+   */
+  function settingsPayload() {
+    const config = loadAdminConfig();
+    return {
+      collector: normalizeCollector(config.collector),
+      defaults: { ...DEFAULT_COLLECTOR },
+      ranges: collectorRanges(),
+      fields: COLLECTOR_FIELDS.map((f) => ({ ...f })),
+      configPath: relFromRoot(CONFIG_FILE),
+      note: "采集参数存 data/admin/config.json，这一页说了算：保存后下一轮采集自动按新值跑（配置压过启动参数，启动参数只在某项没配置时当默认值）。白名单标签仍要重启采集器，因为规则表是进程启动时读的。",
     };
   }
 
@@ -777,9 +806,32 @@ export function createAdmin({ version, api, securityHeaders }) {
       if (parsed.error) return sendJson(res, 400, { error: parsed.error });
       const action = String(parsed.value.action ?? "");
       const owner = String(parsed.value.owner ?? "").trim();
-      if (action !== "add" && action !== "remove") return sendJson(res, 400, { error: "action 只能是 add / remove" });
+      // 单仓库级（issue#5 第1条）：add-repo/remove-repo 用的是 repoId 而不是 owner。
+      // 语义差别很实在 —— 作者级 = 整个账号不可信；仓库级 = 那人还有真项目，只剔这一个。
+      if (action === "add-repo" || action === "remove-repo") {
+        const repoId = String(parsed.value.repoId ?? parsed.value.id ?? "").trim();
+        if (!validRepoId(repoId)) return sendJson(res, 400, { error: "仓库要写成 owner/repo" });
+        const lists = readBlacklist();
+        if (action === "add-repo") {
+          const note = String(parsed.value.note ?? "").slice(0, 200);
+          lists.repos[repoId] = { note: note || null, addedAt: nowIso() };
+        } else if (!lists.repos[repoId]) {
+          return sendJson(res, 404, { error: "仓库黑名单里没有这个仓库：" + repoId });
+        } else {
+          delete lists.repos[repoId];
+        }
+        const written = writeBlacklist(lists);
+        write("blacklist-" + action, repoId);
+        return sendJson(res, 200, { ok: true, repoId, lists: listsPayload(), backedUp: written.backedUp });
+      }
+      if (action !== "add" && action !== "remove") return sendJson(res, 400, { error: "action 只能是 add / remove / add-repo / remove-repo" });
       if (!validOwner(owner)) return sendJson(res, 400, { error: "作者名不合法（GitHub 用户名规则：字母数字与短横线，最长 39 位）" });
       const blacklist = readBlacklist();
+      // 影响预估：累积索引里这个作者当前有多少个仓库、合计多少星。
+      // repos=0 说明"他压根不在数据里"——加了也不会有任何可见变化，必须如实告诉用户，
+      // 否则就是 issue#5 第2条说的"无实际反馈"（回一句"已加入"却什么都没变）。
+      const impact = action === "add" ? estimateOwnerImpact(owner) : null;
+      const existed = action === "add" ? !!blacklist.owners[owner] : false;
       if (action === "add") {
         const note = String(parsed.value.note ?? "").slice(0, 200);
         const previous = blacklist.owners[owner];
@@ -799,7 +851,34 @@ export function createAdmin({ version, api, securityHeaders }) {
       }
       const written = writeBlacklist(blacklist);
       write("blacklist-" + action, owner);
-      return sendJson(res, 200, { ok: true, lists: listsPayload(), backedUp: written.backedUp });
+      return sendJson(res, 200, {
+        ok: true,
+        created: action === "add" ? !existed : false,
+        impact: impact ? { ...impact, before: !!existed } : null,
+        lists: listsPayload(),
+        backedUp: written.backedUp,
+      });
+    }
+    if (name === "settings") {
+      if (!isWrite) return sendJson(res, 200, settingsPayload());
+      const parsed = await readJsonBody(req);
+      if (parsed.error) return sendJson(res, 400, { error: parsed.error });
+      const patch = parsed.value && typeof parsed.value.collector === "object" && parsed.value.collector ? parsed.value.collector : parsed.value;
+      if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
+        return sendJson(res, 400, { error: "请求体应是 {collector:{...}}" });
+      }
+      const normalized = normalizeCollector(patch);
+      // rejected = 传进来但没能按原样生效的键。判定必须直接查"这个值本身合不合法"，
+      // 不能拿归一化结果反推：坏值会被回退成默认值，而默认值恰好等于你传的值时
+      // 会被误判成"接受"（budget:120 传了个坏值也说成功）。
+      const rejected = Object.keys(patch).filter((key) => {
+        const spec = COLLECTOR_RANGES_KEYS[key];
+        if (!spec) return true; // 不认识的键
+        return numSettingFor(patch[key], spec) === null;
+      });
+      saveAdminConfig({ collector: normalized });
+      write("settings-set", JSON.stringify(normalized));
+      return sendJson(res, 200, { ok: true, applied: normalized, rejected, ...settingsPayload() });
     }
     if (name === "lists/whitelist") {
       if (!isWrite) return sendJson(res, 405, { error: "只允许 POST" });
@@ -811,9 +890,13 @@ export function createAdmin({ version, api, securityHeaders }) {
       if (bad.length) return sendJson(res, 400, { error: "标签不合法：" + bad.slice(0, 3).join("、") });
       const tags = [...new Set(raw)];
       if (tags.length > 50) return sendJson(res, 400, { error: "标签最多 50 个" });
+      // 别名组可选：只传 tags 时保持原样（老前端不会把别名组抹掉）
       const config = loadAdminConfig();
-      saveAdminConfig({ ...config, whitelistTags: tags });
-      write("whitelist-set", tags.join(","));
+      const aliases = Array.isArray(parsed.value.whitelistAliases)
+        ? normalizeAliases(parsed.value.whitelistAliases, tags)
+        : config.whitelistAliases;
+      saveAdminConfig({ ...config, whitelistTags: tags, whitelistAliases: aliases });
+      write("whitelist-set", tags.join(",") + " | 别名组 " + aliases.length + " 个");
       return sendJson(res, 200, { ok: true, lists: listsPayload() });
     }
     if (name === "apply") {
