@@ -26,6 +26,35 @@ function randomString(length) {
   return out;
 }
 
+/**
+ * 就地覆盖 .env 里的键值：同名键只保留一条（写在新值的位置，其余重复行删除），
+ * 原本没有的键追加到末尾。文件末尾统一补一个换行。
+ *
+ * 单独抽出来是为了能测 —— 这个函数以前是内联"追加"，线上因此出现两条
+ * ADMIN_PASSWORD_HASH，重置口令后服务读到的仍是旧哈希，登录怎么都进不去。
+ */
+export function upsertEnvValues(text, updates) {
+  const wanted = new Map(updates);
+  const kept = [];
+  const written = new Set();
+  for (const line of String(text ?? "").split("\n")) {
+    const m = /^([A-Za-z_][A-Za-z0-9_]*)=/.exec(line);
+    if (!m || !wanted.has(m[1])) {
+      if (line !== "" || kept.length) kept.push(line);
+      continue;
+    }
+    const key = m[1];
+    if (!written.has(key)) {
+      kept.push(key + "=" + wanted.get(key));
+      written.add(key);
+    }
+    // 同名重复行：丢掉
+  }
+  while (kept.length && kept[kept.length - 1] === "") kept.pop();
+  for (const [key, value] of wanted) if (!written.has(key)) kept.push(key + "=" + value);
+  return kept.join("\n") + "\n";
+}
+
 const argv = process.argv.slice(2);
 const flag = (name) => argv.includes("--" + name);
 const argOf = (name, fallback = null) => {
@@ -44,17 +73,20 @@ if (flag("show")) {
 const lines = [];
 let plainPassword = null;
 const path = existingPath ?? randomString(32);
-if (!existingPath) lines.push("ADMIN_PATH=" + path);
+if (!existingPath) lines.push(["ADMIN_PATH", path]);
 
+// 为什么必须"替换"而不是"追加"（2026-10-15 线上踩过）：
+// 这个脚本原来只会往末尾追加 ADMIN_PASSWORD_HASH=...，于是 .env 里出现两条同名键。
+// 而服务读取时只认第一条 —— 结果就是"重置完口令还是登不上"，新旧口令都对不上，极难排查。
+// 凭据这种键必须就地覆盖：同名只留一条。
 if (!flag("path-only") && (flag("force-password") || !env.ADMIN_PASSWORD_HASH)) {
   plainPassword = argOf("password") ?? randomString(16);
-  lines.push("ADMIN_PASSWORD_HASH=" + (await hashPassword(plainPassword)));
+  lines.push(["ADMIN_PASSWORD_HASH", await hashPassword(plainPassword)]);
 }
 
 if (lines.length) {
   const text = existsSync(ENV_FILE) ? readFileSync(ENV_FILE, "utf8") : "";
-  const prefix = text && !text.endsWith("\n") ? "\n" : "";
-  writeFileSync(ENV_FILE, text + prefix + lines.join("\n") + "\n", { mode: 0o600 });
+  writeFileSync(ENV_FILE, upsertEnvValues(text, lines), { mode: 0o600 });
   chmodSync(ENV_FILE, 0o600);
 }
 

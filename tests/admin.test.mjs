@@ -48,6 +48,7 @@ writeFileSync(
 
 const { hashPassword } = await import("../tools/admin-auth.mjs");
 const { normalizeConfig, normalizeCollector, readBlacklist, writeBlacklist, adminPathFrom, estimateOwnerImpact, ownerImpactFromIndex, expandTags, matchRepo } = await import("../tools/admin-config.mjs");
+const { upsertEnvValues } = await import("../tools/admin-setup.mjs");
 const { anchorsDiffer, collectorBusy, resonanceIsPending } = await import("../tools/admin.mjs");
 
 const P = "TestAdminPath0123456789abcdef"; // 32 位字母数字，形状与线上一致
@@ -138,6 +139,25 @@ test("后台路径校验：只认 8~64 位随机字母数字，不给默认值",
   assert.equal(adminPathFrom({ ADMIN_PATH: "a/b/c" }), null, "路径里不许有斜杠");
   assert.equal(adminPathFrom({ ADMIN_PATH: P }), P, "32 位字母数字应当接受");
   process.env.ADMIN_PATH = saved;
+});
+
+test("凭据键就地覆盖：同名只留一条（线上曾因追加写导致重置口令后登不上）", () => {
+  // 真实事故：admin-setup 只会往 .env 末尾追加 ADMIN_PASSWORD_HASH，
+  // 于是文件里出现两条同名键，而服务只读第一条 → 新口令永远不生效。
+  const broken = "ADMIN_PATH=abc\nADMIN_PASSWORD_HASH=old-one\nFOO=bar\nADMIN_PASSWORD_HASH=old-two\n";
+  const fixed = upsertEnvValues(broken, [["ADMIN_PASSWORD_HASH", "NEW"]]);
+  const hashes = fixed.split("\n").filter((l) => l.startsWith("ADMIN_PASSWORD_HASH="));
+  assert.equal(hashes.length, 1, "同名键必须只剩一条，实际：\n" + fixed);
+  assert.equal(hashes[0], "ADMIN_PASSWORD_HASH=NEW", "留下的必须是最新值");
+  assert.ok(fixed.includes("FOO=bar"), "别的键不能被牵连");
+  assert.ok(fixed.includes("ADMIN_PATH=abc"));
+
+  // 没有的键：追加到末尾
+  const appended = upsertEnvValues("ADMIN_PATH=abc", [["GITHUB_TOKEN", "t"]]);
+  assert.deepEqual(appended.split("\n").filter(Boolean), ["ADMIN_PATH=abc", "GITHUB_TOKEN=t"]);
+  // 空文件 / 注释保留 / 结尾换行
+  assert.equal(upsertEnvValues("", [["A", "1"]]), "A=1\n");
+  assert.equal(upsertEnvValues("# 注释\nA=1\nB=2\n", [["A", "9"]]), "# 注释\nA=9\nB=2\n");
 });
 
 test("配置规范化：白名单为空回退默认，共鸣覆盖只认布尔", () => {
