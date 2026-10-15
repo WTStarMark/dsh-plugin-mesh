@@ -57,6 +57,7 @@ from .config import (
     OWNER_CLIQUE_MAX,
     WHITELIST_TAGS,
 )
+from . import admin_config
 
 # 生态共鸣清单（人工策展，见 tools/curate-ecosystem.mjs）：基座 → 长在它上面的插件
 ECOSYSTEM_JSON = ROOT / "tools" / "ecosystem.json"
@@ -257,17 +258,25 @@ def build_mesh(
     *,
     source: str = "GitHub REST Search API",
     blacklist: dict | None = None,
+    blacklist_repos: dict | None = None,
     aliases: dict | None = None,
+    whitelist_aliases: list[dict] | None = None,
 ) -> dict:
     """主构图流程：精确命中 -> 剔除黑名单/新识别的噪声作者 -> 去重 -> 分类 -> 连线 -> 裁剪。
     blacklist 是已判定的噪声作者，一旦判定长期生效（data/noise-blacklist.json）。
+    blacklist_repos 是【单仓库级】黑名单：作者名下有真项目、只想剔掉某一个仓库时用它 ——
+    作者级判据（几百个 0 星仓库）对"混合账号"太粗，实测 100 个作者既产噪声也产相关仓库。
     aliases（旧名 -> 现名）默认读 data/cache/aliases.json；跨语言一致性校验必须传 {} 不读盘 ——
-    冻结的 JS 参照物不经过别名表，读盘会把本机检测过的改名混进比对。"""
+    冻结的 JS 参照物不经过别名表，读盘会把本机检测过的改名混进比对。
+    whitelist_aliases 是白名单别名组（issue#5 第3条）：不传 = 老行为（只认精确标签），
+    data.test.mjs / 跨语言校验那份"精确命中"的冻结参照物就靠这个默认值保持原样。"""
     tag_totals = tag_totals or {}
     blacklist = dict(blacklist or {})
+    blacklist_repos = dict(blacklist_repos or {})
     nodes: list[dict] = []
     seen: dict[str, dict] = {}
     skipped_blacklisted = 0
+    skipped_blacklisted_repos = 0
     # 只有名字命中 dsh、却无描述也无主题标签的仓库不收录：分类器无从下手，画进图里是纯噪点。
     # 只计数不逐个记录（excludedNotPlugin 留给"非 DSH 语境"这类需要复核的）。
     no_signal_desc_chars = 10  # 与 non_plugin_reason 里"没有描述"的判据保持一致
@@ -276,6 +285,30 @@ def build_mesh(
 
     if aliases is None:
         aliases = load_aliases()
+    # 匹配层展开别名：仓库只打了 awsome-dsh 这种同义标签时，也归到规范标签上。
+    # 抓取层完全不用这份展开表（GitHub 只认精确 topic，拿别名去搜纯属白烧配额）。
+    match_tags = list(WHITELIST_TAGS)
+    alias_to_canon: dict[str, str] = {}
+    if whitelist_aliases:
+        match_tags, alias_to_canon = admin_config.effective_tags(WHITELIST_TAGS, whitelist_aliases)
+    tag_order = {tag: i for i, tag in enumerate(WHITELIST_TAGS)}
+    broad_tag = WHITELIST_TAGS[-1] if WHITELIST_TAGS else "dsh"
+
+    def match_whitelist(topics: list[str]) -> tuple[list[str], list[str]]:
+        """返回 (规范标签, 命中标签)：规范标签按白名单顺序排；只认精确 topic，别名也是精确比对。"""
+        present = set(topics)
+        canonical: list[str] = []
+        hits: list[str] = []
+        for tag in match_tags:
+            if tag not in present:
+                continue
+            hits.append(tag)
+            canon = alias_to_canon.get(tag, tag) if tag in alias_to_canon else tag
+            if canon and canon not in canonical:
+                canonical.append(canon)
+        canonical.sort(key=lambda t: tag_order.get(t, len(tag_order)))
+        return canonical, hits
+
     for raw in raw_repos:
         repo = normalize_repo(raw)
         if aliases and str(repo.get("id")) in aliases:
@@ -283,6 +316,10 @@ def build_mesh(
             repo = dict(repo, id=fixed, name=fixed.split("/")[-1], htmlUrl="https://github.com/" + fixed)
         if owner_of(repo) in blacklist:
             skipped_blacklisted += 1
+            continue
+        # 单仓库级：放在别名修正之后判定 —— 仓库改过名就认新名字那条记录，与作者级同一套身份口径。
+        if blacklist_repos and str(repo.get("id")) in blacklist_repos:
+            skipped_blacklisted_repos += 1
             continue
         if not repo["topics"] and len(str(repo.get("description") or "").strip()) < no_signal_desc_chars:
             skipped_no_signal += 1
@@ -292,17 +329,16 @@ def build_mesh(
         if not_plugin:
             excluded_repos[str(repo.get("id") or repo.get("name") or "?")] = not_plugin
             continue
-        matched = [t for t in WHITELIST_TAGS if t in repo["topics"]]
-        # 命中白名单 topic 或名字带 dsh- 都收录（很多插件没打标签，靠名字收录，matchedTags 为空）
+        matched, _hits = match_whitelist(repo["topics"])
+        # 命中白名单 topic（含别名）或名字带 dsh- 都收录（很多插件没打标签，靠名字收录，matchedTags 为空）
         by_name = bool(_NAME_DASH_RE.search(str(repo.get("name") or "")))
         if (not matched and not by_name) or not repo["id"]:
             continue
-        matched.sort(key=WHITELIST_TAGS.index)
         # 稳定身份是 githubId（改名不变），老记录退回 id；改名前后两条并存时，展示采用更新的那条。
         key = str(repo.get("githubId") or repo["id"])
         if key in seen:
             prev = seen[key]
-            prev["matchedTags"] = sorted(set(prev["matchedTags"]) | set(matched), key=WHITELIST_TAGS.index)
+            prev["matchedTags"] = sorted(set(prev["matchedTags"]) | set(matched), key=lambda t: tag_order.get(t, len(tag_order)))
             if str(repo.get("updatedAt") or "") > str(prev.get("updatedAt") or ""):
                 for field in ("id", "githubId", "name", "owner", "ownerType", "avatar", "htmlUrl"):
                     if repo.get(field) is not None:
@@ -425,7 +461,7 @@ def build_mesh(
             "sampleCount": sum(1 for n in nodes if tag in n["matchedTags"]),
             "apiTotal": tag_totals.get(tag),
         }
-        for tag in WHITELIST_TAGS
+        for tag in WHITELIST_TAGS  # 统计只按规范标签：别名命中已经归到规范标签上了
     ]
 
     return {
@@ -459,6 +495,10 @@ def build_mesh(
             "noiseBlacklistSize": len(blacklist),
             "noiseNodesRemoved": noise_removed,
             "noiseSkipped": skipped_blacklisted,
+            # 单仓库级黑名单（issue#5 第1条）：记下生效清单与剔掉的条数，前端/后台都能自查
+            "noiseBlacklistRepos": dict(sorted(blacklist_repos.items())),
+            "noiseBlacklistReposSize": len(blacklist_repos),
+            "noiseReposSkipped": skipped_blacklisted_repos,
             "categories": {
                 "classified": categories["classified"],
                 "unclassified": categories["unclassified"],

@@ -7,13 +7,16 @@
  * 分类可声明 gate（准入门槛）/ exclude（排除条件）/ override（自述救回），用来处理歧义分类。
  */
 
-import { loadAdminConfig, whitelistTagsOf } from "./admin-config.mjs";
+import { loadAdminConfig, whitelistAliasesOf, whitelistTagsOf } from "./admin-config.mjs";
 
 /**
  * 捕获标签白名单：以 data/admin/config.json 为准（管理后台里可改），文件不存在/损坏时回退默认值。
  * Python 侧 backend/dsh_mesh/config.py 读同一份数据，后台改一次两边同时变，不会再出现「只改了一处」的分叉。
  */
 export const WHITELIST_TAGS = whitelistTagsOf(loadAdminConfig());
+export const WHITELIST_ALIASES = whitelistAliasesOf(loadAdminConfig());
+/** 分类证据里要剔除的标签 = 白名单 + 别名（别名同样是"生态签"，留着会把分类带偏） */
+export const SIGNAL_TAGS = new Set([...WHITELIST_TAGS, ...WHITELIST_ALIASES.flatMap((g) => g.aliases)]);
 
 export const OTHER = { id: "other", label: "其他" };
 
@@ -401,7 +404,7 @@ function scoreOf(counter, sig, weight) {
 }
 
 function textSignals(node) {
-  const topics = (node.topics ?? []).filter((t) => !WHITELIST_TAGS.includes(t)).join(" ");
+  const topics = (node.topics ?? []).filter((t) => !SIGNAL_TAGS.has(t)).join(" ");
   const name = (node.name ?? node.id ?? "").toLowerCase();
   return {
     name,

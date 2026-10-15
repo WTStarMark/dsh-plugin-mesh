@@ -483,26 +483,58 @@ def write_last_crawl(payload: dict, path: Path) -> int:
     return _write_json(path, payload)
 
 
-def load_blacklist(path: Path) -> dict:
-    """读噪声作者黑名单。文件不存在/损坏都当空表处理，绝不因此中断采集。"""
+def _read_blacklist_payload(path: Path) -> dict:
+    """读黑名单原始外壳。文件不存在/损坏都当空表处理，绝不因此中断采集。"""
     if not path.exists():
         return {}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
-    owners = data.get("owners") if isinstance(data, dict) else None
+    return data if isinstance(data, dict) else {}
+
+
+def load_blacklist(path: Path) -> dict:
+    """读【作者级】黑名单：一个人整批刷标签，整账号剔除。"""
+    owners = _read_blacklist_payload(path).get("owners")
     if not isinstance(owners, dict):
         return {}
     return {str(owner): info for owner, info in owners.items() if owner}
 
 
-def write_blacklist(owners: dict, path: Path, *, updated_at: str | None = None) -> int:
-    """写黑名单。人工删掉某个 owner 再跑一轮即可解除拉黑。"""
+def load_blacklist_repos(path: Path) -> dict:
+    """读【单仓库级】黑名单：那个人还有真项目，只剔这一个仓库（issue#5 第1条）。
+    与作者级分开，是因为两者语义不同 —— 作者级是"整账号不可信"，仓库级是"这个仓库不可信"。"""
+    repos = _read_blacklist_payload(path).get("repos")
+    if not isinstance(repos, dict):
+        return {}
+    out: dict = {}
+    for rid, info in repos.items():
+        key = str(rid).strip()
+        if not key:
+            continue
+        out[key] = info if isinstance(info, dict) else {}
+    return out
+
+
+# 黑名单文件的说明文案。tools/admin-config.mjs 的 BLACKLIST_NOTE 必须与本行一字不差
+# （后台写、采集器读同一份文件，文案分叉会让两侧的测试互相打架）。
+BLACKLIST_NOTE = "噪声黑名单：自动判据是同作者收录超过阈值个仓库、且每个仓库星标都低于阈值；也可以在后台手工加。删除条目即可解除拉黑。"
+
+
+def write_blacklist(owners: dict, path: Path, *, repos: dict | None = None, updated_at: str | None = None) -> int:
+    """写黑名单（作者级 + 单仓库级）。人工删掉某个条目再跑一轮即可解除拉黑。
+
+    两个键都必须写出去：只写 owners 会把后台加的单仓库条目静默抹掉
+    —— Node 侧 writeBlacklist 曾经就是这么丢数据的，别再犯一遍。
+    """
+    owner_map = dict(sorted((owners or {}).items()))
+    repo_map = dict(sorted((repos or {}).items()))
     payload = {
         "updatedAt": updated_at or utcnow(),
-        "count": len(owners),
-        "note": "噪声作者（同一作者被收录超过阈值个仓库、且每个仓库星标都低于阈值）。删除条目即可解除拉黑。",
-        "owners": dict(sorted(owners.items())),
+        "count": len(owner_map) + len(repo_map),
+        "note": BLACKLIST_NOTE,
+        "owners": owner_map,
+        "repos": repo_map,
     }
     return _write_json(path, payload)

@@ -6,10 +6,21 @@
  * 改动请同时改两边。
  */
 
-import { loadAdminConfig, whitelistTagsOf } from "./admin-config.mjs";
+import { loadAdminConfig, matchRepo, whitelistAliasesOf, whitelistTagsOf } from "./admin-config.mjs";
 
 /** 捕获标签白名单：与 tools/categories.mjs、backend/dsh_mesh/config.py 同源（data/admin/config.json） */
 export const WHITELIST = whitelistTagsOf(loadAdminConfig());
+/** 白名单别名组（issue#5 第3条）：匹配时展开成规范标签，抓取时完全不用它 */
+export const WHITELIST_ALIASES = whitelistAliasesOf(loadAdminConfig());
+
+/**
+ * 这个仓库到底挂了哪些白名单标签 —— 别名也算它的规范标签。
+ * 别名组是"人显式登记的精确标签"，所以这里仍然是精确比对，不做子串/正则匹配。
+ */
+export function matchedTagsOf(repo) {
+  if (Array.isArray(repo && repo.matchedTags)) return repo.matchedTags;
+  return matchRepo(repo, WHITELIST, WHITELIST_ALIASES).canonical;
+}
 
 /** DSH 专有线索：dsh 词元 / DeepSeek Harness / Cordis */
 const DSH_NAME = /(^|[^a-z0-9])dsh([^a-z0-9]|$)|dsh[-_]|deepseek[\s-]?harness|cordis/i;
@@ -31,7 +42,7 @@ export function relevanceScore(repo) {
   if (/dsh|deepseek[- ]?harness|cordis/i.test(repo.description ?? "")) s += 2;
   const topics = repo.topics ?? [];
   if (topics.includes("deepseek-harness")) s += 1;
-  if (topics.filter((t) => WHITELIST.includes(t)).length >= 2) s += 1;
+  if (matchedTagsOf(repo).length >= 2) s += 1;
   if (/cordis/i.test(repo.description ?? "") || topics.includes("cordis")) s += 1;
   return s;
 }

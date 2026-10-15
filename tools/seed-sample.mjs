@@ -7,7 +7,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { applyCategories, DEFAULT_OPTIONS, nonPluginReason } from "./categories.mjs";
 // 生态共鸣清单：后台管理副本优先，其次策展产物（与采集器同规则）
-import { loadAdminConfig, readEcosystem, whitelistTagsOf } from "./admin-config.mjs";
+import { loadAdminConfig, matchRepo, readEcosystem, whitelistAliasesOf, whitelistTagsOf } from "./admin-config.mjs";
 const ecosystem = readEcosystem().doc;
 // 相关性判定与采集器同一套口径（三档结论：related / noise / manual）
 import { analyzeRelevance } from "./relevance.mjs";
@@ -20,6 +20,8 @@ const API = "https://api.github.com";
 
 /** 白名单：与采集器同源（data/admin/config.json，管理后台可改；缺省即 6 个默认标签） */
 const WHITELIST = whitelistTagsOf(loadAdminConfig());
+/** 别名组（issue#5 第3条）：命中别名要归到规范标签上，与 Python build.py 同一口径 */
+const WHITELIST_ALIASES = whitelistAliasesOf(loadAdminConfig());
 
 const HEADERS = {
   accept: "application/vnd.github+json",
@@ -66,12 +68,17 @@ function pickRepo(it) {
   };
 }
 
+/** 主标签 = 白名单里排最前的那个（白名单顺序就是优先级），一个都没命中才退回 dsh */
+const primaryTagOf = (matchedTags) => WHITELIST.find((t) => matchedTags.includes(t)) ?? "dsh";
+
 function buildMesh(rawRepos, queryMeta) {
   const nodes = [];
   const seen = new Map();
   for (const r of rawRepos) {
-    const matchedTags = WHITELIST.filter((t) => r.topics.includes(t));
-    if (!matchedTags.length) continue; // 精确命中才算数：只认 topics[] 里的白名单标签
+    // 精确命中才算数：只认 topics[] 里的白名单标签（别名组是"人登记的精确标签"，不是子串匹配）
+    const hit = matchRepo(r, WHITELIST, WHITELIST_ALIASES);
+    const matchedTags = hit.canonical;
+    if (!matchedTags.length) continue;
     if (nonPluginReason(r)) continue; // 非 DSH 语境（例如 DSH 指深度哈希）不进索引
     // 稳定身份是 githubId（改名不变），老记录没有它时退回 id
     const key = String(r.githubId ?? r.id);
@@ -93,7 +100,7 @@ function buildMesh(rawRepos, queryMeta) {
     const node = {
       ...r,
       matchedTags,
-      primaryTag: WHITELIST.find((t) => matchedTags.includes(t)) ?? "dsh",
+      primaryTag: primaryTagOf(matchedTags),
       relevance: rel,
       noise: clamp(1 - rel / 5, 0, 1),
       review: verdict.review,
