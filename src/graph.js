@@ -144,15 +144,28 @@ export function createGraphView(canvas, hooks = {}) {
   const toScreen = (x, y) => [x * view.k + view.x, y * view.k + view.y];
   const toWorld = (sx, sy) => [(sx - view.x) / view.k, (sy - view.y) / view.k];
 
+  /**
+   * 命中测试：在覆盖该点的球里取【中心最近】的那个。
+   *
+   * 原来是"从后往前第一个覆盖点就返回"，结果取决于节点的绘制顺序 —— 某个大球的相邻小球被
+   * 判给了大球：测试「点关联行居中后，画面正中也应该是它」就这么翻的（数据一刷新就随机失败，
+   * 2026-10-14 那轮采集后即复现）。按距离取最近更符合直觉：真的想点谁，就是谁的中心离指针最近。
+   */
   function pick(mx, my) {
     if (!layout) return null;
     const nodes = layout.nodes;
-    for (let i = nodes.length - 1; i >= 0; i--) {
+    let bestId = null;
+    let bestDist = Infinity;
+    for (let i = 0; i < nodes.length; i++) {
       const [sx, sy] = toScreen(layout.x[i], layout.y[i]);
       const r = Math.max(7, layout.radius[i] * view.k + 4);
-      if ((mx - sx) ** 2 + (my - sy) ** 2 <= r * r) return nodes[i].id;
+      const d = (mx - sx) ** 2 + (my - sy) ** 2;
+      if (d <= r * r && d < bestDist) {
+        bestDist = d;
+        bestId = nodes[i].id;
+      }
     }
-    return null;
+    return bestId;
   }
 
   const isActive = (node) => !highlight || highlight.has(node.id);

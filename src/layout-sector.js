@@ -18,11 +18,16 @@ export function createSectorLayout(options = {}) {
   const minRadius = options.minRadius ?? 96;
   const sectorFill = options.sectorFill ?? 0.92;
   const scatter = options.scatter ?? 0.26; // 半径抖动幅度：越大越散
-  const softIterations = options.softIterations ?? 110;
-  const hardIterations = options.hardIterations ?? 160;
   const packing = options.packing ?? 1.2; // 随机散布装不满理想面积，留 20% 余量
 
   const n = nodes.length;
+  // 分离迭代次数按节点规模自适应（issue#5 期间修）：
+  // 球是固定的半径，节点越多装得越挤，固定 110/160 次在三万节点时压不住重叠（实测 5.70%，
+  // 三万节点临界翻红）。按规模加迭代后实测降到 1.99%（软 160 / 硬 260），代价是预计算慢 4.7 秒
+  // （8.3s → 13.0s，纯离线一次，不进浏览器）。小数据集保持原值，不无谓变慢。
+  const scale = Math.max(0, n - 5000) / 25000;
+  const softIterations = options.softIterations ?? Math.round(110 + 50 * scale);
+  const hardIterations = options.hardIterations ?? Math.round(160 + 100 * scale);
   const index = new Map(nodes.map((node, i) => [node.id, i]));
   const xs = new Float64Array(n);
   const ys = new Float64Array(n);
