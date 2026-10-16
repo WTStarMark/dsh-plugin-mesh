@@ -571,7 +571,16 @@ class RunOnceOrderTest(unittest.TestCase):
     def test_snapshot_covers_full_index_while_mesh_is_limited(self):
         import collect
 
-        with mock.patch.object(collect, "MESH_JSON", TMP / "mesh.json"), mock.patch.object(
+        # 观测时刻钉死：样本是 2026-10-01 冻结的，而"是否近期推送"的 14 天窗口以本轮观测日为基准。
+        # 用真实的"今天"当基准，样本会随日期一天天滑出窗口 —— 2026-10-16 线上 CI 正是这样红的
+        # （前一天还是绿的）。固定观测时刻后，"样本里近期推送过的仓库必须进 seen" 才有稳定含义。
+        frozen = "2026-10-02T00:00:00Z"
+
+        with mock.patch.object(build_mod, "utcnow", lambda: frozen), mock.patch.object(
+            collect, "utcnow", lambda: frozen
+        ), mock.patch.object(snap, "utcnow", lambda: frozen), mock.patch.object(
+            collect, "MESH_JSON", TMP / "mesh.json"
+        ), mock.patch.object(
             collect, "SNAPSHOT_DIR", TMP / "snapshots"
         ), mock.patch.object(collect, "LAST_CRAWL", TMP / "last-crawl.json"), mock.patch.object(
             collect, "STATUS_FILE", TMP / "status.json"
