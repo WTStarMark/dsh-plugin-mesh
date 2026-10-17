@@ -719,7 +719,7 @@ input[type="range"]::-moz-range-thumb {
 .rank-row {
   /* 列宽必须固定（除"仓库名"那一列）：只要有一列 auto，每行就会被自己的内容挤出不同宽度，
      趋势图随之左右参差。固定列宽 = 所有趋势图严格落在同一竖线上。 */
-  position: relative; display: grid; grid-template-columns: 30px 34px minmax(0, 1fr) 68px 96px;
+  position: relative; display: grid; grid-template-columns: 30px 34px minmax(0, 1fr) 68px 124px;
   align-items: center; gap: 10px; padding: 8px 10px; border-radius: var(--r-sm); cursor: pointer;
   transition: background var(--t);
 }

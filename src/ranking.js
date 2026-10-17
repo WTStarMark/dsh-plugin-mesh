@@ -266,7 +266,12 @@ export function createRankingBoard({ button, modal, tabs, body, close, fetcher, 
     const verText = versions.length
       ? " · 版本：" + versions.map((v) => (v.tag || "—") + (v.at ? "@" + String(v.at).slice(5) : "") + (v.pre ? "（预发布）" : "")).join("、")
       : "";
-    row.title = item.id + verText;
+    // npm 榜的窗口在窄列里会被截断（"10-06~1…"），而它是"这是哪一周"的唯一线索 —— 悬停里给全。
+    const npmText =
+      tab === "npm" && item.npmWindow && item.npmWindow.start && item.npmWindow.end
+        ? " · npm 窗口 " + item.npmWindow.start + " ~ " + item.npmWindow.end + "（npm 按天数据滞后约 5 天，这是最后一个完整的 7 天）"
+        : "";
+    row.title = item.id + verText + npmText;
     row.addEventListener("click", () => {
       setOpen(false);
       if (typeof onPick === "function") onPick(item.id);
