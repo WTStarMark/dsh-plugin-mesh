@@ -5,7 +5,7 @@
  * 接口拿不到就直说拿不到，不编任何数字。
  */
 
-const TAB_LABEL = { updated: "周更新热榜", stars: "周 star 热榜", npm: "周 npm 热榜" };
+const TAB_LABEL = { updated: "周更新热榜", stars: "周 star 热榜", npm: "周 npm 下载热榜" };
 
 function el(tag, className, text) {
   const node = document.createElement(tag);

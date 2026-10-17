@@ -1051,7 +1051,7 @@ export function createApi({ root }) {
       for (let d = from; d <= to && npmAxis.length < 31; d = dayShift(d, 1)) npmAxis.push(d);
     }
     const npmBoard = {
-      label: "周 npm 热榜",
+      label: "周 npm 下载热榜",
       metric: "npm-downloads",
       seriesKind: "npm-downloads",
       available: npmRows.length > 0,
@@ -1448,7 +1448,7 @@ export function apiIndex(version) {
     endpoints: [
       { method: "GET", path: "/api", desc: "本清单" },
       { method: "GET", path: "/api/health", desc: "健康检查与数据概况（含 README 索引规模）" },
-      { method: "GET", path: "/api/ranking?days=7&limit=50&fields=all&noise=all|hide|only", desc: "榜单：周更新热榜（本周发过 release 的项目，最多 50 行，含 updates / updatesSource / releases）+ 周 star 热榜（星标历史增量，最多 50 行；历史不足时如实返回实际窗口）+ 周 npm 热榜（npm 官方下载量真实计数，只收确认拿到数字的包；窗口取自采集时的 npm 区间，可能与另两榜不重合，见 boards.npm.window）。每行带 verdict（related/noise/manual）与 npm（周下载量可选列：status/package/downloads/window；缺省或失败为 unknown，不进排序）；noise=hide 排除已判定噪声，only 只看噪声，默认 all（只标注不过滤）" },
+      { method: "GET", path: "/api/ranking?days=7&limit=50&fields=all&noise=all|hide|only", desc: "榜单：周更新热榜（本周发过 release 的项目，最多 50 行，含 updates / updatesSource / releases）+ 周 star 热榜（星标历史增量，最多 50 行；历史不足时如实返回实际窗口）+ 周 npm 下载热榜（npm 官方下载量真实计数，只收确认拿到数字的包；窗口取自采集时的 npm 区间，可能与另两榜不重合，见 boards.npm.window）。每行带 verdict（related/noise/manual）与 npm（周下载量可选列：status/package/downloads/window；缺省或失败为 unknown，不进排序）；noise=hide 排除已判定噪声，only 只看噪声，默认 all（只标注不过滤）" },
       { method: "GET", path: "/api/categories", desc: "扇区（功能分类）与细枝及各自数量" },
       { method: "GET", path: "/api/repos?q=&category=&subcategory=&tag=&language=&minStars=&archived=&noise=&sort=stars|pushed|created|name&limit=&offset=&fields=all", desc: "检索仓库（默认 20 条，最多 100 条）。行带 verdict；noise=hide|only 按三档判定过滤，默认 all 只标注" },
       { method: "GET", path: "/api/search?q=&limit=", desc: "紧凑检索：只回命中 id 与计数（含 README 正文命中）" },

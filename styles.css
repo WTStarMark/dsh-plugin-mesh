@@ -636,8 +636,9 @@ input[type="range"]::-moz-range-thumb {
 .modal-mask { position: absolute; inset: 0; background: var(--veil); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); }
 .modal-card {
   position: relative; display: flex; flex-direction: column;
-  /* 700px（原 620）：三个标签页要整名显示，加上两个开关与关闭键，620 装不下会挤到换行 */
-  width: min(700px, 100%); max-height: min(78vh, 660px);
+  /* 740px（620 → 700 → 740）：三个标签页都要整名显示（最长的是「周 npm 下载热榜」），
+     再加上两个开关与关闭键，窄一点就会挤到换行 */
+  width: min(740px, 100%); max-height: min(78vh, 660px);
   background: var(--glass-1);
   -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
   border: 1px solid var(--glass-line); border-radius: var(--r-blob);
