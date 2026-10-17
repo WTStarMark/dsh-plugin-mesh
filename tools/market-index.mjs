@@ -15,7 +15,8 @@
  *     不是的（纯工具、同名巧合）一律不进索引：市场索引等于一键安装清单，宁缺毋滥。
  *   · 版本只留最近几个（默认 5 个），publishTimestamp 取 registry 的 time；没有发布时间就整个包不要 ——
  *     索引格式要求整数秒，编一个时间戳比少一个包更糟。
- *   · 不写 engines.dsh：我们只有 cordis 的同伴依赖范围，推不出 DSH 版本范围。宁可留空（= 不限制），不猜。
+ *   · 整个 engines 字段都不写：DSH 的校验器把这一项当可选（缺失时自己补 {}），写上就是纯体积。
+ *     仍然不猜 engines.dsh：我们只有 cordis 的同伴依赖范围，推不出 DSH 版本范围，空 = 不限制。
  */
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
@@ -59,6 +60,19 @@ const toUnixSeconds = (iso) => {
 
 /* 索引要求严格 SemVer：registry 里偶尔混进非 semver 的版本串，一律丢掉 */
 const SEMVER = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+[0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*)?$/;
+
+/**
+ * 描述开头的人气前缀：只放两个数字（★ 星标 · 周下载），不放「周下载」这几个字。
+ * 理由见下面 entry.description 处的注释：DSH 把 description 当检索字段，中文词会被切进每个插件的检索词里。
+ */
+export function toneOf(stars, hasDownloads, downloads) {
+  return "★" + shortNumber(stars) + " · " + (hasDownloads ? shortNumber(downloads) : "—");
+}
+
+/** 版本条目：不写 engines —— DSH 校验器对它是 optional(...) ?? {}，缺失自动补空对象，写上是纯体积。 */
+export function versionEntries(versions) {
+  return versions.map((v) => ({ version: v.version, publishTimestamp: v.ts, source: { type: "npm" } }));
+}
 
 /** 大数缩写：1234 → 1.2k、160042 → 160k、1200000 → 1.2M（榜单里也是这把尺子）。 */
 function shortNumber(value) {
@@ -325,10 +339,16 @@ async function main() {
       /* 人气数字：索引格式里**没有"显示数字"的字段**（sortKeys 只进排序菜单，值不显示），
        * 而前端渲染的字段只有 标题 / 标签胶囊 / 描述 / 版本·作者·日期。描述是唯一能放自由文本的位，
        * 且列表里两行截断 —— 所以把数字放**开头**，放结尾会被截掉。
-       * 为什么不做分档标签：实测这个生态 97.7% 的插件星标 <100、92% 周下载 <1000，分档会全挤在最低档，没有信息量。 */
+       * 为什么不做分档标签：实测这个生态 97.7% 的插件星标 <100、92% 周下载 <1000，分档会全挤在最低档，没有信息量。
+       *
+       * 只放数字，不放「周下载」三个字：DSH 的发现页把 description 当检索字段
+       * （@deepseek-ai/dsh-plugin-market 的 MarketSearch：fields 含 description，boost 1），
+       * 而它的分词把 CJK 串切成相邻二字对 ——「周下载」会切成 周下/下载/载 三个词，
+       * 于是**每个**插件的描述都带上这三个词：实测搜「下载」命中全部 6589 个插件，一个常用词就这么废了。
+       * 数字本身几乎无害（实测「8k」命中 23 个、「6」命中 199 个），而数字是这套格式里唯一能让用户
+       * 看到"人气"的办法，所以保留数字、去掉中文词。数字的含义写在索引级 description 里（那段不进检索）。 */
       description: (() => {
-        const dl = chosen.hasDownloads ? shortNumber(chosen.downloads) : "—";
-        const tone = "★ " + shortNumber(node.stars) + " · 周下载 " + dl;
+        const tone = toneOf(node.stars, chosen.hasDownloads, chosen.downloads);
         const body = typeof node.description === "string" ? node.description.trim() : "";
         return body ? tone + " —— " + body : tone;
       })(),
@@ -344,7 +364,10 @@ async function main() {
         ],
         sortKeys: { stars: Number(node.stars) || 0, downloads: chosen.downloads },
       },
-      versions: rec.versions.map((v) => ({ version: v.version, publishTimestamp: v.ts, source: { type: "npm" }, engines: {} })),
+      /* 不写 engines：DSH 的校验器（@deepseek-ai/dsh-plugin-market-index 的 marketVersion）对这一项是
+       * optional(...) ?? {}，缺失就补一个空对象 —— 写与不写完全等价，21852 个版本各带一个 "engines":{}
+       * 纯属白送体积（原始约 280 KB）。 */
+      versions: versionEntries(rec.versions),
     };
     for (const key of Object.keys(entry)) if (entry[key] === undefined) delete entry[key];
     if (entry.metadata.category === undefined) delete entry.metadata.category;
@@ -370,8 +393,8 @@ async function main() {
     format: 1,
     title: { en: "DSH Plugin Ecosystem · " + plugins.length, zh: "DSH 插件生态图 · " + plugins.length },
     description: {
-      en: "Installable DSH plugin bundles catalogued by the dsh-plugin-mesh ecosystem graph.",
-      zh: "由 dsh-plugin-mesh 生态图整理的可安装 DSH 插件组合包。",
+      en: "Installable DSH plugin bundles catalogued by the dsh-plugin-mesh ecosystem graph. The two numbers at the start of a description are GitHub stars and weekly npm downloads (— when npm has no figure yet).",
+      zh: "由 dsh-plugin-mesh 生态图整理的可安装 DSH 插件组合包。每条描述开头的两个数字是星标数与周 npm 下载量（显示「—」表示 npm 还没统计到）。",
     },
     metadata: {
       categories: declaredCategories,
@@ -398,7 +421,10 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error("market-index 失败：" + (err?.stack ?? err));
-  process.exit(1);
-});
+/* 直接执行时跑一次；被 import（例如单测）时什么都不做 —— 否则 import 一下就会真的去抓 npm。 */
+if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
+  main().catch((err) => {
+    console.error("market-index 失败：" + (err?.stack ?? err));
+    process.exit(1);
+  });
+}
