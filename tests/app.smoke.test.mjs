@@ -103,7 +103,7 @@ class FakeNode {
   filter(pred) { return this.all.filter(pred); }
 }
 
-const ids = ["rail", "inspector", "snapshot", "loading", "tooltip", "hint", "telemetry", "lamp", "edge-types", "search", "search-clear", "palette", "toggle-rail", "toggle-dossier", "stage", "graph", "trophy", "ranking", "ranking-tabs", "ranking-body", "ranking-foot", "ranking-close"];
+const ids = ["rail", "inspector", "snapshot", "loading", "tooltip", "hint", "telemetry", "lamp", "edge-types", "search", "search-clear", "palette", "toggle-rail", "toggle-dossier", "stage", "graph", "trophy", "ranking", "ranking-tabs", "ranking-body", "ranking-foot", "ranking-close", "index-source", "index-source-panel", "index-source-url", "index-source-copy"];
 const registry = new Map(ids.map((id) => [id, new FakeNode(id === "graph" ? "canvas" : "div", id)]));
 // 榜单弹窗：真实的 tab / 遮罩是 HTML 里的子节点，桩里手动补上（否则点不到、渲染不出）
 const rankingTabs = [

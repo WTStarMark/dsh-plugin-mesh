@@ -587,8 +587,9 @@ class RunOnceOrderTest(unittest.TestCase):
         ), mock.patch.object(collect, "STAR_HISTORY", TMP / "star-history.json"), mock.patch.object(
             collect, "UPDATE_LOG", TMP / "update-log.json"), mock.patch.object(
         collect, "STAR_DAILY", TMP / "star-daily.json"
-        # 预计算会调 node 按真实 data/mesh.json 重写 data/mesh-core.*；测试一律用临时目录，挡掉
-        ), mock.patch.object(collect, "run_precompute", lambda *_a, **_k: None):
+        # 预计算与市场索引都会调 node、按真实 data/ 重写产物（mesh-core.* 与 dist/market/index.json）；
+        # 测试一律用临时目录，两条都要挡掉 —— 漏挡一条，跑测试就会把线上那份索引写成本地贫瘠数据。
+        ), mock.patch.object(collect, "run_precompute", lambda *_a, **_k: None), mock.patch.object(collect, "run_market_index", lambda *_a, **_k: None):
             code = collect.main(["--from-raw", "--frontend-limit", "100", "--quiet"])
         self.assertEqual(code, 0)
         # 状态文件也必须落在临时目录：跑测试不能污染真实的 data/cache
@@ -656,7 +657,7 @@ class StatusBudgetTest(unittest.TestCase):
         ), mock.patch.object(
             collect, "STAR_DAILY", TMP / "star-daily.json"
         # 同上：别让测试里的预计算去改真实 data/ 目录
-        ), mock.patch.object(collect, "run_precompute", lambda *_a, **_k: None):
+        ), mock.patch.object(collect, "run_precompute", lambda *_a, **_k: None), mock.patch.object(collect, "run_market_index", lambda *_a, **_k: None):
             code = collect.main(["--from-raw", "--budget", "900", "--releases-budget", "1200", "--quiet"])
         self.assertEqual(code, 0)
 
@@ -1679,12 +1680,21 @@ class NpmDownloadsTest(unittest.TestCase):
         sleeps: list[float] = []
 
         def opener_ok(req, timeout=20):
-            return FakeResp(b'{"downloads":112438,"start":"2026-10-03","end":"2026-10-09","package":"dshmarket"}')
+            # range 口径：逐日数组；总量由逐日求和得出（112438 = 50000 + 62438）
+            return FakeResp(
+                b'{"downloads":[{"day":"2026-10-03","downloads":50000},{"day":"2026-10-09","downloads":62438}],'
+                b'"start":"2026-10-03","end":"2026-10-09","package":"dshmarket"}'
+            )
 
         hit = npm.fetch_npm_downloads("dshmarket", sleep=sleeps.append, opener=opener_ok)
         self.assertEqual(hit["status"], "ok")
         self.assertEqual(hit["downloads"], 112438)
         self.assertEqual(hit["window"], {"start": "2026-10-03", "end": "2026-10-09"})
+        self.assertEqual([d["day"] for d in hit["days"]], ["2026-10-03", "2026-10-09"], "逐日数组按日期升序带回")
+        self.assertEqual(sum(d["downloads"] for d in hit["days"]), hit["downloads"], "总量必须等于逐日求和")
+        self.assertEqual(npm.parse_npm_range({"downloads": [{"day": "2026-10-01", "downloads": 1}]})["downloads"], 1)
+        self.assertIsNone(npm.parse_npm_range({"downloads": []}), "空逐日 → 判失败，不编 0")
+        self.assertIsNone(npm.parse_npm_range({"downloads": [{"day": "2026-10-01", "downloads": -1}]}), "负值 → 判失败")
 
         def opener_404(req, timeout=20):
             raise urllib.error.HTTPError(req.full_url, 404, "Not Found", hdrs=None, fp=None)
@@ -1699,7 +1709,7 @@ class NpmDownloadsTest(unittest.TestCase):
             calls["n"] += 1
             if calls["n"] < 3:
                 raise urllib.error.HTTPError(req.full_url, 500, "boom", hdrs=None, fp=None)
-            return FakeResp(b'{"downloads":10,"start":"2026-10-04","end":"2026-10-10"}')
+            return FakeResp(b'{"downloads":[{"day":"2026-10-04","downloads":10}],"start":"2026-10-04","end":"2026-10-10"}')
 
         recovered = npm.fetch_npm_downloads("picgo", sleep=sleeps.append, opener=opener_flaky)
         self.assertEqual(recovered["status"], "ok")
@@ -1835,6 +1845,72 @@ class NpmDownloadsTest(unittest.TestCase):
         offline = type("A", (), {"npm_budget": 300, "dry_run": False, "from_raw": True, "from_store": False})()
         skipped = collect.fetch_npm_downloads(offline, {"nodes": [{"id": "a/b"}]}, lambda *_a: None)
         self.assertEqual(skipped.get("enabled"), False)
+
+    def test_market_index_hook_never_raises(self):
+        """市场索引是给 DSH「发现」页读的：生成失败只能记一行日志，绝不许拖垮采集本身。"""
+        import collect
+
+        logs = []
+        with mock.patch.object(collect.subprocess, "run", side_effect=RuntimeError("boom")):
+            collect.run_market_index(logs.append)  # 不抛异常
+        self.assertTrue(any("市场索引生成失败" in line for line in logs), logs)
+        self.assertTrue(any("boom" in line for line in logs), logs)
+
+    def test_market_index_hook_reports_nonzero_exit(self):
+        """退出码非 0 也要如实记下来（含 stderr 摘要），而不是当成成功。"""
+        import collect
+
+        logs = []
+
+        class Done:
+            returncode = 1
+            stdout = "候选（有下载量的仓库记录）: 10，本轮处理: 10\n"
+            stderr = "ReferenceError: boom"
+
+        with mock.patch.object(collect.subprocess, "run", return_value=Done()), mock.patch.object(
+            collect, "_market_index_fresh", lambda *_a, **_k: False
+        ):
+            collect.run_market_index(logs.append)
+        joined = " ".join(logs)
+        self.assertIn("市场索引失败", joined)
+        self.assertIn("ReferenceError", joined)
+
+    def test_market_index_hook_treats_fresh_artifact_as_success(self):
+        """线上实测 node 会在**写完文件之后**崩在退出阶段（libuv 断言）：产物刷新了就算成功，别误报失败。"""
+        import collect
+
+        logs = []
+
+        class Done:
+            returncode = -6
+            stdout = "写入 /tmp/x/index.json：42 个插件 · 9 KB\n"
+            stderr = "uv__io_poll: Assertion `errno == EEXIST' failed."
+
+        with mock.patch.object(collect.subprocess, "run", return_value=Done()), mock.patch.object(
+            collect, "_market_index_fresh", lambda *_a, **_k: True
+        ):
+            collect.run_market_index(logs.append)
+        joined = " ".join(logs)
+        self.assertIn("市场索引已刷新", joined)
+        self.assertIn("-6", joined)
+        self.assertNotIn("失败", joined)
+
+    def test_market_index_hook_logs_success_line(self):
+        """成功时把生成器那行「写入 …」摘要带到采集日志里，便于回溯这批索引是哪一轮生成的。"""
+        import collect
+
+        logs = []
+
+        class Done:
+            returncode = 0
+            stdout = "候选（有下载量的仓库记录）: 10\n写入 /tmp/x/index.json：42 个插件 · 9 KB\n"
+            stderr = ""
+
+        with mock.patch.object(collect.subprocess, "run", return_value=Done()):
+            collect.run_market_index(logs.append)
+        joined = " ".join(logs)
+        self.assertIn("市场索引已刷新", joined)
+        self.assertIn("42 个插件", joined)
 
     def test_pkg_resolve_keeps_old_downloads_when_npm_blips(self):
         """回归：重读 package.json 后 npm 挂了，不得把已有周下载量抹成 unknown。"""
@@ -2355,7 +2431,7 @@ class AdminConfigTest(unittest.TestCase):
             mock.patch.object(collect, "STAR_HISTORY", TMP / "star-history.json"),
             mock.patch.object(collect, "UPDATE_LOG", TMP / "update-log.json"),
             mock.patch.object(collect, "STAR_DAILY", TMP / "star-daily.json"),
-            mock.patch.object(collect, "run_precompute", lambda *_a, **_k: None),
+            mock.patch.object(collect, "run_precompute", lambda *_a, **_k: None), mock.patch.object(collect, "run_market_index", lambda *_a, **_k: None),
             mock.patch.object(collect, "SegmentStore", lambda *a, **k: fake_store),
             mock.patch.object(
                 collect,
@@ -2530,7 +2606,7 @@ class AdminBlacklistPersistenceTest(unittest.TestCase):
             mock.patch.object(collect, "STAR_DAILY", TMP / "star-daily.json"),
             mock.patch.object(collect, "UPDATE_LOG", TMP / "update-log.json"),
             # 预计算会调 node 写真实 data/ 目录：测试里必须挡掉（测试一律用临时目录）
-            mock.patch.object(collect, "run_precompute", lambda *_a, **_k: None),
+            mock.patch.object(collect, "run_precompute", lambda *_a, **_k: None), mock.patch.object(collect, "run_market_index", lambda *_a, **_k: None),
             # 隔离真实运行态的 data/admin/config.json
             mock.patch.object(admin_cfg, "CONFIG_FILE", TMP / "admin" / "config.json"),
         ]

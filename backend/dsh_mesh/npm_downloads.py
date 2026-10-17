@@ -126,13 +126,42 @@ def parse_package_json(text: str | None, *, repo_id: str | None = None) -> dict:
 
 
 def npm_downloads_url(package: str) -> str:
+    # 用 range 而不是 point：一次请求就把这一周的 **逐日** 下载量一起拿回来，总量由逐日求和得出。
+    # 求和而不是另取一个 point 值，是为了让「行内数字 == 柱状图加总」这条恒等式由构造成立
+    # （站点里每一处"总量"都遵守这条规矩，见 tests/api.test.mjs 的同名断言）。
     # scoped 包：@scope/name → @scope%2Fname（整段 quote 会把 @ 也编码，npm 接口两者都认，统一 quote）
-    return "https://api.npmjs.org/downloads/point/last-week/" + urllib.parse.quote(package, safe="@")
+    return "https://api.npmjs.org/downloads/range/last-week/" + urllib.parse.quote(package, safe="@")
+
+
+def parse_npm_range(data: dict) -> dict | None:
+    """把 npm range 接口的返回收成 {downloads, window, days}。
+    days = 逐日真实计数（[{day, downloads}] 按日期升序），downloads = 逐日求和。
+    任何一天缺数 / 坏数就整条判失败（None）：宁可这一行没有柱子，也不画一根凭空的柱。"""
+    if not isinstance(data, dict):
+        return None
+    raw = data.get("downloads")
+    if not isinstance(raw, list) or not raw:
+        return None
+    days = []
+    for item in raw:
+        if not isinstance(item, dict):
+            return None
+        day = item.get("day")
+        value = item.get("downloads")
+        if not isinstance(day, str) or not isinstance(value, int) or value < 0:
+            return None
+        days.append({"day": day[:10], "downloads": value})
+    days.sort(key=lambda d: d["day"])
+    return {
+        "downloads": sum(d["downloads"] for d in days),
+        "window": {"start": days[0]["day"], "end": days[-1]["day"]},
+        "days": days,
+    }
 
 
 def fetch_npm_downloads(package: str, *, sleep=time.sleep, opener=None) -> dict:
-    """查 npm last-week。
-    成功 → status=ok；404 → status=unknown（确认无包，终态）；
+    """查 npm 的 last-week（range 口径，带逐日）。
+    成功 → status=ok（含 downloads / window / days）；404 → status=unknown（确认无包，终态）；
     网络/5xx 耗尽重试 → status=error（暂时失败，可再进候选）。绝不返回 downloads=0 冒充「没人装」。"""
     url = npm_downloads_url(package)
     open_fn = opener or urllib.request.urlopen
@@ -143,20 +172,10 @@ def fetch_npm_downloads(package: str, *, sleep=time.sleep, opener=None) -> dict:
             with open_fn(req, timeout=NPM_TIMEOUT) as resp:
                 body = resp.read()
             data = json.loads(body.decode("utf-8"))
-            downloads = data.get("downloads")
-            start = data.get("start")
-            end = data.get("end")
-            if not isinstance(downloads, int) or downloads < 0:
-                return {
-                    "status": "error",
-                    "downloads": None,
-                    "window": {"start": start, "end": end} if start and end else None,
-                }
-            return {
-                "status": "ok",
-                "downloads": downloads,
-                "window": {"start": str(start)[:10], "end": str(end)[:10]} if start and end else None,
-            }
+            parsed = parse_npm_range(data)
+            if parsed is None:
+                return {"status": "error", "downloads": None, "window": None, "days": None}
+            return {"status": "ok", **parsed}
         except urllib.error.HTTPError as err:
             last_err = err
             if err.code == 404:

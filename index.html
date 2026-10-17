@@ -27,12 +27,27 @@
     <button id="search-clear" class="key" hidden>清除</button>
   </div>
   <div class="readouts">
+    <button class="ro ro-idx" id="index-source" aria-expanded="false" aria-controls="index-source-panel"
+            title="DSH 插件市场索引地址：复制后加到 DSH 的「插件 → 发现 → 添加索引源」">
+      <i>索引源</i><b>插件市场</b><span class="idx-caret" aria-hidden="true">▾</span>
+    </button>
     <span class="ro"><i>数据源</i><b>GitHub 搜索接口</b></span>
     <span class="ro"><i>快照</i><b id="snapshot">--</b></span>
   </div>
+  <div class="idx-panel" id="index-source-panel" hidden role="dialog" aria-label="DSH 插件市场索引源">
+    <p class="idx-lead">把这条地址加进 DSH，就能在「插件 → 发现」里浏览并一键安装这些插件：</p>
+    <div class="idx-row">
+      <code id="index-source-url">https://www.moc-chen.cn/market/index.json</code>
+      <button id="index-source-copy" class="key" title="复制索引地址">复制</button>
+    </div>
+    <ol class="idx-steps">
+      <li>插件页 → <b>实验性插件</b> → 更多 → 启用「自定义插件市场」</li>
+      <li>切到 <b>发现</b> → <b>添加索引源</b> → 粘贴上面的地址</li>
+    </ol>
+  </div>
   <div class="keys">
     <button id="toggle-rail" class="key" title="收起 / 展开左侧栏（快捷键 [）">左栏</button>
-    <button id="trophy" class="trophy-btn" aria-haspopup="dialog" aria-expanded="false" aria-label="生态榜单：周更新热榜 / 周 star 热榜" title="生态榜单：周更新热榜 / 周 star 热榜">
+    <button id="trophy" class="trophy-btn" aria-haspopup="dialog" aria-expanded="false" aria-label="生态榜单：周更新热榜 / 周 star 热榜 / 周 npm 热榜" title="生态榜单：周更新热榜 / 周 star 热榜 / 周 npm 热榜">
       <i class="fa-solid fa-trophy" aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M7 2h10a1.5 1.5 0 0 1 1.5 1.5V9a6.5 6.5 0 0 1-5 6.32V18h-3v-2.68A6.5 6.5 0 0 1 5.5 9V3.5A1.5 1.5 0 0 1 7 2Z"/><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" d="M5.5 5.5H3.6A1.6 1.6 0 0 0 2 7.1v.7a3.9 3.9 0 0 0 3.7 3.9M18.5 5.5h1.9A1.6 1.6 0 0 1 22 7.1v.7a3.9 3.9 0 0 1-3.7 3.9"/><rect x="4" y="18" width="16" height="2.6" rx="1.3" fill="currentColor"/></svg></i>
     </button>
     <button id="toggle-dossier" class="key" title="收起 / 展开右侧栏（快捷键 ]）">右栏</button>
@@ -84,6 +99,7 @@
       <div class="seg modal-seg" id="ranking-tabs">
         <button data-tab="updated" class="on">周更新热榜</button>
         <button data-tab="stars">周 star 热榜</button>
+        <button data-tab="npm">周 npm 热榜</button>
       </div>
       <!-- 两个开关成对放：噪声没有时用 visibility 占位，避免「显示周下载」跳位；窄屏整组换行 -->
       <div class="modal-toggles" id="ranking-toggles">

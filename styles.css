@@ -49,6 +49,10 @@
   --accent: #2f7df6;
   --accent-soft: rgba(47,125,246,.12);
   --warn: #e08a00;
+  /* 三原色（榜身份色）：更新=朱、star=金、npm=青。与 palettes.js 的默认主题逐项一致，避免首屏闪色 */
+  --board-updated: #cf5127;
+  --board-stars: #b57e00;
+  --board-npm: #0b8375;
   --shadow: 0 8px 24px rgba(23,66,124,.10);
 
   /* 结构令牌：取自 DSH 主题包（tools/dsh-tokens.mjs 解析） */
@@ -190,6 +194,33 @@ body::after {
 }
 .ro i { font-style: normal; color: var(--label-3); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; }
 .ro b { font-size: 12px; font-weight: 500; color: var(--label-1); font-family: var(--font-code); font-variant-numeric: tabular-nums; }
+/* ---------------- 顶栏「索引源」：可展开胶囊 + 气泡 ---------------- */
+/* 气泡挂在 .cmdbar 下（它本来就是 position: relative），右对齐、宽度随屏幕收 */
+.ro-idx { cursor: pointer; font: inherit; color: inherit; }
+.ro-idx:hover { background: var(--hover); border-color: var(--glass-line); }
+.ro-idx.on { border-color: var(--accent-line); background: var(--accent-soft); }
+.ro-idx .idx-caret { color: var(--label-3); font-size: 10px; line-height: 1; transition: transform var(--t); }
+.ro-idx.on .idx-caret { transform: rotate(180deg); color: var(--accent-ink); }
+.idx-panel {
+  position: absolute; top: calc(100% + 6px); right: 16px; z-index: 7;
+  width: min(440px, calc(100vw - 32px)); padding: 12px 14px;
+  border: 1px solid var(--glass-line); border-radius: var(--r-md);
+  background: var(--glass-1); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+  box-shadow: var(--shadow); animation: modal-in var(--t);
+}
+.idx-panel[hidden] { display: none; }
+.idx-lead { margin: 0 0 8px; color: var(--label-2); font-size: 12px; line-height: 1.6; }
+.idx-row { display: flex; align-items: center; gap: 8px; }
+.idx-row code {
+  flex: 1; min-width: 0; padding: 7px 10px; border: 1px solid var(--hairline); border-radius: var(--r-sm);
+  background: var(--bg-layer-2); color: var(--label-1);
+  font-family: var(--font-code); font-size: 12px; white-space: nowrap; overflow-x: auto; scrollbar-width: none;
+}
+.idx-row code::-webkit-scrollbar { display: none; }
+.idx-row .key { flex: none; height: 32px; }
+.idx-steps { margin: 10px 0 0; padding-left: 18px; color: var(--label-3); font-size: 11.5px; line-height: 1.9; }
+.idx-steps b { color: var(--label-2); font-weight: 500; }
+
 .keys { display: flex; gap: 6px; }
 .key {
   height: 30px; padding: 0 12px; border-radius: var(--r-sm); border: 1px solid var(--hairline);
@@ -617,7 +648,34 @@ input[type="range"]::-moz-range-thumb {
   background: color-mix(in srgb, var(--sidebar) 76%, transparent);
 }
 .modal-head h3 { margin: 0; font-size: 14px; font-weight: 600; flex: none; letter-spacing: .02em; }
-.modal-seg { flex: 1 1 auto; max-width: 300px; margin-left: auto; }
+.modal-seg { flex: 1 1 auto; max-width: 360px; margin-left: auto; }
+
+/* 三原色：三个榜各一个身份色。榜色只作用于「数据」（标签页圆点、名次、指标、趋势柱），不做装饰着色。
+   派生色一律在 [使用处] 用 color-mix 现算，不预存到 :root —— 这样无论主题变量落在哪个元素上都不会算错。 */
+#ranking { --board: var(--board-updated); }
+#ranking[data-board="stars"] { --board: var(--board-stars); }
+#ranking[data-board="npm"] { --board: var(--board-npm); }
+#ranking-tabs button { position: relative; }
+#ranking-tabs button::before {
+  content: ""; width: 6px; height: 6px; border-radius: 50%; flex: none;
+  margin-right: 6px; background: var(--b-dot, var(--accent));
+}
+#ranking-tabs button[data-tab="updated"] { --b-dot: var(--board-updated); }
+#ranking-tabs button[data-tab="stars"] { --b-dot: var(--board-stars); }
+#ranking-tabs button[data-tab="npm"] { --b-dot: var(--board-npm); }
+#ranking-tabs button.on {
+  background: color-mix(in srgb, var(--b-dot) 10%, var(--bg-layer-1));
+  color: color-mix(in srgb, var(--b-dot) 76%, var(--label-1));
+}
+#ranking .rank-row .metric b { color: color-mix(in srgb, var(--board) 72%, var(--label-1)); }
+/* 名次徽章让位给前三名的奖牌配色（top1/top2/top3 保持金/银/铜），其余用榜色 */
+#ranking .rank-row:not(.top1):not(.top2):not(.top3) .rk {
+  color: color-mix(in srgb, var(--board) 80%, var(--label-1));
+  background: color-mix(in srgb, var(--board) 10%, var(--bg-layer-2));
+}
+#ranking .spark-bar { background: var(--board); }
+#ranking .spark-span { background: var(--board); }
+
 /* 榜单头部开关组：胶囊样式，与 .seg 同族；成对占位，噪声空时不让「周下载」跳位 */
 .modal-toggles {
   display: flex; align-items: center; gap: 8px; flex: none; margin-right: 4px;

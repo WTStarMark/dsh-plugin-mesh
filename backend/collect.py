@@ -293,6 +293,78 @@ def run_precompute(log, expected_nodes: int | None = None) -> None:
             log("预计算失败（不影响数据）：" + detail)
 
 
+def _market_index_fresh(started: float) -> bool:
+    """dist/market/index.json 是否在本轮之后被完整重写。
+    只看 mtime 会漏掉"写了一半就崩"的半截 JSON，所以还要能解析出 plugins —— 同 _core_looks_fresh 的思路。"""
+    from dsh_mesh.config import ROOT
+
+    path = ROOT / "dist" / "market" / "index.json"
+    try:
+        if not path.exists() or path.stat().st_mtime < started - 1:
+            return False
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return isinstance(data.get("plugins"), list)
+
+
+def run_market_index(log) -> None:
+    """调 Node 工具生成插件市场索引（dist/market/index.json，serve.mjs 直接对外提供）。
+    失败不影响采集：索引只服务 DSH 的「发现」页，坏了是那一页拿不到清单，站点与数据都不受影响。
+    npm 侧有一份带 24 小时 TTL 的注册表缓存（data/cache/npm-registry.json），所以常规轮次只补过期的包；
+    第一次跑（或缓存被删）要全量抓上万份 packument，会明显拖长本轮。"""
+    from dsh_mesh.config import ROOT
+
+    node = shutil.which("node")
+    if not node:
+        fallback = Path("/opt/dsh-runtime/node/bin/node")
+        node = str(fallback) if fallback.exists() else None
+    if not node:
+        log("未找到 node，跳过市场索引生成")
+        return
+    script = ROOT / "tools" / "market-index.mjs"
+    if not script.exists():
+        log("未找到市场索引脚本（tools/market-index.mjs），跳过")
+        return
+
+    started = time.time()
+    try:
+        result = subprocess.run(
+            # 堆上限兜底：线上实测峰值 RSS 181MB，给它 256MB 天花板 —— 真失控时是"这轮索引没刷新"，
+            # 而不是把同机的 web 进程挤到 OOM（那台机器今天已经因为内存崩过一次）。
+            [node, "--max-old-space-size=256", str(script), "--limit", "20000", "--concurrency", "4"],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            timeout=3600,
+            # 同 run_precompute：pm2 托管下独立会话 + 空 stdin，避开 node 的 libuv 偶发断言
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except Exception as exc:  # noqa: BLE001 - 索引失败不该拖垮采集
+        log("市场索引生成失败（不影响采集）：" + str(exc)[:160])
+        return
+
+    lines = [line for line in (result.stdout or "").strip().splitlines() if line.strip()]
+    written = next((line.strip() for line in reversed(lines) if "写入" in line), None)
+    detail = written or (lines[-1].strip() if lines else "无输出")
+    # 退出码非 0 别急着判失败：线上实测 node 会在**写完文件之后**崩在退出阶段
+    # （uv__io_poll: errno == EEXIST，pm2 托管下的老毛病，run_precompute 也踩过）。
+    # 产物确实刷新了、且能解析出 plugins，就认成功 —— 与预计算同一套判断。
+    if result.returncode == 0:
+        log("市场索引已刷新（用时 %.0f 秒）：%s" % (time.time() - started, detail))
+    elif _market_index_fresh(started):
+        log(
+            "市场索引已刷新（子进程退出码 %d，但产物已完整写出）：%s"
+            % (result.returncode, detail)
+        )
+    else:
+        log(
+            "市场索引失败（退出码 %d，产物未刷新）：%s | %s"
+            % (result.returncode, detail, (result.stderr or "").strip()[:160])
+        )
+
+
 def load_from_store(args, log):
     """离线重建：直接用累积索引（data/cache/repos.json）构图，不联网、不消耗配额。
     改完分类/噪声/相关性规则后立刻重算前端契约，不必等下一轮采集（仍走同一套 build_mesh + 预计算）。"""
@@ -440,6 +512,8 @@ def fetch_npm_downloads(args, mesh: dict, log) -> dict:
             "packageAt": now,
             "downloads": prev.get("downloads") if isinstance(prev.get("downloads"), int) else None,
             "window": prev.get("window") if isinstance(prev.get("window"), dict) else None,
+            # 逐日序列（range 口径）：与 downloads 同源；缺一天就整条不给 —— 宁可没柱子，不画假柱子
+            "days": prev.get("days") if isinstance(prev.get("days"), list) else None,
             "downloadsAt": prev.get("downloadsAt"),
         }
         if parsed["status"] == "ok" and parsed["package"]:
@@ -449,6 +523,7 @@ def fetch_npm_downloads(args, mesh: dict, log) -> dict:
                 entry["status"] = "ok"
                 entry["downloads"] = hit["downloads"]
                 entry["window"] = hit["window"]
+                entry["days"] = hit.get("days")
                 entry["downloadsAt"] = now
                 entry.pop("terminal", None)
             elif isinstance(prev.get("downloads"), int) and prev.get("status") == "ok":
@@ -456,6 +531,7 @@ def fetch_npm_downloads(args, mesh: dict, log) -> dict:
                 entry["status"] = "ok"
                 entry["downloads"] = prev["downloads"]
                 entry["window"] = prev.get("window")
+                entry["days"] = prev.get("days")
                 entry["downloadsAt"] = prev.get("downloadsAt")
                 failed += 1
             elif hit["status"] == "unknown":
@@ -463,6 +539,7 @@ def fetch_npm_downloads(args, mesh: dict, log) -> dict:
                 entry["status"] = "unknown"
                 entry["downloads"] = None
                 entry["window"] = None
+                entry["days"] = None
                 entry["downloadsAt"] = now
                 entry["terminal"] = True
                 failed += 1
@@ -471,6 +548,7 @@ def fetch_npm_downloads(args, mesh: dict, log) -> dict:
                 entry["status"] = "error"
                 entry["downloads"] = None
                 entry["window"] = None
+                entry["days"] = None
                 entry["downloadsAt"] = now
                 entry.pop("terminal", None)
                 failed += 1
@@ -489,6 +567,7 @@ def fetch_npm_downloads(args, mesh: dict, log) -> dict:
             entry["status"] = "ok"
             entry["downloads"] = hit["downloads"]
             entry["window"] = hit["window"]
+            entry["days"] = hit.get("days")
             entry["downloadsAt"] = now
             entry.pop("terminal", None)
             npm.put(payload, repo_id, entry, now=now)
@@ -501,6 +580,7 @@ def fetch_npm_downloads(args, mesh: dict, log) -> dict:
             entry["status"] = "unknown"
             entry["downloads"] = None
             entry["window"] = None
+            entry["days"] = None
             entry["downloadsAt"] = now
             entry["terminal"] = True
             npm.put(payload, repo_id, entry, now=now)
@@ -515,6 +595,7 @@ def fetch_npm_downloads(args, mesh: dict, log) -> dict:
         entry["status"] = "error"
         entry["downloads"] = None
         entry["window"] = None
+        entry["days"] = None
         entry["downloadsAt"] = now
         entry.pop("terminal", None)
         npm.put(payload, repo_id, entry, now=now)
@@ -761,6 +842,7 @@ def run_once(args, log) -> dict:
 
     log(f"索引 {total_indexed} 个仓库 · 前端 {len(mesh['nodes'])} 个节点 / {len(mesh['edges'])} 条连线")
     run_precompute(log, len(mesh["nodes"]))
+    run_market_index(log)
     if path is None:
         log("索引与上一份快照一致，本次不生成新快照")
     else:

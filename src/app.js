@@ -11,6 +11,7 @@ import { PALETTES, themeOf, DEFAULT_PALETTE } from "./palettes.js";
 import { buildLinks, countByType } from "./links.js";
 import { createGraphView } from "./graph.js";
 import { createRankingBoard } from "./ranking.js";
+import { createIndexSource } from "./index-source.js";
 
 
 const dom = {
@@ -42,9 +43,21 @@ const dom = {
   rankingNpm: document.getElementById("ranking-npm"),
   rankingNpmBox: document.getElementById("ranking-npm-box"),
   rankingNpmLabel: document.getElementById("ranking-npm-label"),
+  indexSource: document.getElementById("index-source"),
+  indexSourcePanel: document.getElementById("index-source-panel"),
+  indexSourceUrl: document.getElementById("index-source-url"),
+  indexSourceCopy: document.getElementById("index-source-copy"),
 };
 
 // 采集状态圆环已迁到管理后台（公开页不再暴露采集进度）：见 admin/status.js 与 tools/admin.mjs。
+
+/** 顶栏「索引源」：展开一条可直接复制的 DSH 插件市场索引地址（按当前站点的 origin 现算，局域网实例复制到的是它自己的地址）。 */
+const indexSource = createIndexSource({
+  button: dom.indexSource,
+  panel: dom.indexSourcePanel,
+  urlNode: dom.indexSourceUrl,
+  copyButton: dom.indexSourceCopy,
+});
 
 /** 榜单弹窗：画布顶端那枚奖杯（正好夹在左栏与右栏之间）；两个榜单都由 GET /api/ranking 算好，点某一行 = 选中它并把镜头移过去（与右栏「关联」同一套动作）。 */
 const rankingBoard = createRankingBoard({
@@ -714,11 +727,24 @@ function bindChrome() {
     });
   }
 
+  // 点气泡外面收起它（点自己或气泡里的任何东西都不收）
+  document.addEventListener?.("click", (ev) => {
+    if (!indexSource.isOpen()) return;
+    const target = ev.target;
+    if (target && (target.closest?.("#index-source") || target.closest?.("#index-source-panel"))) return;
+    indexSource.close();
+  });
+
   window.addEventListener("keydown", (ev) => {
     const typing = ev.target && ev.target.tagName === "INPUT";
     if (!typing && ev.key === "[") { state.hideRail = !state.hideRail; applyPanels(); return; }
     if (!typing && ev.key === "]") { state.hideDossier = !state.hideDossier; applyPanels(); return; }
     if (ev.key === "Escape") {
+      // 索引源是个轻量气泡：开着就先收它（比榜单弹窗轻）
+      if (indexSource.isOpen()) {
+        indexSource.close();
+        return;
+      }
       // 榜单弹窗在最上层：先关它，再轮到状态浮窗与放大退回
       if (rankingBoard.isOpen()) {
         rankingBoard.setOpen(false);

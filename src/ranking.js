@@ -5,7 +5,7 @@
  * 接口拿不到就直说拿不到，不编任何数字。
  */
 
-const TAB_LABEL = { updated: "周更新热榜", stars: "周 star 热榜" };
+const TAB_LABEL = { updated: "周更新热榜", stars: "周 star 热榜", npm: "周 npm 热榜" };
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -82,13 +82,18 @@ export function createRankingBoard({ button, modal, tabs, body, close, fetcher, 
   let hideNoise = false;
   let showNpm = false;
 
+  /** 大数缩写：12.3k / 1.2M —— 下载量榜与星标榜共用同一把尺子 */
+  function formatCount(n) {
+    const v = Number(n) || 0;
+    if (v >= 1e6) return (v / 1e6).toFixed(1).replace(/\.0$/, "") + "M";
+    if (v >= 1e4) return (v / 1e3).toFixed(1).replace(/\.0$/, "") + "k";
+    return v.toLocaleString("en-US");
+  }
+
   /** 周下载量展示：有数字就千分位；没数字时按状态给具体原因（缺失不能当 0） */
   function formatNpm(npm) {
     if (npm && npm.status === "ok" && typeof npm.downloads === "number") {
-      const n = npm.downloads;
-      if (n >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, "") + "M";
-      if (n >= 1e4) return (n / 1e3).toFixed(1).replace(/\.0$/, "") + "k";
-      return n.toLocaleString("en-US");
+      return formatCount(npm.downloads);
     }
     if (npm && npm.status === "private") return "未发布";
     if (npm && npm.status === "no-package") return "无 npm 包";
@@ -108,6 +113,8 @@ export function createRankingBoard({ button, modal, tabs, body, close, fetcher, 
   const STALE_MS = 5 * 60 * 1000;
 
   function syncTabs() {
+    // 三原色：当前榜的身份色挂在弹窗元素上，行内名次/指标/趋势柱都从 --board 取色
+    if (modal && modal.dataset) modal.dataset.board = tab;
     if (!tabs) return;
     for (const btn of tabs.children ?? []) {
       const on = btn.dataset?.tab === tab;
@@ -124,16 +131,19 @@ export function createRankingBoard({ button, modal, tabs, body, close, fetcher, 
   /** 近 7 日趋势柱：null = 那天没观测（不是 0）——有数据画实心、0 画浅底座、没观测画虚线底座 */
   function sparkline(item, board) {
     const values = Array.isArray(item.series) ? item.series : null;
-    const days = Array.isArray(data?.seriesDays) ? data.seriesDays : [];
+    // 横轴：本榜自带 seriesAxis 时优先用它（npm 榜的 7 天与另两榜不是同一组日期，混用会整排错位）
+    const axis = Array.isArray(board?.seriesAxis) && board.seriesAxis.length ? board.seriesAxis : data?.seriesDays;
+    const days = Array.isArray(axis) ? axis : [];
     const rawKind = board?.seriesKind ?? board?.metric;
-    const kind = rawKind === "star-gain" ? "star-gain" : rawKind === "releases" ? "releases" : "updates";
+    const kind =
+      rawKind === "star-gain" ? "star-gain" : rawKind === "releases" ? "releases" : rawKind === "npm-downloads" ? "npm-downloads" : "updates";
     const spans = (Array.isArray(item.spans) ? item.spans : []).filter((s) => s.value > 0);
     const wrap = el("div", "spark" + (values ? "" : " spark-empty"));
     if (!values && !spans.length) return wrap;
     if (!values) {
       // 只有跨天累计、没有逐日数据：仍然把这根宽柱画出来（槽位留空即可，位置按百分比算）
       for (const s of spans) {
-        const n = (Array.isArray(data?.seriesDays) && data.seriesDays.length) || 7;
+        const n = days.length || 7;
         const span = el("span", "spark-span");
         span.style.left = (s.fromIdx / n) * 100 + "%";
         span.style.width = ((s.toIdx - s.fromIdx + 1) / n) * 100 + "%";
@@ -151,7 +161,9 @@ export function createRankingBoard({ button, modal, tabs, body, close, fetcher, 
       const bar = el("span", "spark-bar" + (nodata ? " none" : down ? " down" : v > 0 ? (v >= peak ? " peak" : "") : " zero"));
       if (!nodata) bar.style.height = Math.max(3, Math.round((Math.abs(v) / peak) * BAR_MAX)) + "px";
       const label =
-        kind === "star-gain" ? (v > 0 ? "+" + v + " ★" : v < 0 ? v + " ★" : "0 ★") : kind === "releases" ? v + " 个版本" : v + " 次";
+        kind === "star-gain"
+          ? v > 0 ? "+" + v + " ★" : v < 0 ? v + " ★" : "0 ★"
+          : kind === "releases" ? v + " 个版本" : kind === "npm-downloads" ? v + " 次下载" : v + " 次";
       bar.title = (days[i] ?? "第 " + (i + 1) + " 天") + "：" + (nodata ? "—" : label);
       wrap.append(bar);
     });
@@ -196,7 +208,8 @@ export function createRankingBoard({ button, modal, tabs, body, close, fetcher, 
       line.append(el("span", "ver" + (newest.pre ? " pre" : ""), newest.tag || "—"));
     }
     // 周下载：和噪声/版本同一行的胶囊，不另开列、不挤 metric（可选列，默认关）
-    if (showNpm) {
+    // npm 榜自己就是按下载量排的，指标列已经写着数字，这里不再重复挂一枚胶囊
+    if (showNpm && tab !== "npm") {
       const npm = item.npm;
       const label = formatNpm(npm);
       const ok = npm && npm.status === "ok" && typeof npm.downloads === "number";
@@ -231,6 +244,16 @@ export function createRankingBoard({ button, modal, tabs, body, close, fetcher, 
       metric.append(
         el("b", null, "≥" + (item.updates ?? 1) + " 次"),
         el("span", null, timeAgo(item.pushedAt) + " · ★ " + formatStars(item.stars)),
+      );
+    } else if (board?.metric === "npm-downloads") {
+      // 指标列 = 周下载量（真实计数），次行给星标与该数字对应的 npm 窗口（窗口与另两榜可能不重合，所以写在行上）
+      const win =
+        item.npmWindow && item.npmWindow.start && item.npmWindow.end
+          ? item.npmWindow.start.slice(5) + "~" + item.npmWindow.end.slice(5)
+          : "";
+      metric.append(
+        el("b", null, formatCount(item.downloads)),
+        el("span", null, "★ " + formatStars(item.stars) + (win ? " · " + win : "")),
       );
     } else {
       const w = board?.window?.days;
@@ -347,7 +370,7 @@ export function createRankingBoard({ button, modal, tabs, body, close, fetcher, 
   }
 
   function setTab(next) {
-    if (next !== "updated" && next !== "stars") return;
+    if (!TAB_LABEL[next]) return;
     tab = next;
     render();
   }

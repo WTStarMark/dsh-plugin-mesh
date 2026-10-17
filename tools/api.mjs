@@ -939,6 +939,71 @@ export function createApi({ root }) {
         : "还没有星标历史：采集器每天会把当天的星标记一个点，跑起来之后这里就有真实的周增量。";
     }
 
+    /* 榜三：周 npm 下载量。数据来自采集器写的 data/cache/npm-downloads.json（npm 官方接口的真实区间计数）。
+     * 门槛很硬：只有 status=ok 且带数字的包能上榜。private / 没有 package.json / npm 查不到 / 接口暂时失败
+     * 一律不进榜 —— 缺数据不是 0，没上榜也不代表没人用。
+     * 窗口取自采集时写进缓存的那一段：npm 的 last-week 与另两榜的「最近 7 个自然日」不是同一个周，
+     * 所以窗口原样回报（前端写在行上），不假装成同一个「周」。 */
+    const npmRows = [];
+    const npmWindowTally = new Map();
+    for (const n of nodes) {
+      if (n.archived || n.fork) continue;
+      const entry = npmIndex.repos[n.id];
+      if (!entry || entry.status !== "ok" || typeof entry.downloads !== "number") continue;
+      const win = entry.window && entry.window.start && entry.window.end ? { start: entry.window.start, end: entry.window.end } : null;
+      if (win) {
+        const key = win.start + "~" + win.end;
+        npmWindowTally.set(key, (npmWindowTally.get(key) ?? 0) + 1);
+      }
+      npmRows.push({ node: n, entry, downloads: entry.downloads, window: win, days: Array.isArray(entry.days) ? entry.days : null });
+    }
+    npmRows.sort((a, b) => b.downloads - a.downloads || (b.node.stars ?? 0) - (a.node.stars ?? 0));
+    const npmTopWindow = [...npmWindowTally.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+    // 逐日横轴：npm 的 7 天与另两榜的 7 个自然日不是同一组日期（npm 按天数据滞后约 5 天），
+    // 所以本榜自带一根横轴 seriesAxis，绝不与全局 seriesDays 混用 —— 混了柱子就会整排错位。
+    const npmAxis = [];
+    if (npmTopWindow) {
+      const [from, to] = npmTopWindow.split("~");
+      for (let d = from; d <= to && npmAxis.length < 31; d = dayShift(d, 1)) npmAxis.push(d);
+    }
+    const npmBoard = {
+      label: "周 npm 热榜",
+      metric: "npm-downloads",
+      seriesKind: "npm-downloads",
+      available: npmRows.length > 0,
+      windowDays,
+      total: npmRows.length,
+      count: Math.min(limit, npmRows.length),
+      maxDownloads: npmRows.length ? npmRows[0].downloads : 0,
+      window: npmTopWindow ? { from: npmTopWindow.split("~")[0], to: npmTopWindow.split("~")[1] } : null,
+      seriesAxis: npmAxis,
+      seriesRows: npmRows.filter((r) => Array.isArray(r.days)).length,
+      coverage: {
+        withDownloads: npmRows.length,
+        candidates: nodes.length,
+        cached: Object.keys(npmIndex.repos).length,
+        updatedAt: npmIndex.updatedAt ?? null,
+      },
+      note:
+        "下载量 = npm 官方接口的真实区间计数（不估算、不平摊）。只有确认拿到数字的包能上榜（当前 " +
+        npmRows.length + " 个）；未发布 / 没有 package.json / npm 查不到 / 接口暂时失败的一律不进榜 —— 缺数据不是 0。" +
+        (npmTopWindow ? " 本榜窗口 " + npmTopWindow.split("~")[0] + " ~ " + npmTopWindow.split("~")[1] + "。" : "") +
+        " 窗口由采集时写入缓存的 npm 区间决定，可能与另两榜的 " + windowDays + " 个自然日不重合；" +
+        "趋势柱画在本榜自己的那根横轴上（seriesAxis），不与另两榜混用。",
+      items: npmRows.slice(0, limit).map((r) => {
+        // 柱子直接来自缓存里的逐日数组：加总 == 行内 downloads（采集时就是按逐日求和定的总量）
+        const byDay = Array.isArray(r.days) ? new Map(r.days.map((d) => [d.day, d.downloads])) : null;
+        return {
+          ...row(r.node),
+          downloads: r.downloads,
+          npmPackage: r.entry.package ?? null,
+          npmWindow: r.window,
+          series: byDay ? npmAxis.map((d) => (byDay.has(d) ? byDay.get(d) : null)) : null,
+          spans: [],
+        };
+      }),
+    };
+
     return {
       generatedAt: mesh.meta?.generatedAt ?? null,
       now: new Date(now).toISOString(),
@@ -1009,6 +1074,7 @@ export function createApi({ root }) {
               })),
             },
         stars: starsBoard,
+        npm: npmBoard,
       },
     };
   }
@@ -1291,7 +1357,7 @@ export function apiIndex(version) {
     endpoints: [
       { method: "GET", path: "/api", desc: "本清单" },
       { method: "GET", path: "/api/health", desc: "健康检查与数据概况（含 README 索引规模）" },
-      { method: "GET", path: "/api/ranking?days=7&limit=50&fields=all&noise=all|hide|only", desc: "榜单：周更新热榜（本周发过 release 的项目，最多 50 行，含 updates / updatesSource / releases）+ 周 star 热榜（星标历史增量，最多 50 行；历史不足时如实返回实际窗口）。每行带 verdict（related/noise/manual）与 npm（周下载量可选列：status/package/downloads/window；缺省或失败为 unknown，不进排序）；noise=hide 排除已判定噪声，only 只看噪声，默认 all（只标注不过滤）" },
+      { method: "GET", path: "/api/ranking?days=7&limit=50&fields=all&noise=all|hide|only", desc: "榜单：周更新热榜（本周发过 release 的项目，最多 50 行，含 updates / updatesSource / releases）+ 周 star 热榜（星标历史增量，最多 50 行；历史不足时如实返回实际窗口）+ 周 npm 热榜（npm 官方下载量真实计数，只收确认拿到数字的包；窗口取自采集时的 npm 区间，可能与另两榜不重合，见 boards.npm.window）。每行带 verdict（related/noise/manual）与 npm（周下载量可选列：status/package/downloads/window；缺省或失败为 unknown，不进排序）；noise=hide 排除已判定噪声，only 只看噪声，默认 all（只标注不过滤）" },
       { method: "GET", path: "/api/categories", desc: "扇区（功能分类）与细枝及各自数量" },
       { method: "GET", path: "/api/repos?q=&category=&subcategory=&tag=&language=&minStars=&archived=&noise=&sort=stars|pushed|created|name&limit=&offset=&fields=all", desc: "检索仓库（默认 20 条，最多 100 条）。行带 verdict；noise=hide|only 按三档判定过滤，默认 all 只标注" },
       { method: "GET", path: "/api/search?q=&limit=", desc: "紧凑检索：只回命中 id 与计数（含 README 正文命中）" },

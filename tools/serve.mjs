@@ -627,6 +627,37 @@ async function handleRequest(req, res) {
     await handlePreview(req, res, method, url);
     return;
   }
+  /* 插件市场索引（tools/market-index.mjs 生成，DSH 插件市场索引 format 1）：
+   * 它给另一台机器上的 DSH「发现」标签页读取，不是本站页面资源，所以不进静态白名单、单独一条路由；
+   * 跨机取用必须带 CORS，且不能跟着页面的 300 秒静态缓存走（改完索引要马上生效）。 */
+  if (pathname === "/market/index.json") {
+    if (method !== "GET" && method !== "HEAD") {
+      deny(res, 405, "405 只允许 GET / HEAD");
+      return;
+    }
+    try {
+      const raw = await readFile(join(ROOT, "dist", "market", "index.json"));
+      /* 必须压缩：索引有几 MB，而读它的 DSH 默认 15 秒超时（pluginMarket.fetchTimeoutMs）。
+       * 线上实测：不压缩走公网 30 秒只下到 3.4MB/5.6MB —— 那边会直接判超时。Brotli 后约十分之一。 */
+      // 复用现成的协商压缩（encodeJson 就是为这类 JSON 写的；自己伸手调 brotliCompress 会踩"没有 callback"的坑）
+      const { payload: body, encoding } = await encodeJson(req, raw);
+      res.writeHead(200, {
+        "content-type": "application/json; charset=utf-8",
+        "access-control-allow-origin": "*",
+        "cache-control": "public, max-age=300",
+        "content-length": body.length,
+        "vary": "accept-encoding",
+        ...(encoding ? { "content-encoding": encoding } : {}),
+      });
+      res.end(method === "HEAD" ? undefined : body);
+      console.log(method + " /market/index.json (" + raw.length + "B → " + body.length + "B" + (encoding ? " " + encoding : " 未压缩") + ")");
+    } catch {
+      sendJson(res, { error: "还没有生成索引：先跑 node tools/market-index.mjs" }, 404, CORS);
+      console.log("404 /market/index.json (未生成)");
+    }
+    return;
+  }
+
   // 接口路由：只认白名单里的两个，其余 404，绝不落到静态文件逻辑
   if (pathname === "/api" || pathname.startsWith("/api/")) {
     try {
