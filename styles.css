@@ -349,8 +349,10 @@ input[type="range"]::-moz-range-thumb {
 
 .seg { display: flex; flex: 1; gap: 2px; background: var(--bg-layer-2); border-radius: var(--r-sm); padding: 2px; min-width: 0; }
 .seg button {
-  flex: 1; min-width: 0; height: 26px; border-radius: 6px; font-size: 12px; color: var(--label-2);
-  transition: background var(--t), color var(--t), transform var(--t); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 6px;
+  /* flex: 0 1 auto（不是 flex: 1）：标签按**自己的文字**撑开，不做三等分。
+     三等分会在中文标签上截出省略号（"周 star 热…"），而标签页的名字是用户认路的唯一依据，不该被裁。 */
+  flex: 0 1 auto; min-width: 0; height: 26px; border-radius: 6px; font-size: 12px; color: var(--label-2);
+  transition: background var(--t), color var(--t), transform var(--t); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 10px;
 }
 .seg button:hover { background: var(--hover); }
 .seg button.on { background: var(--bg-layer-1); color: var(--accent-ink); box-shadow: var(--sheen), 0 1px 2px color-mix(in srgb, var(--label-1) 12%, transparent); }
@@ -634,7 +636,8 @@ input[type="range"]::-moz-range-thumb {
 .modal-mask { position: absolute; inset: 0; background: var(--veil); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); }
 .modal-card {
   position: relative; display: flex; flex-direction: column;
-  width: min(620px, 100%); max-height: min(78vh, 660px);
+  /* 700px（原 620）：三个标签页要整名显示，加上两个开关与关闭键，620 装不下会挤到换行 */
+  width: min(700px, 100%); max-height: min(78vh, 660px);
   background: var(--glass-1);
   -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
   border: 1px solid var(--glass-line); border-radius: var(--r-blob);
@@ -643,12 +646,14 @@ input[type="range"]::-moz-range-thumb {
 }
 @keyframes modal-in { from { opacity: 0; transform: translateY(6px) scale(.995); } to { opacity: 1; transform: none; } }
 .modal-head {
-  display: flex; align-items: center; gap: 10px;
+  /* 允许换行：挤不下时让开关组掉到第二行，而不是把标签页的文字压成省略号 */
+  display: flex; align-items: center; flex-wrap: wrap; row-gap: 8px; gap: 10px;
   padding: 12px 14px; border-bottom: 1px solid var(--hairline);
   background: color-mix(in srgb, var(--sidebar) 76%, transparent);
 }
 .modal-head h3 { margin: 0; font-size: 14px; font-weight: 600; flex: none; letter-spacing: .02em; }
-.modal-seg { flex: 1 1 auto; max-width: 360px; margin-left: auto; }
+/* 三个标签页要能整名显示：不设宽度上限、按内容撑开（原先是 max-width: 360px + 三等分，中文全被截断） */
+.modal-seg { flex: 0 1 auto; max-width: none; margin-left: auto; }
 
 /* 三原色：三个榜各一个身份色。榜色只作用于「数据」（标签页圆点、名次、指标、趋势柱），不做装饰着色。
    派生色一律在 [使用处] 用 color-mix 现算，不预存到 :root —— 这样无论主题变量落在哪个元素上都不会算错。 */
