@@ -392,6 +392,82 @@ test("榜单行带 npm 周下载量：读 data/cache/npm-downloads.json；缺省
   }
 });
 
+test("npm 榜：只收确实是 DSH 组合包的包，同名只留一行，官方内部模块不进榜", async () => {
+  // 线上实据（2026-10-17）：不加这三道门槛时，榜首 14 行里 12 行是 @deepseek-ai/* 官方内部包
+  // 被第三方仓库"复制 package.json"顶名（dsh-client-locale 挂在 AlexKaiqi 名下），
+  // 还有通用 npm 包撞名进榜（platform，920 万周下载）；同一个包还被多个仓库重复占行（dshmarket 5 行）。
+  const hoursAgo = (h) => new Date(Date.now() - h * 3600000).toISOString();
+  const tmp = await mkdtemp(join(tmpdir(), "mesh-npmboard-"));
+  const node = (id, stars) => ({
+    id,
+    name: id.split("/")[1],
+    owner: id.split("/")[0],
+    stars,
+    htmlUrl: "https://github.com/" + id,
+    pushedAt: hoursAgo(2),
+    archived: false,
+    fork: false,
+    matchedTags: ["dsh"],
+    topics: [],
+  });
+  const dl = (pkg, downloads) => ({
+    status: "ok",
+    package: pkg,
+    downloads,
+    window: { start: "2026-10-06", end: "2026-10-12" },
+    multiPackage: false,
+  });
+  try {
+    await mkdir(join(tmp, "data", "cache"), { recursive: true });
+    await writeFile(
+      join(tmp, "data", "mesh.json"),
+      JSON.stringify({
+        meta: { generatedAt: hoursAgo(1) },
+        tags: [], clusters: [], hubs: [], edges: [],
+        nodes: [node("a/real", 10), node("b/copy", 999), node("c/plain", 5000), node("d/official", 1)],
+      }),
+    );
+    await writeFile(
+      join(tmp, "data", "cache", "npm-downloads.json"),
+      JSON.stringify({
+        updatedAt: hoursAgo(1),
+        repos: {
+          "a/real": dl("real-plugin", 500),
+          "b/copy": dl("real-plugin", 500),
+          "c/plain": dl("platform", 9244162),
+          "d/official": dl("@deepseek-ai/dsh", 376103),
+        },
+      }),
+    );
+    await writeFile(
+      join(tmp, "data", "cache", "npm-registry.json"),
+      JSON.stringify({
+        updatedAt: hoursAgo(1),
+        packages: {
+          "real-plugin": { isBundle: true, dshKeys: ["@deepseek-ai/cordis"], repository: "https://github.com/a/real" },
+          platform: { isBundle: false, dshKeys: [], repository: null },
+          "@deepseek-ai/dsh": { isBundle: true, dshKeys: ["@deepseek-ai/cordis"], repository: null },
+        },
+      }),
+    );
+    const local = createApi({ root: tmp });
+    const board = (await local.ranking(new URLSearchParams("limit=10"))).boards.npm;
+    assert.equal(
+      board.total,
+      1,
+      "只有 real-plugin 该进榜，实际进了：" + board.items.map((r) => r.npmPackage).join(","),
+    );
+    assert.equal(board.items[0].npmPackage, "real-plugin");
+    assert.equal(board.items[0].id, "a/real", "门面要取 npm 包 repository 声明的仓库，而不是星标更高的顶名仓库");
+    assert.equal(board.coverage.skippedOfficial, 1, "官方内部模块要挡掉");
+    assert.equal(board.coverage.skippedNotBundle, 1, "撞名的通用包要挡掉");
+    assert.equal(board.coverage.mergedClaimants, 1, "同名认领要合并成一行");
+    assert.ok(board.note.includes("挡掉"), "口径要写进 note：" + board.note);
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("周更新热榜：窗口与横轴对齐（最左那天的版本必须被画出来）", async () => {
   // 复现过的线上 bug：窗口按"现在往前 7x24 小时"（起点比横轴早一天），
   // 于是最早那天的版本被算进总数却不画柱子（实测第 5 行 12 个版本 vs 柱子和 6）。

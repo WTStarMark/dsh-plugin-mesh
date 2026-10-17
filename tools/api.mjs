@@ -519,6 +519,27 @@ export function createApi({ root }) {
    * status=error 表示暂时失败（可重试），与确认无包的 unknown 区分。 */
   const NPM_UNKNOWN = { status: "unknown", package: null, downloads: null, window: null, multiPackage: false };
   let npmCache = { mtimeMs: -2, index: { repos: {}, updatedAt: null } };
+  /* 注册表元数据（data/cache/npm-registry.json，tools/market-index.mjs 写）：npm 榜用它判"是不是 DSH 组合包"、
+   * 以及"同一个包被多个仓库认领时挑哪个当门面"。缺文件时退回空表，榜会退回只挡官方内部包的弱口径。 */
+  let registryCache = { mtimeMs: -2, index: { packages: {}, updatedAt: null } };
+
+  async function loadNpmRegistry() {
+    const file = join(root, "data", "cache", "npm-registry.json");
+    const info = await stat(file).catch(() => null);
+    if (!info) return { packages: {}, updatedAt: null };
+    if (registryCache.mtimeMs === info.mtimeMs) return registryCache.index;
+    try {
+      const data = JSON.parse(await readFile(file, "utf8"));
+      const packages = {};
+      for (const [name, rec] of Object.entries(data.packages ?? {})) {
+        if (rec && typeof rec === "object") packages[name] = rec;
+      }
+      registryCache = { mtimeMs: info.mtimeMs, index: { packages, updatedAt: data.updatedAt ?? null } };
+    } catch {
+      registryCache = { mtimeMs: info.mtimeMs, index: { packages: {}, updatedAt: null } };
+    }
+    return registryCache.index;
+  }
 
   function publicNpm(entry) {
     if (!entry || typeof entry !== "object") return { ...NPM_UNKNOWN };
@@ -939,23 +960,86 @@ export function createApi({ root }) {
         : "还没有星标历史：采集器每天会把当天的星标记一个点，跑起来之后这里就有真实的周增量。";
     }
 
-    /* 榜三：周 npm 下载量。数据来自采集器写的 data/cache/npm-downloads.json（npm 官方接口的真实区间计数）。
-     * 门槛很硬：只有 status=ok 且带数字的包能上榜。private / 没有 package.json / npm 查不到 / 接口暂时失败
-     * 一律不进榜 —— 缺数据不是 0，没上榜也不代表没人用。
+    /* 榜三：周 npm 下载量。数据 = data/cache/npm-downloads.json（采集器写）+ data/cache/npm-registry.json（市场索引生成器写）。
+     * 三道门槛，缺一不可：
+     *   ① status=ok 且带数字 —— 缺数据不是 0，没上榜也不代表没人用；
+     *   ② 确实是 DSH 组合包（作者声明 dsh.bundle，或依赖里有 @deepseek-ai/*）—— 与插件市场索引同一套判据；
+     *   ③ 不是 @deepseek-ai/* 官方内部模块。
+     * 为什么必须有 ②③（线上实据）：不加门槛时榜首 14 行里 12 行是官方内部包被第三方仓库"复制 package.json"顶名
+     * （dsh-client-locale 挂在 AlexKaiqi 名下、dsh-session-format 挂在 Chinesezjc 名下），
+     * 还有通用 npm 包撞名进榜（platform，920 万周下载，根本不是 DSH 插件）。
+     * 再加一道去重：同一个包常被几十个仓库认领（dshmarket 5 个、dsh-whale-widget 11 个），
+     * 一个包只留一行；门面优先取 npm 包自己在 repository 里声明的那个仓库。
      * 窗口取自采集时写进缓存的那一段：npm 的 last-week 与另两榜的「最近 7 个自然日」不是同一个周，
      * 所以窗口原样回报（前端写在行上），不假装成同一个「周」。 */
-    const npmRows = [];
+    const registry = await loadNpmRegistry();
+    const registryKnown = Object.keys(registry.packages).length > 0;
+    const repoKeyOf = (value) => {
+      if (!value) return null;
+      let url = typeof value === "string" ? value : value.url;
+      if (typeof url !== "string" || !url) return null;
+      url = url.trim().replace(/^git\+/u, "").replace(/^git@github\.com:/iu, "https://github.com/")
+        .replace(/^ssh:\/\/git@github\.com\//iu, "https://github.com/").replace(/^git:\/\//iu, "https://").replace(/\.git$/u, "");
+      const hit = /github\.com\/([^/?#]+)\/([^/?#]+)/iu.exec(url);
+      return hit ? (hit[1] + "/" + hit[2]).toLowerCase() : null;
+    };
+    const npmByPkg = new Map();
     const npmWindowTally = new Map();
+    let npmSkippedOfficial = 0;
+    let npmSkippedNotBundle = 0;
     for (const n of nodes) {
       if (n.archived || n.fork) continue;
       const entry = npmIndex.repos[n.id];
       if (!entry || entry.status !== "ok" || typeof entry.downloads !== "number") continue;
-      const win = entry.window && entry.window.start && entry.window.end ? { start: entry.window.start, end: entry.window.end } : null;
+      const pkg = String(entry.package ?? "");
+      if (!pkg) continue;
+      if (pkg.startsWith("@deepseek-ai/")) {
+        npmSkippedOfficial += 1;
+        continue;
+      }
+      const rec = registry.packages[pkg];
+      const bundle = !!rec && (rec.isBundle === true || (Array.isArray(rec.dshKeys) && rec.dshKeys.length > 0));
+      // 注册表还没生成时（首次部署、生成器失败）退回弱口径：只挡官方内部包，别把整个榜清空
+      if (registryKnown && !bundle) {
+        npmSkippedNotBundle += 1;
+        continue;
+      }
+      if (!npmByPkg.has(pkg)) npmByPkg.set(pkg, []);
+      npmByPkg.get(pkg).push({ node: n, entry, downloads: entry.downloads });
+    }
+    let npmMergedClaimants = 0;
+    const npmRows = [];
+    for (const [pkg, claimants] of npmByPkg) {
+      const wanted = repoKeyOf(registry.packages[pkg]?.repository);
+      const matched = wanted ? claimants.find((c) => repoKeyOf(c.node.htmlUrl) === wanted) : null;
+      const chosen =
+        matched ??
+        claimants
+          .slice()
+          .sort(
+            (a, b) =>
+              (a.node.fork ? 1 : 0) - (b.node.fork ? 1 : 0) ||
+              (Number(b.node.stars) || 0) - (Number(a.node.stars) || 0) ||
+              b.downloads - a.downloads ||
+              String(a.node.id).localeCompare(String(b.node.id)),
+          )[0];
+      if (claimants.length > 1) npmMergedClaimants += claimants.length - 1;
+      const win =
+        chosen.entry.window && chosen.entry.window.start && chosen.entry.window.end
+          ? { start: chosen.entry.window.start, end: chosen.entry.window.end }
+          : null;
       if (win) {
         const key = win.start + "~" + win.end;
         npmWindowTally.set(key, (npmWindowTally.get(key) ?? 0) + 1);
       }
-      npmRows.push({ node: n, entry, downloads: entry.downloads, window: win, days: Array.isArray(entry.days) ? entry.days : null });
+      npmRows.push({
+        node: chosen.node,
+        entry: chosen.entry,
+        package: pkg,
+        downloads: chosen.downloads,
+        window: win,
+        days: Array.isArray(chosen.entry.days) ? chosen.entry.days : null,
+      });
     }
     npmRows.sort((a, b) => b.downloads - a.downloads || (b.node.stars ?? 0) - (a.node.stars ?? 0));
     const npmTopWindow = [...npmWindowTally.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
@@ -983,10 +1067,17 @@ export function createApi({ root }) {
         candidates: nodes.length,
         cached: Object.keys(npmIndex.repos).length,
         updatedAt: npmIndex.updatedAt ?? null,
+        // 被门槛挡掉的与同名合并的，如实回报 —— 榜小了要能说清"小在哪"
+        skippedOfficial: npmSkippedOfficial,
+        skippedNotBundle: npmSkippedNotBundle,
+        mergedClaimants: npmMergedClaimants,
+        registryKnown,
       },
       note:
         "下载量 = npm 官方接口的真实区间计数（不估算、不平摊）。只有确认拿到数字的包能上榜（当前 " +
         npmRows.length + " 个）；未发布 / 没有 package.json / npm 查不到 / 接口暂时失败的一律不进榜 —— 缺数据不是 0。" +
+        "只收确实是 DSH 组合包的包：已挡掉 " + npmSkippedOfficial + " 个官方内部模块、" + npmSkippedNotBundle + " 个非组合包；" +
+        "同一个包被多个仓库认领时只留一行（合并 " + npmMergedClaimants + " 条）。" +
         (npmTopWindow ? " 本榜窗口 " + npmTopWindow.split("~")[0] + " ~ " + npmTopWindow.split("~")[1] + "。" : "") +
         " 窗口由采集时写入缓存的 npm 区间决定，可能与另两榜的 " + windowDays + " 个自然日不重合；" +
         "趋势柱画在本榜自己的那根横轴上（seriesAxis），不与另两榜混用。",
@@ -996,7 +1087,7 @@ export function createApi({ root }) {
         return {
           ...row(r.node),
           downloads: r.downloads,
-          npmPackage: r.entry.package ?? null,
+          npmPackage: r.package,
           npmWindow: r.window,
           series: byDay ? npmAxis.map((d) => (byDay.has(d) ? byDay.get(d) : null)) : null,
           spans: [],
