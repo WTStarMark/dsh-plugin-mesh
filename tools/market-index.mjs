@@ -3,7 +3,7 @@
  * market-index —— 把生态图里「确实是 DSH 组合包」的那部分，生成一份插件市场索引（format 1）。
  *
  * 用法：
- *   node tools/market-index.mjs [--limit 200] [--refresh] [--out dist/market/index.json]
+ *   node tools/market-index.mjs [--limit 200] [--refresh] [--out dist/market/index.json] [--seed 12345]
  *
  * 数据来源：
  *   · data/cache/npm-downloads.json —— 仓库 ↔ npm 包名（采集器写）
@@ -113,6 +113,30 @@ function shortNumber(value) {
   if (v >= 1e4) return Math.round(v / 1e3) + "k";
   if (v >= 1e3) return (v / 1e3).toFixed(1).replace(/\.0$/u, "") + "k";
   return String(v);
+}
+
+/* 默认顺序随机打乱用：零依赖的可复现伪随机（mulberry32），同一个 seed 出同一串数。 */
+export function seededRandom(seed) {
+  let a = (Number(seed) || 0) >>> 0;
+  return function random() {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Fisher-Yates 洗牌；rand 可注入便于单测。返回新数组，不改原数组。 */
+export function shuffled(list, rand = Math.random) {
+  const out = list.slice();
+  for (let i = out.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(rand() * (i + 1));
+    const tmp = out[i];
+    out[i] = out[j];
+    out[j] = tmp;
+  }
+  return out;
 }
 
 /** 把 npm 的 repository 字段或仓库网页地址收成 "owner/repo"（小写）——用来判断"这个包其实住在哪个仓库"。 */
@@ -471,12 +495,19 @@ async function main() {
     declaredCategories[id] = { title: { en: value.title.en + " · " + count, zh: value.title.zh + " · " + count } };
   }
 
+  /* 默认顺序随机打乱：原来按周下载量从高到低，头部永远霸屏，长尾插件几乎没有曝光机会。
+     --limit 的截断仍然按人气排序（picked），所以被裁掉的是长尾，不是随机丢。
+     用带种子的洗牌并打印 seed：顺序看着不对时，用同一个 --seed 能复现这一次。 */
+  const seed = Number(argOf("seed", Date.now())) || Date.now();
+  const ordered = shuffled(plugins, seededRandom(seed));
+  console.log("默认顺序：随机打乱（seed=" + seed + " · " + ordered.length + " 条）");
+
   const index = {
     format: 1,
     title: { en: "DSH Plugin Ecosystem · " + plugins.length, zh: "DSH 插件生态图 · " + plugins.length },
     description: {
-      en: "Installable DSH plugin bundles catalogued by the dsh-plugin-mesh ecosystem graph. A description starts with GitHub stars (shown once the repo has at least 10) and weekly npm downloads (— when npm has no figure yet).",
-      zh: "由 dsh-plugin-mesh 生态图整理的可安装 DSH 插件组合包。描述开头是星标数与周 npm 下载量（星标不足 10 的只显示下载量；显示「—」表示 npm 还没统计到）。",
+      en: "Installable DSH plugin bundles catalogued by the dsh-plugin-mesh ecosystem graph. A description starts with GitHub stars (shown once the repo has at least 10) and weekly npm downloads (— when npm has no figure yet). The list order is shuffled on every rebuild, so every plugin gets a turn in front; use the sort menu to order by stars or downloads.",
+      zh: "由 dsh-plugin-mesh 生态图整理的可安装 DSH 插件组合包。描述开头是星标数与周 npm 下载量（星标不足 10 的只显示下载量；显示「—」表示 npm 还没统计到）。列表顺序每次重建随机打乱，让每个插件都有机会排到前面；要按星标或下载量排，请用排序菜单。",
     },
     metadata: {
       categories: declaredCategories,
@@ -486,7 +517,7 @@ async function main() {
         downloads: { title: { en: "Weekly downloads", zh: "周下载量" }, order: "desc" },
       },
     },
-    plugins,
+    plugins: ordered,
   };
 
   mkdirSync(dirname(OUT), { recursive: true });

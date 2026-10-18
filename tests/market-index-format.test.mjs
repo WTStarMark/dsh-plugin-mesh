@@ -6,7 +6,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { toneOf, versionEntries, collectCandidates, keywordsOf, isFreshRelease, MIN_STARS_FOR_BADGE, FRESH_RELEASE_DAYS } from "../tools/market-index.mjs";
+import { toneOf, versionEntries, collectCandidates, keywordsOf, isFreshRelease, seededRandom, shuffled, MIN_STARS_FOR_BADGE, FRESH_RELEASE_DAYS } from "../tools/market-index.mjs";
 
 test("人气前缀只放两个数字，不放中文词", () => {
   assert.equal(toneOf(6786, true, 160042), "★6.8k · 160k");
@@ -28,6 +28,19 @@ test("关键词兜底：没打 topic 的条目也要能被搜到（核心词 + �
   assert.ok(out.includes("dsh") && out.includes("auto") && out.includes("memory"), "包名里的功能词也要带上：" + out.join(","));
   assert.ok(!out.includes("scope"), "去掉 scope 段");
   assert.ok(keywordsOf({ topics: [] }, "dsh").length <= 12, "别超 12 个");
+});
+
+test("默认顺序：洗牌只换位置不丢条目，同一个 seed 可复现", () => {
+  const list = Array.from({ length: 80 }, (_, i) => "p" + i);
+  const a = shuffled(list, seededRandom(12345));
+  const b = shuffled(list, seededRandom(12345));
+  assert.deepEqual(a, b, "同一个 seed 必须复现同一次洗牌，否则线上顺序无从追溯");
+  assert.deepEqual(a.slice().sort(), list.slice().sort(), "洗牌不能丢条目也不能造条目");
+  assert.notDeepEqual(a, list, "80 个条目洗牌后仍与原地顺序相同的概率可以忽略");
+  assert.deepEqual(list, Array.from({ length: 80 }, (_, i) => "p" + i), "不能改原数组");
+  assert.notDeepEqual(a, shuffled(list, seededRandom(67890)), "不同 seed 应给出不同顺序");
+  assert.deepEqual(shuffled([]), [], "空表不能炸");
+  assert.deepEqual(shuffled(["only"]), ["only"], "单条就是它自己");
 });
 
 test("「近 7 天有新版」只看最新发布时间，拿不到时间就不打标", () => {
