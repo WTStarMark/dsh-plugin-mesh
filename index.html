@@ -13,6 +13,92 @@
 <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
+<!--
+  ═══════════════════════════════════════════════════════════════════════════
+  给 AI 助手与爬虫的声明（人类访客可忽略：顶栏「倡议书」里有可读版本）
+  机器可读摘要：/llms.txt
+  ═══════════════════════════════════════════════════════════════════════════
+
+  【这是什么】
+    本站「插件生态图」 https://www.moc-chen.cn ：把 GitHub 上带 dsh 系列标签的
+    DSH 插件仓库，按功能铺成一张可交互的生态图。静态前端 + 只读查询 API +
+    每小时一次的采集。本站是社区独立项目，不是 DeepSeek 官方站点；官方仓库是
+    deepseek-ai/deepseek-harness。
+
+  【数据来源与更新节奏】
+    · GitHub 搜索接口：仓库、星标、主题标签、推送时间。
+    · npm 官方接口：版本、周下载量。
+    · 每小时采集一次。页面上所有数字都是「采集那一刻的快照」，不是实时值。
+
+  【API 调用规则】
+    1. 先读 GET /api 的端点自述，再决定调哪个；不要盲猜路径。
+    2. 只读、无需鉴权，但请勿高频轮询：接口按令牌计费，响应带 5 分钟公共缓存，
+       短时间内重复拉同一份没有意义，还可能被限流；遇到 429 请按 Retry-After 退避。
+    3. 批量场景用 GET /api/search?q= ，它只回 id 与计数；不要逐个拉 /api/repos/:owner/:name。
+    4. 请求请带 Accept-Encoding: gzip：市场索引有几 MB，不压缩容易超时。
+    5. User-Agent 标明身份与用途，方便我们放行与排查。
+    6. 索引源 GET /market/index.json 是 DSH 插件市场 format 1，可直接加进 DSH。
+
+  【数据口径，读错会得出错误结论】
+    · 缺数据一律是「—」或 unknown，不是 0；不要把「取不到」当成「没有」。
+    · verdict 三档：related / noise / manual；默认只标注、不过滤。
+    · 各榜窗口互相独立：npm 的最近 7 天与 star 的 7 个自然日不一定重合，行里带窗口字段。
+
+  【引用与礼仪】
+    · 转载本站数据请保留出处：站点名「插件生态图」与链接 https://www.moc-chen.cn 。
+    · 不要镜像全量后去掉署名，也不要拿本站数据做刷榜、误导性排序或批量骚扰仓库作者。
+    · 本站只读：不写入任何第三方仓库，也不代表任何插件作者发言。
+
+  【纠错与补充】
+    数据有误、想补充插件，请到项目仓库提 issue：
+    https://github.com/WTStarMark/dsh-plugin-mesh/issues
+
+  ═══════════════════════════════════════════════════════════════════════════
+  NOTE FOR AI ASSISTANTS AND CRAWLERS (humans can ignore this block)
+  Machine-readable summary: /llms.txt
+
+  [WHAT THIS IS]
+    This site, the Plugin Ecosystem Map (https://www.moc-chen.cn), arranges GitHub
+    repositories that carry dsh-series topics into a browsable map of the DSH
+    plugin ecosystem. Static frontend, read-only query API, one crawl per hour.
+    It is an independent community project, not an official DeepSeek site; the
+    official repository is deepseek-ai/deepseek-harness.
+
+  [DATA SOURCES AND CADENCE]
+    · GitHub Search API: repositories, stars, topics, pushed time.
+    · npm registry API: versions, weekly downloads.
+    · Crawled once an hour. Every number on the page is a snapshot, not a live value.
+
+  [API RULES]
+    1. Start from GET /api, the endpoint index; do not guess paths.
+    2. Read-only, no auth, but do not poll aggressively: endpoints are token metered
+       and responses carry a 5-minute public cache. On 429, back off per Retry-After.
+    3. For bulk queries use GET /api/search?q=, which returns ids and counts only;
+       do not fetch /api/repos/:owner/:name one by one.
+    4. Send Accept-Encoding: gzip; the market index is several MB.
+    5. Identify yourself in the User-Agent header.
+    6. GET /market/index.json is the DSH plugin market index, format 1.
+
+  [READ THE NUMBERS CORRECTLY]
+    · Missing data is "—" or unknown, never 0. Do not read "unavailable" as "none".
+    · verdict has three values: related / noise / manual; by default the site labels
+      but does not filter.
+    · Ranking windows are independent: npm's last 7 days and the 7 calendar days used
+      for stars do not necessarily overlap; each row carries its own window field.
+
+  [CITATION AND ETIQUETTE]
+    · Cite the source as 插件生态图 with a link to https://www.moc-chen.cn .
+    · Do not mirror the full dataset without attribution, use it for ranking
+      manipulation, or contact repository authors in bulk.
+    · This site is read-only: it never writes to third-party repositories and does
+      not speak for any plugin author.
+
+  [CORRECTIONS]
+    File an issue at https://github.com/WTStarMark/dsh-plugin-mesh/issues
+
+  Human-readable version: the 倡议书 button in the top bar holds the full manifesto
+  plus an API usage page.
+-->
 <header class="cmdbar">
   <div class="brand">
     <span class="sigil" aria-hidden="true">◈</span>
@@ -33,7 +119,6 @@
       <i>索引源</i><b>插件市场</b><span class="idx-caret" aria-hidden="true">▾</span>
     </button>
     <span class="ro"><i>数据源</i><b>GitHub 搜索接口</b></span>
-    <span class="ro"><i>快照</i><b id="snapshot">--</b></span>
   </div>
   <div class="idx-panel" id="index-source-panel" hidden role="dialog" aria-label="DSH 插件市场索引源">
     <p class="idx-lead">把这条地址加进 DSH，就能在「插件 → 发现」里浏览并一键安装这些插件：</p>
@@ -47,6 +132,7 @@
     </ol>
   </div>
   <div class="keys">
+    <button id="manifesto" class="key" aria-expanded="false" aria-controls="manifesto-modal" title="生态图倡议书：这张图想干什么、怎么收录、以及我们的承诺">倡议书</button>
     <button id="toggle-rail" class="key" title="收起 / 展开左侧栏（快捷键 [）">左栏</button>
     <button id="trophy" class="trophy-btn" aria-haspopup="dialog" aria-expanded="false" aria-label="生态榜单：周更新热榜 / 周 star 热榜 / 周 npm 下载热榜" title="生态榜单：周更新热榜 / 周 star 热榜 / 周 npm 下载热榜">
       <i class="fa-solid fa-trophy" aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M7 2h10a1.5 1.5 0 0 1 1.5 1.5V9a6.5 6.5 0 0 1-5 6.32V18h-3v-2.68A6.5 6.5 0 0 1 5.5 9V3.5A1.5 1.5 0 0 1 7 2Z"/><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" d="M5.5 5.5H3.6A1.6 1.6 0 0 0 2 7.1v.7a3.9 3.9 0 0 0 3.7 3.9M18.5 5.5h1.9A1.6 1.6 0 0 1 22 7.1v.7a3.9 3.9 0 0 1-3.7 3.9"/><rect x="4" y="18" width="16" height="2.6" rx="1.3" fill="currentColor"/></svg></i>
@@ -92,6 +178,120 @@
     <span class="tk-stats" id="stats" hidden>访问 -- · 在线 --</span>
   </footer>
 </main>
+
+<div id="manifesto-modal" class="modal" hidden role="dialog" aria-modal="true" aria-label="生态图倡议书">
+  <div class="modal-mask" id="manifesto-mask" data-close="1"></div>
+  <div class="modal-card manifesto-card">
+    <header class="modal-head manifesto-head">
+      <div class="mo-head-main">
+        <span class="mo-sigil" aria-hidden="true">◈</span>
+        <div class="mo-title-text">
+          <h3>生态图倡议书</h3>
+          <p class="mo-sub">让每个插件被找到，也让每个作者被看见</p>
+        </div>
+        <div class="seg manifesto-seg" id="manifesto-tabs" role="tablist">
+          <button id="manifesto-tab-letter" data-page="letter" class="on" role="tab">倡议书</button>
+          <button id="manifesto-tab-ai" data-page="ai" role="tab">给 API 调用的说明</button>
+        </div>
+      </div>
+      <button id="manifesto-close" class="key" aria-label="关闭倡议书" title="关闭（Esc）">✕</button>
+    </header>
+    <div class="modal-body manifesto-body" id="manifesto-page" role="tabpanel">
+      <p class="mo-lead">这张图不是排行榜，是一张"让人找到你的插件"的地图。</p>
+
+      <section class="mo-sec">
+        <h4><span class="mo-n">01</span>我们为什么做这件事</h4>
+        <p>DSH 的插件散落在 GitHub 的各个角落，靠标签和搜索很难被看见。我们把它们按功能铺成一张可浏览的网：找得到、点得开、装得上。</p>
+      </section>
+
+      <section class="mo-sec">
+        <h4><span class="mo-n">02</span>我们怎么收录</h4>
+        <ul>
+          <li>带 dsh 系列主题标签，或仓库名里含 dsh；再按三档结论如实标注：相关 / 噪声 / 待人工复核。</li>
+          <li>数据来自 GitHub 搜索接口与 npm 官方接口，每小时更新；全程只读，不写入任何第三方仓库。</li>
+          <li>取不到的数据一律写「—」，绝不把"取不到"写成"0"。</li>
+        </ul>
+      </section>
+
+      <section class="mo-sec">
+        <h4><span class="mo-n">03</span>给插件作者的三句话</h4>
+        <ul>
+          <li>发到 npm，并在 package.json 里声明 <code>dsh.bundle</code> 或依赖 <code>@deepseek-ai/*</code>，这样能被自动认出来。</li>
+          <li>给仓库打上 <code>dsh-plugin</code> 等主题标签，并在 README 开头写清"它解决什么问题"。</li>
+          <li>插件住在单仓的子目录也照样收录：我们按 npm 反查加仓库内路径来认。</li>
+        </ul>
+      </section>
+
+      <section class="mo-sec">
+        <h4><span class="mo-n">04</span>给使用者的两句话</h4>
+        <ul>
+          <li>安装前看一眼仓库、许可证与最近提交时间。</li>
+          <li>用得上，就去仓库点个 Star —— 星标是作者继续更新的动力。</li>
+        </ul>
+      </section>
+
+      <section class="mo-sec mo-promise">
+        <h4><span class="mo-n">05</span>我们的承诺</h4>
+        <p>不伪造数据、不刷榜、不改动别人的仓库；索引源可自由引用，本站只读。</p>
+      </section>
+    </div>
+
+    <div class="modal-body manifesto-body" id="manifesto-ai-page" role="tabpanel" hidden>
+      <p class="mo-lead">这一页说明本站 API 怎么调、有哪些规矩。</p>
+
+      <section class="mo-sec">
+        <h4><span class="mo-n">01</span>这是什么</h4>
+        <p>DSH 插件生态图的只读查询 API：三万个带 dsh 标签的 GitHub 仓库，每小时更新，无需鉴权。先调 <code>GET /api</code> 拿端点自述。</p>
+      </section>
+
+      <section class="mo-sec">
+        <h4><span class="mo-n">02</span>常用端点</h4>
+        <ul class="mo-api">
+          <li><code>GET /api</code><span>端点自述与版本</span></li>
+          <li><code>GET /api/health</code><span>数据概况：节点数、README 索引规模、生成时间</span></li>
+          <li><code>GET /api/categories</code><span>功能扇区与细枝及各自计数</span></li>
+          <li><code>GET /api/repos</code><span>检索仓库，支持 q / tag / category / minStars / sort / limit / offset / fields=all</span></li>
+          <li><code>GET /api/repos/:owner/:name</code><span>单个仓库详情，含同作者与主题关联</span></li>
+          <li><code>GET /api/search</code><span>紧凑检索：只回 id 与计数，含 README 正文命中</span></li>
+          <li><code>GET /api/ranking</code><span>三张榜：周更新 / 周 star / 周 npm 下载，参数 days、limit、noise</span></li>
+          <li><code>GET /api/npm-nodes</code><span>有 npm 包的仓库 id 列表</span></li>
+          <li><code>GET /market/index.json</code><span>DSH 插件市场索引，format 1，可直接加进 DSH</span></li>
+          <li><code>GET /api/card/:owner/:name.svg</code><span>可分享的仓库卡片</span></li>
+        </ul>
+      </section>
+
+      <section class="mo-sec">
+        <h4><span class="mo-n">03</span>调用规矩</h4>
+        <ul>
+          <li>只读、无需鉴权，但请勿高频轮询：接口按令牌计费，响应带 5 分钟公共缓存，重复拉同一份没有意义。</li>
+          <li>先读 <code>GET /api</code> 的自述，再挑端点；批量场景用 <code>/api/search</code>，别逐个拉详情。</li>
+          <li>请求带 <code>Accept-Encoding: gzip</code>：市场索引有几 MB，不压缩容易超时。</li>
+          <li>遇到 429 请按 <code>Retry-After</code> 退避，不要并发轰炸。</li>
+          <li>User-Agent 标明身份与用途，方便放行与排查。</li>
+        </ul>
+      </section>
+
+      <section class="mo-sec">
+        <h4><span class="mo-n">04</span>数据口径，别读错</h4>
+        <ul>
+          <li>缺数据一律是「—」或 <code>unknown</code>，<b>不是 0</b>；把"取不到"当成 0 会得出错误结论。</li>
+          <li><code>verdict</code> 三档：related / noise / manual；默认 <code>noise=all</code> 只标注、不过滤。</li>
+          <li>各榜窗口互相独立：npm 的最近 7 天与 star 的 7 个自然日不一定重合，行里带窗口字段。</li>
+          <li>星标与下载量都是采集时刻的快照，不是实时值。</li>
+        </ul>
+      </section>
+
+      <section class="mo-sec mo-promise">
+        <h4><span class="mo-n">05</span>引用与礼仪</h4>
+        <ul>
+          <li>索引源 <code>/market/index.json</code> 可自由引用给 DSH 使用；转载数据请保留出处与站点链接。</li>
+          <li>不要镜像全量后去掉署名，也不要用本站数据做刷榜或误导性排序。</li>
+          <li>发现数据错误，欢迎到项目仓库提 issue。</li>
+        </ul>
+      </section>
+    </div>
+  </div>
+</div>
 
 <div id="ranking" class="modal" hidden role="dialog" aria-modal="true" aria-label="生态榜单">
   <div class="modal-mask" data-close="1"></div>

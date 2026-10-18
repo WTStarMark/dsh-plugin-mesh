@@ -103,7 +103,7 @@ class FakeNode {
   filter(pred) { return this.all.filter(pred); }
 }
 
-const ids = ["rail", "inspector", "snapshot", "loading", "tooltip", "hint", "telemetry", "lamp", "edge-types", "search", "search-clear", "search-fan", "palette", "toggle-rail", "toggle-dossier", "stage", "graph", "trophy", "ranking", "ranking-tabs", "ranking-body", "ranking-foot", "ranking-close", "index-source", "index-source-panel", "index-source-url", "index-source-copy"];
+const ids = ["rail", "inspector", "loading", "tooltip", "hint", "telemetry", "lamp", "edge-types", "search", "search-clear", "search-fan", "palette", "toggle-rail", "toggle-dossier", "stage", "graph", "trophy", "ranking", "ranking-tabs", "ranking-body", "ranking-foot", "ranking-close", "index-source", "index-source-panel", "index-source-url", "index-source-copy", "manifesto", "manifesto-modal", "manifesto-close", "manifesto-mask", "manifesto-tabs", "manifesto-tab-letter", "manifesto-tab-ai", "manifesto-page", "manifesto-ai-page"];
 const registry = new Map(ids.map((id) => [id, new FakeNode(id === "graph" ? "canvas" : "div", id)]));
 // 榜单弹窗：真实的 tab / 遮罩是 HTML 里的子节点，桩里手动补上（否则点不到、渲染不出）
 const rankingTabs = [
@@ -340,10 +340,12 @@ function enterCenteredFan() {
   return { ...picked, related: Number(m[1]) };
 }
 
-test("启动后：载入层关闭、快照读数就位", () => {
+test("启动后：载入层关闭、顶栏读数就位、倡议书默认收起", () => {
   assert.equal(registry.get("loading").hidden, true, "载入完成后 loading 必须隐藏（否则页面看起来是白屏）");
-  assert.match(registry.get("snapshot").textContent, /^\d{4}-\d{2}-\d{2} · 抽样$/, "快照读数应为日期：" + registry.get("snapshot").textContent);
+  // 顶栏的「快照 · 抽样」读数已按要求移除：页面里不该再留这个数据新鲜度的读数
+  assert.equal(registry.get("snapshot"), undefined, "快照读数应已从页面移除");
   assert.match(registry.get("telemetry").textContent, /^缩放 \d+\.\d\d$/, "缩放读数应被初始化");
+  assert.equal(registry.get("manifesto-modal").hidden, true, "倡议书弹窗默认收起");
 });
 
 test("布局会沉降并真的画出东西", () => {
@@ -363,6 +365,44 @@ test("三个面板都渲染出了内容", () => {
   assert.ok(rail.children.length >= 4, "左侧 rail 区块过少");
   assert.ok(inspector.children.length >= 2, "右侧检查器未渲染");
   assert.ok(registry.get("edge-types").children.length >= 1, "连线图例应存在：" + registry.get("edge-types").children.length);
+});
+
+test("倡议书：点顶栏按钮弹出，✕ / 点遮罩 / Esc 都能关", () => {
+  const btn = registry.get("manifesto");
+  const modal = registry.get("manifesto-modal");
+  assert.equal(modal.hidden, true, "默认收起");
+  btn.fire("click");
+  assert.equal(modal.hidden, false, "点按钮应弹出倡议书");
+  assert.equal(btn.attrs["aria-expanded"], "true", "aria-expanded 要同步");
+  registry.get("manifesto-close").fire("click");
+  assert.equal(modal.hidden, true, "✕ 应关闭");
+  assert.equal(btn.attrs["aria-expanded"], "false");
+  btn.fire("click");
+  registry.get("manifesto-mask").fire("click");
+  assert.equal(modal.hidden, true, "点遮罩应关闭");
+  btn.fire("click");
+  for (const fn of windowListeners.keydown ?? []) fn({ key: "Escape", target: {} });
+  assert.equal(modal.hidden, true, "Esc 应关闭");
+});
+
+test("API 调用说明：切页只显示对应那一页，重开回到倡议书", () => {
+  const btn = registry.get("manifesto");
+  const letter = registry.get("manifesto-page");
+  const ai = registry.get("manifesto-ai-page");
+  btn.fire("click");
+  assert.equal(letter.hidden, false, "默认显示倡议书正文");
+  assert.equal(ai.hidden, true, "AI 说明页默认隐藏");
+  registry.get("manifesto-tab-ai").fire("click");
+  assert.equal(letter.hidden, true, "切页后正文隐藏");
+  assert.equal(ai.hidden, false, "AI 说明页出现");
+  // 切回正文，然后关掉再打开：应回到正文页，而不是停在 AI 页
+  registry.get("manifesto-tab-letter").fire("click");
+  registry.get("manifesto-tab-ai").fire("click");
+  registry.get("manifesto-close").fire("click");
+  btn.fire("click");
+  assert.equal(letter.hidden, false, "重开后回到正文页");
+  assert.equal(ai.hidden, true);
+  registry.get("manifesto-close").fire("click");
 });
 
 test("过滤真的生效：关掉一个标签后命中数下降", () => {

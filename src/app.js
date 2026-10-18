@@ -11,13 +11,13 @@ import { PALETTES, themeOf, DEFAULT_PALETTE } from "./palettes.js";
 import { buildLinks, countByType } from "./links.js";
 import { createGraphView } from "./graph.js";
 import { createRankingBoard } from "./ranking.js";
+import { createManifesto } from "./manifesto.js";
 import { createIndexSource } from "./index-source.js";
 
 
 const dom = {
   rail: document.getElementById("rail"),
   inspector: document.getElementById("inspector"),
-  snapshot: document.getElementById("snapshot"),
   loading: document.getElementById("loading"),
   tooltip: document.getElementById("tooltip"),
   hint: document.getElementById("hint"),
@@ -25,6 +25,14 @@ const dom = {
   search: document.getElementById("search"),
   searchClear: document.getElementById("search-clear"),
   searchFan: document.getElementById("search-fan"),
+  manifesto: document.getElementById("manifesto"),
+  manifestoModal: document.getElementById("manifesto-modal"),
+  manifestoClose: document.getElementById("manifesto-close"),
+  manifestoMask: document.getElementById("manifesto-mask"),
+  manifestoPage: document.getElementById("manifesto-page"),
+  manifestoAiPage: document.getElementById("manifesto-ai-page"),
+  manifestoTabLetter: document.getElementById("manifesto-tab-letter"),
+  manifestoTabAi: document.getElementById("manifesto-tab-ai"),
   palette: document.getElementById("palette"),
   deck: document.querySelector(".deck"),
   toggleRail: document.getElementById("toggle-rail"),
@@ -78,6 +86,18 @@ const rankingBoard = createRankingBoard({
       ? () => fetch("/api/ranking?limit=50").then((res) => (res.ok ? res.json() : null))
       : null,
   onPick: (id) => actions.openRelated(id),
+});
+
+/** 顶栏「倡议书」弹窗：正文在 index.html 里，这里只管开关与关闭方式（Esc / ✕ / 点遮罩） */
+const manifesto = createManifesto({
+  button: dom.manifesto,
+  modal: dom.manifestoModal,
+  close: dom.manifestoClose,
+  mask: dom.manifestoMask,
+  pages: [
+    { id: "letter", node: dom.manifestoPage, tab: dom.manifestoTabLetter },
+    { id: "ai", node: dom.manifestoAiPage, tab: dom.manifestoTabAi },
+  ],
 });
 
 const HUB_ID = "deepseek-ai/deepseek-harness";
@@ -871,9 +891,13 @@ function bindChrome() {
         indexSource.close();
         return;
       }
-      // 榜单弹窗在最上层：先关它，再轮到状态浮窗与放大退回
+      // 榜单弹窗在最上层：先关它，再轮到倡议书、状态浮窗与放大退回
       if (rankingBoard.isOpen()) {
         rankingBoard.setOpen(false);
+        return;
+      }
+      if (manifesto.isOpen()) {
+        manifesto.close();
         return;
       }
       // 退出顺序：先退出搜索扇形图，再退出单扇区放大，再退出"以某仓库为中心"的扇形图，最后才是清选中
@@ -945,7 +969,6 @@ async function bootMesh(mesh, { resetFilters, core }) {
   }
   syncView();
   dom.loading.hidden = true;
-  dom.snapshot.textContent = String(prepared.meta.generatedAt ?? "").slice(0, 10) + " · 抽样";
   if (dom.telemetry) dom.telemetry.textContent = "缩放 " + view.view.k.toFixed(2);
   dom.hint.title = "圆心固定为 " + HUB_ID;
 

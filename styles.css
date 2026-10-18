@@ -631,6 +631,55 @@ input[type="range"]::-moz-range-thumb {
 
 /* 弹窗：遮罩 + 卡片，居中；手机端几乎占满。卡片不压 canvas 的"工作状态"（打开时画布已静止），
    所以可以用玻璃；遮罩仍是一层很淡的暗纱 + 3px 模糊。 */
+/* 倡议书弹窗：分节 + 编号徽标 + 品牌菱形。长文要能读下去，所以给足了行距与留白，
+   同时沿用弹窗自己的玻璃底与阴影，不另造一套视觉。 */
+.modal-card.manifesto-card { width: min(760px, 100%); max-height: min(84vh, 800px); }
+/* 关闭键钉在卡片右上角：标题区会换行、会居中，跟着流式布局走就会歪到中间去 */
+.modal-card.manifesto-card #manifesto-close { position: absolute; top: 10px; right: 10px; z-index: 2; }
+/* 本段插在弹窗基础样式之前，同优先级的 .modal-head / .modal-body 写在后面会覆盖它 ——
+   症状就是「头部又变回 flex 行，标题块被当成内容宽的 flex 子项丢在左边」。
+   所以这里用 id 选择器，把优先级抬到无论如何都赢。 */
+#manifesto-modal .modal-head { display: block; padding: 16px 46px 0; text-align: center; }
+#manifesto-modal .modal-body { padding: 16px 20px 22px; }
+#manifesto-modal .manifesto-seg { margin: 0; flex: none; }
+#manifesto-modal .manifesto-seg button { font-size: 13px; padding: 6px 12px; }
+.mo-head-main { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+/* 菱形徽标单独占一行放在标题上方：跟着标题横排会把标题挤得偏右，看起来就不居中 */
+.mo-sigil {
+  flex: none; width: 38px; height: 38px; display: grid; place-items: center; border-radius: 13px;
+  font-size: 18px; color: #fff;
+  background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 45%, #7b5cff));
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 34%, transparent);
+}
+.mo-title-text { text-align: center; }
+.modal-card.manifesto-card .modal-head h3 { font-size: 19px; line-height: 1.3; }
+.mo-sub { margin: 5px 0 0; font-size: 13px; color: var(--label-3); }
+/* 内边距交给上面的 #manifesto-modal .modal-body，这里只管排版 */
+.manifesto-body { line-height: 1.9; font-size: 13.5px; color: var(--label-2); text-align: center; }
+.manifesto-body .mo-api { list-style: none; padding: 0; display: grid; gap: 7px; justify-items: center; }
+.manifesto-body .mo-api li { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.manifesto-body .mo-api span { color: var(--label-3); font-size: 12px; }
+.mo-lead {
+  margin: 0; padding: 11px 13px; border-radius: var(--r-sm);
+  background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--label-1); font-size: 15px; font-weight: 600;
+}
+.mo-sec { margin-top: 12px; padding-top: 14px; border-top: 1px solid var(--hairline); }
+.mo-sec h4 { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 0 0 8px; font-size: 14px; color: var(--label-1); }
+.mo-n {
+  flex: none; font-family: var(--font-code); font-size: 10.5px; letter-spacing: .04em;
+  color: var(--accent); background: var(--accent-soft); border-radius: 6px; padding: 1px 6px;
+}
+.mo-sec p { margin: 0 0 6px; }
+.mo-sec ul { margin: 0; padding-left: 0; list-style-position: inside; }
+.mo-sec li { margin: 6px 0; }
+.mo-sec li::marker { color: var(--accent); }
+.mo-promise { border-top-style: dashed; }
+.mo-promise p { color: var(--label-1); font-weight: 600; }
+.manifesto-body code {
+  font-family: var(--font-code); font-size: 11.5px; color: var(--label-1);
+  background: var(--bg-layer-2); border: 1px solid var(--hairline); border-radius: 5px; padding: 1px 5px;
+}
 .modal { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; padding: 24px; }
 .modal[hidden] { display: none; }
 .modal-mask { position: absolute; inset: 0; background: var(--veil); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); }

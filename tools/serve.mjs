@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * 静态预览服务（加固版）—— 只暴露「前端跑起来真正需要的东西」。安全策略：
- *   ① 【路径白名单】只提供 /、/index.html、/styles.css、/src/*.js、/data/mesh.json；
+ *   ① 【路径白名单】只提供 /、/index.html、/styles.css、/src/*.js、/data/mesh.json、/llms.txt；
  *      backend/、tests/、docs/、data/cache/、data/snapshots/、README、package.json 一律 403；
  *   ② 【方法白名单】只允许 GET / HEAD，其余 405；③ 【Host 白名单】只接受本机地址，挡掉 DNS rebinding；
  *   ④ 【安全响应头】CSP / nosniff / frame-ancestors none / CORP same-origin / no-referrer；
@@ -52,6 +52,7 @@ const MIME = {
   ".js": "text/javascript; charset=utf-8",
   ".mjs": "text/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8",
+  ".txt": "text/plain; charset=utf-8",
   ".svg": "image/svg+xml",
   ".png": "image/png",
   ".ico": "image/x-icon",
@@ -62,6 +63,8 @@ const ALLOW = [
   { pattern: /^\/$/, file: "index.html" },
   { pattern: /^\/index\.html$/, file: "index.html" },
   { pattern: /^\/styles\.css$/, file: "styles.css" },
+  // 给 AI / 爬虫的机器可读摘要：不是前端资源，但和页面同源、同样是只读文本，故意公开
+  { pattern: /^\/llms\.txt$/, file: "llms.txt" },
   { pattern: /^\/src\/[A-Za-z0-9_.-]+\.js$/, file: null },
   { pattern: /^\/data\/mesh\.json$/, file: "data/mesh.json" },
   { pattern: /^\/data\/mesh-core\.json$/, file: "data/mesh-core.json" },
