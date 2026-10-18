@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import { prepareCore, ownerSiblings } from "../src/mesh-data.js";
+import { prepareCore, ownerSiblings, matches } from "../src/mesh-data.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const mesh = JSON.parse(await readFile(resolve(ROOT, "data/mesh.json"), "utf8"));
@@ -288,6 +288,34 @@ function findNodeOnCanvas(accept = () => true) {
 // 用【二进制契约】建对照表：页面实际准备的就是它（prepareCore），
 // 用 mesh.json 建会在两者节点集不同时算出不一样的分组/关联。
 const preparedForTest = prepareCore(coreJson);
+
+/**
+ * 在当前数据集里找一个命中数落在 [min, max] 的词。
+ * 搜索类用例不能写死查询词：CI 跑的是 data/sample-raw.json 生成的夹具（593 个仓库），
+ * 本机是全量（1.7 万+），同一个词两边命中数完全不同 —— 实测 openviking 在夹具里只命中 1 个，
+ * 按"单个命中不成图"的规则就不会成图，断言直接假红。期望值一律从数据推导，
+ * 与仓库里"数据每小时更新、硬编码数字必然过期"是同一条规矩。
+ */
+function queryInHitBand(min, max = Infinity) {
+  const seen = new Set();
+  const words = [];
+  const push = (w) => {
+    const s = String(w ?? "").trim();
+    if (s.length < 3 || seen.has(s.toLowerCase())) return;
+    seen.add(s.toLowerCase());
+    words.push(s);
+  };
+  for (const n of coreJson.nodes ?? []) {
+    for (const t of [...(n.matchedTags ?? []), ...(n.topics ?? [])]) push(t);
+    push(n.category);
+    for (const seg of String(n.name ?? "").split(/[^A-Za-z0-9]+/)) push(seg);
+  }
+  for (const word of words) {
+    const count = preparedForTest.nodes.filter((n) => matches(n, word)).length;
+    if (count >= min && count <= max) return { word, count };
+  }
+  return null;
+}
 function fanMembers(id) {
   return new Set([id, ...(preparedForTest.adjacency.get(id) ?? []).map((n) => n.id), ...ownerSiblings(preparedForTest, id)]);
 }
@@ -351,22 +379,26 @@ test("过滤真的生效：关掉一个标签后命中数下降", () => {
 
 test("搜索：命中少自动成图、命中多只高亮，回车选中星标最高的命中项", () => {
   const search = registry.get("search");
-  search.value = "tauri";
+  const narrow = queryInHitBand(2, 99);
+  assert.ok(narrow, "当前数据集里应能找到一个命中 2 到 99 个仓库的词");
+  search.value = narrow.word;
   search.fire("input");
-  // 命中 21 个（<100）→ 自动画成搜索扇形图，提示随之换成扇形图写法
-  const m = hint.textContent.match(/搜索「tauri」命中 (\d+) 个仓库/);
-  assert.ok(m && Number(m[1]) > 0 && Number(m[1]) < NODE_COUNT, "命中少时应自动成图，实际 " + hint.textContent);
+  const reNarrow = new RegExp("搜索「" + escapeReg(narrow.word) + "」命中 (\\d+) 个仓库");
+  const m = hint.textContent.match(reNarrow);
+  assert.ok(m && Number(m[1]) >= 2 && Number(m[1]) < 100, "命中少时应自动成图，实际 " + hint.textContent);
   search.fire("keydown", { key: "Enter" });
   const h2 = inspector.find((n) => n.tagName === "h2");
   assert.ok(h2, "回车后检查器应展示选中的仓库");
-  // 命中可能在仓库名，也可能在作者名（如 dsh-tauri/...），因此校验整块面板文本
+  // 命中可能在仓库名，也可能在作者名，因此校验整块面板文本
   const panelText = inspector.all.map((n) => n.textContent).join(" ");
-  assert.match(panelText, /tauri/i, "回车选中的仓库必须真的与查询词相关，实际=" + panelText.slice(0, 120));
-  // 宽查询：命中上千 → 不成图，只高亮（与"命中多不画放射线"同一个思路）
-  search.value = "dsh";
+  assert.match(panelText.toLowerCase(), new RegExp(escapeReg(narrow.word.toLowerCase())), "回车选中的仓库必须真的与查询词相关，实际=" + panelText.slice(0, 120));
+  // 宽查询：命中超过"光束上限" → 不成图，只高亮（与"命中多不画放射线"同一个思路）
+  const wide = queryInHitBand(101);
+  assert.ok(wide, "当前数据集里应能找到一个命中超过 100 个仓库的词");
+  search.value = wide.word;
   search.fire("input");
   assert.match(hint.textContent, /当前命中 \d+ \/ \d+/, "命中多时应回到全景只做高亮：" + hint.textContent);
-  assert.ok(!/搜索「dsh」命中/.test(hint.textContent), "命中多时不该自动成图：" + hint.textContent);
+  assert.ok(!/搜索「/.test(hint.textContent), "命中多时不该自动成图：" + hint.textContent);
   search.value = "";
   search.fire("input");
   assert.match(hint.textContent, atFull, "清空搜索后应回到全图：" + hint.textContent);
@@ -375,15 +407,17 @@ test("搜索：命中少自动成图、命中多只高亮，回车选中星标�
 test("搜索扇形图：命中少于 100 自动成图；手动点按钮可强制切换", () => {
   const search = registry.get("search");
   const fanBtn = registry.get("search-fan");
-  search.value = "openviking";
+  const narrow = queryInHitBand(2, 99);
+  assert.ok(narrow, "当前数据集里应能找到一个命中 2 到 99 个仓库的词");
+  search.value = narrow.word;
   search.fire("input");
   // 不 pump：提示与按钮文案都是同步更新的，而画一帧会把上一个用例遗留的选中态画成连线，
   // 污染 drawCalls 这个全局计数器（下一条用例断言"未选中时一条都不画"）。
-  assert.match(hint.textContent, /搜索「openviking」命中 \d+ 个仓库/, "命中少时应自动成图：" + hint.textContent);
+  assert.match(hint.textContent, new RegExp("搜索「" + escapeReg(narrow.word) + "」命中 \\d+ 个仓库"), "命中少时应自动成图：" + hint.textContent);
   assert.match(hint.textContent, /圆心：deepseek-ai\/deepseek-harness/, "圆心必须是官方仓库");
   assert.equal(fanBtn.textContent, "返回全图", "自动成图后按钮显示为返回入口");
   fanBtn.fire("click"); // 手动退出：命中再少也听用户的
-  assert.ok(!/搜索「openviking」命中/.test(hint.textContent), "手动退出后不应再是成图态：" + hint.textContent);
+  assert.ok(!/搜索「/.test(hint.textContent), "手动退出后不应再是成图态：" + hint.textContent);
   assert.equal(fanBtn.textContent, "成图");
   search.value = "";
   search.fire("input");
@@ -930,9 +964,11 @@ test("v0.4.6 搜索：命中超过 100 个只做高亮、不画放射线（避�
   canvas.fire("pointerleave");
   pump(10);
 
-  // 泛查询：命中必然远超 100（"dsh" 几乎每个仓库都沾）→ 只高亮，不画线
+  // 泛查询：命中远超 100（用当前数据集里最宽的那个词）→ 只高亮，不画线
   const before = drawCalls.lineTo;
-  search.value = "dsh";
+  const wide = queryInHitBand(101);
+  assert.ok(wide, "当前数据集里应能找到一个命中超过 100 个仓库的词");
+  search.value = wide.word;
   search.fire("input");
   pump(30);
   const hintWide = registry.get("hint").textContent;
@@ -981,9 +1017,11 @@ test("v0.4.2 搜索：从圆心放射出指向命中仓库的直线，清空后�
   const before = drawCalls.lineTo;
   const segStart = drawCalls.segments.length;
   const widthStart = drawCalls.strokeWidths.length;
-  search.value = "tauri";
+  const ray = queryInHitBand(2, 99);
+  assert.ok(ray, "当前数据集里应能找到一个命中 2 到 99 个仓库的词");
+  search.value = ray.word;
   search.fire("input");
-  // 命中 21 个（<100）→ 新版会自动成图；这条用例测的是放射线，
+  // 命中少于 100 → 新版会自动成图；这条用例测的是放射线，
   // 所以先点「返回全图」手动退回全景，光束才会画出来（自动成图时每个节点都是命中，画线只会糊）。
   registry.get("search-fan").fire("click");
   pump(30);
