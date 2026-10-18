@@ -583,6 +583,28 @@ export function createApi({ root }) {
     return npmCache.index;
   }
 
+  /* 子目录包（data/cache/npm-packages.json，采集器写）：仓库根没有 package.json、包住在仓库内
+     某个目录的那批，按【包名】做 key（一个仓库可能多个包，不能塞进上面那张一对一表）。 */
+  let npmPackagesCache = { mtimeMs: -2, index: { packages: {}, updatedAt: null } };
+
+  async function loadNpmPackages() {
+    const file = join(root, "data", "cache", "npm-packages.json");
+    const info = await stat(file).catch(() => null);
+    if (!info) return { packages: {}, updatedAt: null };
+    if (npmPackagesCache.mtimeMs === info.mtimeMs) return npmPackagesCache.index;
+    try {
+      const data = JSON.parse(await readFile(file, "utf8"));
+      const packages = {};
+      for (const [name, entry] of Object.entries(data.packages ?? {})) {
+        if (entry && typeof entry === "object") packages[name] = entry;
+      }
+      npmPackagesCache = { mtimeMs: info.mtimeMs, index: { packages, updatedAt: data.updatedAt ?? null } };
+    } catch {
+      npmPackagesCache = { mtimeMs: info.mtimeMs, index: { packages: {}, updatedAt: null } };
+    }
+    return npmPackagesCache.index;
+  }
+
   /* 逐日星标台账（data/cache/star-daily.json，采集器每轮写）：star 榜逐日趋势柱与窗口增量的【唯一来源】，
    * 两者同源同窗口，所以「行内增量 == 逐日柱加总 + 宽条」由构造成立。
    * 不再用星标环推：环一天只留一个点（同日覆盖），「两个日点的差」只能落在后一天，攒不出逐日形状；而且两个来源各算各的（线上实测 20/20 行的逐日加总都不等于行内增量）。 */
@@ -676,6 +698,7 @@ export function createApi({ root }) {
     const wantAll = params.get("fields") === "all";
     const releasesIndex = await loadReleases();
     const npmIndex = await loadNpmDownloads();
+    const npmExtra = await loadNpmPackages();
 
     const row = (n) => ({
       id: n.id,
@@ -1007,6 +1030,28 @@ export function createApi({ root }) {
       if (!npmByPkg.has(pkg)) npmByPkg.set(pkg, []);
       npmByPkg.get(pkg).push({ node: n, entry, downloads: entry.downloads });
     }
+    /* 子目录包（npm 反查发现）：并进同一张榜、一包一行，并标 subdir。
+       仓库根已经认到的包优先（同一行不重复）；官方内部模块与"非组合包"沿用同一道门槛。 */
+    const nodeById = new Map(nodes.map((n) => [n.id, n]));
+    let npmSubdirPackages = 0;
+    for (const [pkg, rec] of Object.entries(npmExtra.packages)) {
+      if (!rec || rec.status !== "ok" || typeof rec.downloads !== "number") continue;
+      if (npmByPkg.has(pkg)) continue;
+      const node = nodeById.get(String(rec.repoId ?? ""));
+      if (!node || node.archived || node.fork) continue;
+      if (pkg.startsWith("@deepseek-ai/")) {
+        npmSkippedOfficial += 1;
+        continue;
+      }
+      const extraRec = registry.packages[pkg];
+      const extraBundle = !!extraRec && (extraRec.isBundle === true || (Array.isArray(extraRec.dshKeys) && extraRec.dshKeys.length > 0));
+      if (registryKnown && !extraBundle) {
+        npmSkippedNotBundle += 1;
+        continue;
+      }
+      npmByPkg.set(pkg, [{ node, entry: rec, downloads: rec.downloads, subdir: true }]);
+      npmSubdirPackages += 1;
+    }
     let npmMergedClaimants = 0;
     const npmRows = [];
     for (const [pkg, claimants] of npmByPkg) {
@@ -1039,6 +1084,7 @@ export function createApi({ root }) {
         downloads: chosen.downloads,
         window: win,
         days: Array.isArray(chosen.entry.days) ? chosen.entry.days : null,
+        subdir: chosen.subdir === true,
       });
     }
     npmRows.sort((a, b) => b.downloads - a.downloads || (b.node.stars ?? 0) - (a.node.stars ?? 0));
@@ -1071,13 +1117,15 @@ export function createApi({ root }) {
         skippedOfficial: npmSkippedOfficial,
         skippedNotBundle: npmSkippedNotBundle,
         mergedClaimants: npmMergedClaimants,
+        subdirPackages: npmSubdirPackages,
         registryKnown,
       },
       note:
         "下载量 = npm 官方接口的真实区间计数（不估算、不平摊）。只有确认拿到数字的包能上榜（当前 " +
         npmRows.length + " 个）；未发布 / 没有 package.json / npm 查不到 / 接口暂时失败的一律不进榜 —— 缺数据不是 0。" +
         "只收确实是 DSH 组合包的包：已挡掉 " + npmSkippedOfficial + " 个官方内部模块、" + npmSkippedNotBundle + " 个非组合包；" +
-        "同一个包被多个仓库认领时只留一行（合并 " + npmMergedClaimants + " 条）。" +
+        "同一个包被多个仓库认领时只留一行（合并 " + npmMergedClaimants + " 条）；其中 " + npmSubdirPackages +
+        " 个是子目录包（仓库根没有 package.json，包住在仓库内某个目录）。" +
         (npmTopWindow ? " 本榜窗口 " + npmTopWindow.split("~")[0] + " ~ " + npmTopWindow.split("~")[1] + "。" : "") +
         " 窗口由采集时写入缓存的 npm 区间决定，可能与另两榜的 " + windowDays + " 个自然日不重合；" +
         "趋势柱画在本榜自己的那根横轴上（seriesAxis），不与另两榜混用。",
@@ -1089,6 +1137,9 @@ export function createApi({ root }) {
           downloads: r.downloads,
           npmPackage: r.package,
           npmWindow: r.window,
+          // 子目录包：前端据此标注，并可指到仓库里那个目录（packument 的 repository.directory）
+          npmSubdir: r.subdir || undefined,
+          npmDir: r.subdir ? (registry.packages[r.package]?.repositoryDirectory ?? null) : null,
           series: byDay ? npmAxis.map((d) => (byDay.has(d) ? byDay.get(d) : null)) : null,
           spans: [],
         };
@@ -1436,7 +1487,40 @@ export function createApi({ root }) {
     };
   }
 
-  return { load, search, searchIds, readmeStats, starDailyStats, status, ranking, categories, one, cardSvg, cardPage, publicNode, slim };
+  /* 哪些仓库「有 npm 包」——即与市场索引源重叠的那批，生态图给它们外圈套一层青绿光环。
+     只回 id 列表（两千来个 id 只有几十 KB），不回下载量数字。
+     状态不是 ok 的一律不算：no-package / unknown / error 都表示「没确认有包」，缺数据不是「有包」。 */
+  async function npmNodes() {
+    const npmIndex = await loadNpmDownloads();
+    const npmExtra = await loadNpmPackages();
+    const ids = [];
+    const seen = new Set();
+    for (const [id, entry] of Object.entries(npmIndex.repos)) {
+      if (!entry || entry.status !== "ok" || !entry.package) continue;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      ids.push(id);
+    }
+    const subdirIds = [];
+    for (const rec of Object.values(npmExtra.packages)) {
+      const id = rec && rec.status === "ok" ? String(rec.repoId ?? "") : "";
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      ids.push(id);
+      subdirIds.push(id);
+    }
+    ids.sort();
+    subdirIds.sort();
+    return {
+      updatedAt: npmIndex.updatedAt ?? npmExtra.updatedAt ?? null,
+      count: ids.length,
+      subdirCount: subdirIds.length,
+      ids,
+      subdirIds,
+    };
+  }
+
+  return { load, search, searchIds, readmeStats, starDailyStats, status, ranking, categories, one, cardSvg, cardPage, publicNode, slim, npmNodes };
 }
 
 /** API 自描述：给调用者一份可发现的端点清单 */
@@ -1450,6 +1534,7 @@ export function apiIndex(version) {
       { method: "GET", path: "/api/health", desc: "健康检查与数据概况（含 README 索引规模）" },
       { method: "GET", path: "/api/ranking?days=7&limit=50&fields=all&noise=all|hide|only", desc: "榜单：周更新热榜（本周发过 release 的项目，最多 50 行，含 updates / updatesSource / releases）+ 周 star 热榜（星标历史增量，最多 50 行；历史不足时如实返回实际窗口）+ 周 npm 下载热榜（npm 官方下载量真实计数，只收确认拿到数字的包；窗口取自采集时的 npm 区间，可能与另两榜不重合，见 boards.npm.window）。每行带 verdict（related/noise/manual）与 npm（周下载量可选列：status/package/downloads/window；缺省或失败为 unknown，不进排序）；noise=hide 排除已判定噪声，only 只看噪声，默认 all（只标注不过滤）" },
       { method: "GET", path: "/api/categories", desc: "扇区（功能分类）与细枝及各自数量" },
+      { method: "GET", path: "/api/npm-nodes", desc: "有 npm 包的仓库 id 列表（与市场索引源重叠的那批，供生态图画外圈光环用）；只回 id，不回数字" },
       { method: "GET", path: "/api/repos?q=&category=&subcategory=&tag=&language=&minStars=&archived=&noise=&sort=stars|pushed|created|name&limit=&offset=&fields=all", desc: "检索仓库（默认 20 条，最多 100 条）。行带 verdict；noise=hide|only 按三档判定过滤，默认 all 只标注" },
       { method: "GET", path: "/api/search?q=&limit=", desc: "紧凑检索：只回命中 id 与计数（含 README 正文命中）" },
       { method: "GET", path: "/api/repos/:owner/:name", desc: "单个仓库详情，含同作者/主题共现连线" },

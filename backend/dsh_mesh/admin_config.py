@@ -32,6 +32,8 @@ DEFAULT_COLLECTOR: dict = {
     "readmeMinStars": 1,
     "releasesBudget": 300,
     "npmBudget": 300,
+    "npmSearchBudget": 5000,  # 每轮 npm 反查最多处理多少条搜索结果（≈20 页；0 = 关闭）
+    "npmExtraBudget": 200,    # 每轮查多少个"子目录包"的 npm 下载量（0 = 关闭）
     "interval": 3600,     # 常驻模式轮询间隔（秒）
     "minRatio": 0.8,      # 低于现有索引的这个比例时拒绝覆盖前端数据
     "frontendLimit": 0,   # 0 = 不限
@@ -46,6 +48,8 @@ _COLLECTOR_RANGE: dict = {
     "readmeMinStars": ("int", 0, 1000000),
     "releasesBudget": ("int", 0, 100000),
     "npmBudget": ("int", 0, 100000),
+    "npmSearchBudget": ("int", 0, 100000),
+    "npmExtraBudget": ("int", 0, 100000),
     "interval": ("int", 60, 86400),
     "minRatio": ("float", 0, 1),
     "frontendLimit": ("int", 0, 1000000),

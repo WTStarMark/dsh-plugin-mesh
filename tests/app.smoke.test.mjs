@@ -103,7 +103,7 @@ class FakeNode {
   filter(pred) { return this.all.filter(pred); }
 }
 
-const ids = ["rail", "inspector", "snapshot", "loading", "tooltip", "hint", "telemetry", "lamp", "edge-types", "search", "search-clear", "palette", "toggle-rail", "toggle-dossier", "stage", "graph", "trophy", "ranking", "ranking-tabs", "ranking-body", "ranking-foot", "ranking-close", "index-source", "index-source-panel", "index-source-url", "index-source-copy"];
+const ids = ["rail", "inspector", "snapshot", "loading", "tooltip", "hint", "telemetry", "lamp", "edge-types", "search", "search-clear", "search-fan", "palette", "toggle-rail", "toggle-dossier", "stage", "graph", "trophy", "ranking", "ranking-tabs", "ranking-body", "ranking-foot", "ranking-close", "index-source", "index-source-panel", "index-source-url", "index-source-copy"];
 const registry = new Map(ids.map((id) => [id, new FakeNode(id === "graph" ? "canvas" : "div", id)]));
 // 榜单弹窗：真实的 tab / 遮罩是 HTML 里的子节点，桩里手动补上（否则点不到、渲染不出）
 const rankingTabs = [
@@ -349,20 +349,46 @@ test("过滤真的生效：关掉一个标签后命中数下降", () => {
   assert.match(hint.textContent, atFull);
 });
 
-test("搜索：输入即淡化过滤，回车选中星标最高的命中项", () => {
+test("搜索：命中少自动成图、命中多只高亮，回车选中星标最高的命中项", () => {
   const search = registry.get("search");
   search.value = "tauri";
   search.fire("input");
-  const m = hint.textContent.match(/命中 (\d+) \/ (\d+)/);
-  assert.ok(m && Number(m[1]) > 0 && Number(m[1]) < NODE_COUNT, "搜索应命中一部分节点，实际 " + hint.textContent);
+  // 命中 21 个（<100）→ 自动画成搜索扇形图，提示随之换成扇形图写法
+  const m = hint.textContent.match(/搜索「tauri」命中 (\d+) 个仓库/);
+  assert.ok(m && Number(m[1]) > 0 && Number(m[1]) < NODE_COUNT, "命中少时应自动成图，实际 " + hint.textContent);
   search.fire("keydown", { key: "Enter" });
   const h2 = inspector.find((n) => n.tagName === "h2");
   assert.ok(h2, "回车后检查器应展示选中的仓库");
   // 命中可能在仓库名，也可能在作者名（如 dsh-tauri/...），因此校验整块面板文本
   const panelText = inspector.all.map((n) => n.textContent).join(" ");
   assert.match(panelText, /tauri/i, "回车选中的仓库必须真的与查询词相关，实际=" + panelText.slice(0, 120));
+  // 宽查询：命中上千 → 不成图，只高亮（与"命中多不画放射线"同一个思路）
+  search.value = "dsh";
+  search.fire("input");
+  assert.match(hint.textContent, /当前命中 \d+ \/ \d+/, "命中多时应回到全景只做高亮：" + hint.textContent);
+  assert.ok(!/搜索「dsh」命中/.test(hint.textContent), "命中多时不该自动成图：" + hint.textContent);
   search.value = "";
   search.fire("input");
+  assert.match(hint.textContent, atFull, "清空搜索后应回到全图：" + hint.textContent);
+});
+
+test("搜索扇形图：命中少于 100 自动成图；手动点按钮可强制切换", () => {
+  const search = registry.get("search");
+  const fanBtn = registry.get("search-fan");
+  search.value = "openviking";
+  search.fire("input");
+  // 不 pump：提示与按钮文案都是同步更新的，而画一帧会把上一个用例遗留的选中态画成连线，
+  // 污染 drawCalls 这个全局计数器（下一条用例断言"未选中时一条都不画"）。
+  assert.match(hint.textContent, /搜索「openviking」命中 \d+ 个仓库/, "命中少时应自动成图：" + hint.textContent);
+  assert.match(hint.textContent, /圆心：deepseek-ai\/deepseek-harness/, "圆心必须是官方仓库");
+  assert.equal(fanBtn.textContent, "返回全图", "自动成图后按钮显示为返回入口");
+  fanBtn.fire("click"); // 手动退出：命中再少也听用户的
+  assert.ok(!/搜索「openviking」命中/.test(hint.textContent), "手动退出后不应再是成图态：" + hint.textContent);
+  assert.equal(fanBtn.textContent, "成图");
+  search.value = "";
+  search.fire("input");
+  assert.match(hint.textContent, atFull, "清空搜索后应回到全图：" + hint.textContent);
+  assert.equal(fanBtn.hidden, true, "清空查询后按钮隐藏");
 });
 
 test("连线不再常驻：未选中时一条都不画", () => {
@@ -957,6 +983,9 @@ test("v0.4.2 搜索：从圆心放射出指向命中仓库的直线，清空后�
   const widthStart = drawCalls.strokeWidths.length;
   search.value = "tauri";
   search.fire("input");
+  // 命中 21 个（<100）→ 新版会自动成图；这条用例测的是放射线，
+  // 所以先点「返回全图」手动退回全景，光束才会画出来（自动成图时每个节点都是命中，画线只会糊）。
+  registry.get("search-fan").fire("click");
   pump(30);
   const rays = drawCalls.lineTo - before;
   assert.ok(rays > 0, "搜索后应画出指向光束（lineTo），实际新增 " + rays);

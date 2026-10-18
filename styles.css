@@ -771,6 +771,12 @@ input[type="range"]::-moz-range-thumb {
   font-family: var(--font-code); font-size: 10.5px; color: var(--warn-ink);
   border: 1px solid var(--warn-line); border-radius: 999px; background: transparent;
 }
+/* 子目录包（仓库根没有 package.json，包住在仓库内某个目录）：中性标注，不是告警 */
+.rank-row .who .line .subdir {
+  flex: none; padding: 0 6px; line-height: 16px; white-space: nowrap;
+  font-family: var(--font-code); font-size: 10.5px; color: var(--label-2);
+  border: 1px solid var(--hairline); border-radius: 999px; background: transparent;
+}
 /* 副标题（owner · 类目）：只命中 .line 外的直接子 span，别盖住胶囊 */
 .rank-row .who > span {
   display: block; max-width: 100%; color: var(--label-3); font-size: 11px;

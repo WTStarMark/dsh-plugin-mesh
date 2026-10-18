@@ -144,6 +144,8 @@ export const DEFAULT_COLLECTOR = {
   readmeMinStars: 1,
   releasesBudget: 300,
   npmBudget: 300,
+  npmSearchBudget: 5000, // 每轮 npm 反查最多处理多少条搜索结果（≈20 页）
+  npmExtraBudget: 200, // 每轮查多少个子目录包的下载量
   interval: 3600, // 常驻模式的轮询间隔（秒）
   minRatio: 0.8, // 低于现有索引的这个比例时拒绝覆盖前端数据
   frontendLimit: 0, // 0 = 不限
@@ -158,6 +160,8 @@ const COLLECTOR_NUM = {
   readmeMinStars: { type: "int", min: 0, max: 1000000 },
   releasesBudget: { type: "int", min: 0, max: 100000 },
   npmBudget: { type: "int", min: 0, max: 100000 },
+  npmSearchBudget: { type: "int", min: 0, max: 100000 },
+  npmExtraBudget: { type: "int", min: 0, max: 100000 },
   interval: { type: "int", min: 60, max: 86400 },
   minRatio: { type: "float", min: 0, max: 1 },
   frontendLimit: { type: "int", min: 0, max: 1000000 },
@@ -173,6 +177,8 @@ export const COLLECTOR_FIELDS = [
   { key: "readmeMinStars", label: "README 星标门槛", unit: "星", hint: "只索引星标不低于它的仓库；0 = 全量。" },
   { key: "releasesBudget", label: "releases 预算", unit: "个/轮", hint: "每轮抓多少个仓库的 release（1 个 = 1 次 core 配额）。" },
   { key: "npmBudget", label: "npm 下载量预算", unit: "个/轮", hint: "每轮查多少个仓库的 npm 周下载量。" },
+  { key: "npmSearchBudget", label: "npm 反查预算", unit: "条/轮", hint: "每轮扫多少条 npm 搜索结果（250 条/页）；用来发现只发在 npm、住在仓库子目录里的插件。0 = 关闭。" },
+  { key: "npmExtraBudget", label: "子目录包预算", unit: "个/轮", hint: "每轮查多少个「反查发现的子目录包」的 npm 周下载量。0 = 关闭。" },
   { key: "interval", label: "轮询间隔", unit: "秒", hint: "常驻采集每轮之间等多久。" },
   { key: "minRatio", label: "最小覆盖率", unit: "比例", hint: "低于现有索引的这个比例时拒绝覆盖前端数据（防手滑清库）。" },
   { key: "frontendLimit", label: "前端节点上限", unit: "个", hint: "前端快照保留多少节点；0 = 不限。" },

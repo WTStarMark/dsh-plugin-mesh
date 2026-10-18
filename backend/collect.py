@@ -32,6 +32,8 @@ from dsh_mesh.config import (
     SEGMENT_STATE,
     SNAPSHOT_DIR,
     NPM_DOWNLOADS_CACHE,
+    NPM_PACKAGES_CACHE,
+    NPM_SEARCH_CACHE,
     RELEASES_CACHE,
     STAR_DAILY,
     STAR_HISTORY,
@@ -41,6 +43,8 @@ from dsh_mesh.config import (
 from dsh_mesh.readmes import ReadmeIndex, fetch_batch as fetch_readmes
 from dsh_mesh import releases as rel
 from dsh_mesh import npm_downloads as npm
+from dsh_mesh import npm_packages
+from dsh_mesh import npm_search
 from dsh_mesh.status import STATUS_FILE, next_run_at, write_status
 from dsh_mesh.segments import SegmentStore, segment_query
 from dsh_mesh.github import GitHubClient, load_token
@@ -50,6 +54,8 @@ RELEASES_BUDGET = 300  # 每轮默认抓 300 个仓库的 releases（core 配额
 RELEASES_INTERVAL = 0.12  # 每次请求之间歇一下，别撞二级限流
 NPM_BUDGET = 300  # 每轮最多处理多少个仓库的 npm 下载量（含重读 package.json + 刷 last-week）
 NPM_INTERVAL = 0.05  # npm 接口不占 GitHub 配额，但仍歇一下避免连不上
+NPM_SEARCH_BUDGET = 5000  # 每轮 npm 反查最多处理多少条搜索结果（≈20 页 = 5000 条；0 = 关闭）
+NPM_EXTRA_BUDGET = 200    # 每轮查多少个"子目录包"的 npm 周下载量（0 = 关闭）
 
 
 def tag_totals_from(state: dict) -> dict[str, int]:
@@ -464,6 +470,100 @@ def fetch_npm_safe(args, mesh: dict, log) -> dict:
         return {"enabled": True, "error": str(exc)[:120]}
 
 
+def fetch_npm_search_safe(args, log) -> dict:
+    """跑 npm 反查发现，但永不抛异常：这是一条可选的新发现通道，失败不该让整轮采集失败。"""
+    try:
+        return fetch_npm_search(args, log)
+    except Exception as exc:  # noqa: BLE001 - 与 fetch_npm_safe 同口径
+        log("⚠ npm 反查本轮失败（不阻塞其它产出）：" + str(exc)[:120])
+        return {"enabled": True, "error": str(exc)[:120]}
+
+
+def fetch_npm_search(args, log) -> dict:
+    """按关键词扫 npm 搜索接口，把「包 → 仓库」落进 data/cache/npm-search.json（按预算续扫）。
+
+    只做发现与落盘：不判定相关性、不动 mesh.json / npm-downloads.json。
+    离线模式（--from-raw / --from-store）与 dry-run 一律跳过 —— 测试与 CI 绝不能因此联网。
+    """
+    budget = int(getattr(args, "npm_search_budget", 0) or 0)
+    if budget <= 0 or args.dry_run or args.from_raw or getattr(args, "from_store", False):
+        return {"enabled": False, "budget": budget}
+    payload = npm_search.load_cache(NPM_SEARCH_CACHE)
+    stats = npm_search.sweep(payload, budget=budget, log=log, sleep=time.sleep)
+    size = npm_search.save_cache(payload, NPM_SEARCH_CACHE)
+    return {
+        "enabled": True,
+        "budget": budget,
+        "pages": stats["pages"],
+        "items": stats["items"],
+        "added": stats["added"],
+        "skippedNoRepo": stats["skippedNoRepo"],
+        "packages": payload["count"],
+        "bytes": size,
+        "done": stats["done"],
+        "settled": stats["settled"],
+        "totals": stats["totals"],
+        "error": stats["error"],
+    }
+
+
+def fetch_npm_packages_safe(args, mesh: dict, log) -> dict:
+    """跑「子目录包」下载量采集，但永不抛异常（与其它可选列同口径）。"""
+    try:
+        return fetch_npm_packages(args, mesh, log)
+    except Exception as exc:  # noqa: BLE001 - 可选列失败不该让整轮采集失败
+        log("⚠ npm 子目录包本轮失败（不阻塞其它产出）：" + str(exc)[:120])
+        return {"enabled": True, "error": str(exc)[:120]}
+
+
+def fetch_npm_packages(args, mesh: dict, log) -> dict:
+    """给「反查发现、仓库根 package.json 认不出」的包查真实下载量，写 data/cache/npm-packages.json。
+
+    候选来自 data/cache/npm-search.json（npm 反查）∩ 图里的仓库；每个包只花 1 次 npm 请求。
+    离线模式与 dry-run 跳过；取不到下载量一律按状态如实记（绝不写 0）。
+    """
+    budget = int(getattr(args, "npm_extra_budget", 0) or 0)
+    if budget <= 0 or args.dry_run or args.from_raw or getattr(args, "from_store", False):
+        return {"enabled": False, "budget": budget}
+    payload = npm_packages.load(NPM_PACKAGES_CACHE)
+    search = npm_search.load_cache(NPM_SEARCH_CACHE)
+    downloads = npm.load_downloads(NPM_DOWNLOADS_CACHE)
+    picked = npm_packages.pick_candidates(payload, search, downloads, mesh.get("nodes") or [], limit=budget)
+    fetched = failed = 0
+    for item in picked:
+        try:
+            hit = npm.fetch_npm_downloads(item["package"], sleep=time.sleep)
+        except Exception as err:  # noqa: BLE001 - 单个包失败就跳过，下一轮重试
+            failed += 1
+            log("npm 子目录包：" + item["package"] + " 查询失败（跳过）：" + str(err)[:80])
+            continue
+        payload.setdefault("packages", {})[item["package"]] = {
+            "package": item["package"],
+            "repoId": item["repoId"],
+            "repoKey": item["repoKey"],
+            "status": hit["status"],
+            "downloads": hit.get("downloads"),
+            "window": hit.get("window"),
+            "days": hit.get("days"),
+            "at": utcnow(),
+        }
+        fetched += 1
+    size = npm_packages.save(payload, NPM_PACKAGES_CACHE)
+    log(
+        "npm 子目录包：本轮查 " + str(len(picked)) + " 个（成功 " + str(fetched) + " / 失败 " + str(failed)
+        + "）· 累计 " + str(len(payload.get("packages") or {})) + " 个 · 落盘 " + str(size // 1024) + "KB"
+    )
+    return {
+        "enabled": True,
+        "budget": budget,
+        "picked": len(picked),
+        "fetched": fetched,
+        "failed": failed,
+        "packages": len(payload.get("packages") or {}),
+        "bytes": size,
+    }
+
+
 def fetch_npm_downloads(args, mesh: dict, log) -> dict:
     """按预算解析根 package.json + 刷 npm last-week，写回 data/cache/npm-downloads.json。
     离线模式与 dry-run 跳过，测试因此完全不碰网络。取不到 / 失败一律记 unknown，不写 0。"""
@@ -814,6 +914,13 @@ def run_once(args, log) -> dict:
     # npm 周下载量：可选列；写 data/cache/npm-downloads.json，失败不阻塞前端数据
     summary["npmDownloads"] = fetch_npm_safe(args, mesh, log)
 
+    # npm 反查发现：只写 data/cache/npm-search.json（包 → 仓库），给「插件住在仓库子目录」兜底；
+    # 消费端（市场索引 / npm 榜）在后面阶段接入，本轮只攒数据。
+    summary["npmSearch"] = fetch_npm_search_safe(args, log)
+
+    # 子目录包下载量：反查发现里「仓库根 package.json 认不出」的那批，单独查（按包名存）
+    summary["npmPackages"] = fetch_npm_packages_safe(args, mesh, log)
+
     limit_for_frontend(mesh, args.frontend_limit)
     mesh["meta"]["note"] = (
         f"每小时自动更新一次的快照（{utcnow()}）。"
@@ -871,6 +978,8 @@ COLLECTOR_ARG_MAP = {
     "readme_min_stars": "readmeMinStars",
     "releases_budget": "releasesBudget",
     "npm_budget": "npmBudget",
+    "npm_search_budget": "npmSearchBudget",
+    "npm_extra_budget": "npmExtraBudget",
     "interval": "interval",
     "min_ratio": "minRatio",
     "frontend_limit": "frontendLimit",
@@ -933,6 +1042,18 @@ def main(argv=None) -> int:
         type=int,
         default=None,
         help="每轮最多处理多少个仓库的 npm 周下载量（默认：读后台配置；0 = 关闭）",
+    )
+    parser.add_argument(
+        "--npm-search-budget",
+        type=int,
+        default=None,
+        help="每轮 npm 反查最多处理多少条搜索结果（默认：读后台配置；0 = 关闭）",
+    )
+    parser.add_argument(
+        "--npm-extra-budget",
+        type=int,
+        default=None,
+        help="每轮查多少个「子目录包」的 npm 周下载量（默认：读后台配置；0 = 关闭）",
     )
     parser.add_argument("--from-raw", action="store_true", help="用 data/sample-raw.json 离线复算，不发网络请求")
     parser.add_argument("--from-store", action="store_true", help="用累积索引 data/cache/repos.json 离线重建前端契约（改规则后立刻重算，不联网）")

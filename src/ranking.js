@@ -207,6 +207,12 @@ export function createRankingBoard({ button, modal, tabs, body, close, fetcher, 
       const newest = versions[0];
       line.append(el("span", "ver" + (newest.pre ? " pre" : ""), newest.tag || "—"));
     }
+    // 子目录包：仓库根没有 package.json，包住在仓库内某个目录（npm 反查发现的）
+    if (item.npmSubdir) {
+      const chip = el("span", "subdir", "子目录包");
+      chip.title = "这个包住在仓库的子目录里" + (item.npmDir ? "：" + item.npmDir : "") + "（仓库根没有 package.json）";
+      line.append(chip);
+    }
     // 周下载：和噪声/版本同一行的胶囊，不另开列、不挤 metric（可选列，默认关）
     // npm 榜自己就是按下载量排的，指标列已经写着数字，这里不再重复挂一枚胶囊
     if (showNpm && tab !== "npm") {

@@ -32,7 +32,9 @@ const PACKUMENT_MAX_BYTES = 6 * 1024 * 1024;
 const REGISTRY_TTL_MS = 24 * 3600 * 1000;
 /* 缓存格式版本：改了"怎么读 packument"就必须改这个数，否则老记录会被当新记录复用
  * （线上实测：把 devDependencies 纳入判定后，缓存里的旧记录让 @xmanrui/dsh-im 继续被漏掉）。 */
-const CACHE_VERSION = 3;
+/* 4 = 新增 repositoryDirectory（子目录包在仓库里的位置，来自 packument 的 repository.directory）；
+ * 老记录没有这个字段，升版本会让它们重抓一次 —— 这是"改了怎么读 packument 就升版本"的既定规矩。 */
+const CACHE_VERSION = 4;
 const VERSIONS_KEPT = 5;
 const DSH_SCOPE = "@deepseek-ai/";
 
@@ -62,11 +64,41 @@ const toUnixSeconds = (iso) => {
 const SEMVER = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+[0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*)?$/;
 
 /**
- * 描述开头的人气前缀：只放两个数字（★ 星标 · 周下载），不放「周下载」这几个字。
+ * 描述开头的人气前缀：只放数字（★ 星标 · 周下载；星标不足 10 时只放周下载），不放「周下载」这几个字。
  * 理由见下面 entry.description 处的注释：DSH 把 description 当检索字段，中文词会被切进每个插件的检索词里。
  */
+export const MIN_STARS_FOR_BADGE = 10;
+export const FRESH_RELEASE_DAYS = 7;
+
+/** 「近 7 天有新版」：取这个包最新一次 npm 发布时间（readPackument 按发布时间倒序取前 5）。
+ *  实测 80% 的条目 7 天内没有新版本 —— 这个标签能把真正在维护的挑出来。 */
+export function isFreshRelease(versions, nowSec = Date.now() / 1000) {
+  if (!Array.isArray(versions) || !versions.length) return false;
+  const latest = Math.max(...versions.map((v) => Number(v?.ts) || 0));
+  return latest > 0 && nowSec - latest < FRESH_RELEASE_DAYS * 86400;
+}
+
+/* 关键词兜底：关键词为空的条目在市场搜索里几乎等于不存在（实测 917/6648 条）。
+   索引里的条目都已经过「声明 dsh.bundle 或依赖里有 @deepseek-ai/*」的筛选，
+   补核心词是如实描述，不是刷词。 */
+const CORE_KEYWORDS = ["deepseek-harness", "dsh", "dsh-plugin"];
+
+export function keywordsOf(node, pkg) {
+  const topics = Array.isArray(node?.topics) ? node.topics.map(String).filter(Boolean) : [];
+  if (topics.length) return topics.slice(0, 12);
+  const tokens = String(pkg || "")
+    .replace(/^@[^/]+\//u, "")
+    .split(/[^a-z0-9]+/iu)
+    .filter((t) => t.length >= 3);
+  return [...new Set([...CORE_KEYWORDS, ...tokens])].slice(0, 12);
+}
+
 export function toneOf(stars, hasDownloads, downloads) {
-  return "★" + shortNumber(stars) + " · " + (hasDownloads ? shortNumber(downloads) : "—");
+  const dl = hasDownloads ? shortNumber(downloads) : "—";
+  const n = Number(stars) || 0;
+  // 星标不足 MIN_STARS_FOR_BADGE 就不写 ★：全索引 38% 的条目是 0 星，
+  // 以「★0」开头等于在卡片第一行写「没人气」；只留下载量（真实使用量）更中性。
+  return n >= MIN_STARS_FOR_BADGE ? "★" + shortNumber(n) + " · " + dl : dl;
 }
 
 /** 版本条目：不写 engines —— DSH 校验器对它是 optional(...) ?? {}，缺失自动补空对象，写上是纯体积。 */
@@ -168,8 +200,13 @@ function readPackument(doc) {
   const isBundle = !!(bundle && typeof bundle === "object" && typeof bundle.patch === "string" && bundle.patch.trim());
   const hasClient = !!(latestFull.dsh && typeof latestFull.dsh === "object" && latestFull.dsh.client);
   const repository = typeof latestFull.repository === "string" ? latestFull.repository : latestFull.repository?.url ?? null;
+  // 子目录包（monorepo 里的插件）在 npm 元数据里声明了自己住在仓库的哪个目录
+  const repositoryDirectory =
+    latestFull.repository && typeof latestFull.repository === "object" && typeof latestFull.repository.directory === "string"
+      ? latestFull.repository.directory
+      : null;
   const author = typeof latestFull.author === "string" ? latestFull.author : latestFull.author?.name ?? null;
-  return { versions: picked, dshKeys, repository, author, latestTag, isBundle, hasClient, bundlePatch: isBundle ? bundle.patch : null };
+  return { versions: picked, dshKeys, repository, repositoryDirectory, author, latestTag, isBundle, hasClient, bundlePatch: isBundle ? bundle.patch : null };
 }
 
 async function loadRegistryCache() {
@@ -177,6 +214,43 @@ async function loadRegistryCache() {
   const cached = readJson(path, null);
   if (cached && cached.packages && typeof cached.packages === "object") return { path, cache: cached };
   return { path, cache: { updatedAt: null, packages: {} } };
+}
+
+/**
+ * 候选并集：仓库根包（npm-downloads.json）+ 子目录包（npm-packages.json，npm 反查发现）。
+ * 子目录包 = "仓库根没有 package.json、插件住在仓库内某个目录"的那批 —— 不并进来它们永远不会
+ * 出现在市场索引里（volcengine/OpenViking 的 examples/dsh-memory-plugin 就是这一类）。
+ * 两条来源都只收「状态 ok 且下载量已知」的，且仓库必须还在图里（归档的不要）。
+ */
+export function collectCandidates(downloads, extra, byId) {
+  const candidates = [];
+  for (const [repoId, entry] of Object.entries(downloads?.repos ?? {})) {
+    if (entry?.status !== "ok" || !entry.package) continue;
+    const node = byId.get(repoId);
+    if (!node || node.archived) continue;
+    candidates.push({
+      repoId,
+      node,
+      pkg: String(entry.package),
+      downloads: Number(entry.downloads) || 0,
+      // 有包名但没拿到下载量（新发布的包 npm 还没统计）——展示时要写「—」，不能写成 0
+      hasDownloads: typeof entry.downloads === "number",
+    });
+  }
+  for (const [pkgName, rec] of Object.entries(extra?.packages ?? {})) {
+    if (!pkgName || !rec || rec.status !== "ok") continue;
+    const node = byId.get(String(rec.repoId ?? ""));
+    if (!node || node.archived) continue;
+    candidates.push({
+      repoId: node.id,
+      node,
+      pkg: String(pkgName),
+      downloads: Number(rec.downloads) || 0,
+      hasDownloads: typeof rec.downloads === "number",
+      subdir: true,
+    });
+  }
+  return candidates;
 }
 
 async function main() {
@@ -190,19 +264,16 @@ async function main() {
   if (!downloads?.repos) throw new Error("读不到 " + npmCachePath);
 
   const byId = new Map(mesh.nodes.map((n) => [n.id, n]));
-  const candidates = [];
-  for (const [repoId, entry] of Object.entries(downloads.repos)) {
-    if (entry?.status !== "ok" || !entry.package) continue;
-    const node = byId.get(repoId);
-    if (!node || node.archived) continue;
-    candidates.push({
-      repoId,
-      node,
-      pkg: String(entry.package),
-      downloads: Number(entry.downloads) || 0,
-      // 有包名但没拿到下载量（新发布的包 npm 还没统计）——展示时要写「—」，不能写成 0
-      hasDownloads: typeof entry.downloads === "number",
-    });
+  // 子目录包缓存（采集器的可选产物）：缺失/损坏都当空表，不影响主流程
+  const extra = readJson(resolve(ROOT, argOf("npm-packages", "data/cache/npm-packages.json")), null);
+  const candidates = collectCandidates(downloads, extra, byId);
+  /* 包自己的 npm 描述（npm 反查缓存里就有，不必为此重抓 packument）：
+     子目录包的母仓库描述常常讲的是整个产品（OpenViking = "上下文数据库"），不是这个插件。 */
+  const searchCache = readJson(resolve(ROOT, argOf("npm-search", "data/cache/npm-search.json")), null);
+  const pkgDescriptions = new Map();
+  for (const [name, rec] of Object.entries(searchCache?.packages ?? {})) {
+    const text = typeof rec?.description === "string" ? rec.description.trim() : "";
+    if (text) pkgDescriptions.set(name, text);
   }
   /* 同一个 npm 包常被「原仓库 + 一堆复刻」同时认领（远端实测：9080 个候选里 2142 个重名）。
    * 索引规定包名唯一，所以必须挑一个当门面 —— 挑法：优先非复刻 → 星标多 → 下载量多 → 仓库名。 */
@@ -291,6 +362,11 @@ async function main() {
   labels.set("dsh-bundle", { title: { en: "DSH bundle", zh: "DSH 组合包" } });
   labels.set("dsh-bundle-unconfirmed", { title: { en: "Likely bundle", zh: "疑似组合包" } });
   labels.set("has-client", { title: { en: "Has UI", zh: "带界面" } });
+  labels.set("recent-release", { title: { en: "Updated this week", zh: "近 7 天有新版" } });
+  labels.set("subdir-package", { title: { en: "Bundle in subdir", zh: "仓库内子包" } });
+  /* 行动号召（CTA）：每个条目都挂，提醒用户去仓库点 Star。
+   * 注意两个已知代价：① 这枚胶囊很长（12 个汉字 + Star），会把标题挤窄；② 若标签文案进检索字段，会命中全部条目。 */
+  labels.set("star-cta", { title: { en: "Star it to cheer the author on", zh: "点个Star鼓励对应作者吧" } });
 
   const plugins = [];
   const skipReasons = new Map();
@@ -333,6 +409,7 @@ async function main() {
     if (claimants.length > 1) mergedClaimants += claimants.length - 1;
     const node = chosen.node;
     const repoUrl = typeof node.htmlUrl === "string" && /^https:\/\/github\.com\/[^/?#]+\/[^/?#]+$/u.test(node.htmlUrl) ? node.htmlUrl : null;
+    const freshRelease = isFreshRelease(rec.versions);
     const entry = {
       name: pkg,
       title: node.name && node.name !== pkg ? node.name : undefined,
@@ -349,7 +426,9 @@ async function main() {
        * 看到"人气"的办法，所以保留数字、去掉中文词。数字的含义写在索引级 description 里（那段不进检索）。 */
       description: (() => {
         const tone = toneOf(node.stars, chosen.hasDownloads, chosen.downloads);
-        const body = typeof node.description === "string" ? node.description.trim() : "";
+        // 子目录包（插件住在仓库子目录）优先用包自己的描述：母仓库描述讲的是整个产品，不是插件本身
+        const own = chosen.subdir ? pkgDescriptions.get(pkg) ?? "" : "";
+        const body = own || (typeof node.description === "string" ? node.description.trim() : "");
         return body ? tone + " —— " + body : tone;
       })(),
       icon: typeof node.avatar === "string" && node.avatar.startsWith("https://") ? node.avatar : undefined,
@@ -357,10 +436,13 @@ async function main() {
       repository: repoUrl ? { url: repoUrl } : undefined,
       metadata: {
         category: categories.has(node.category) ? node.category : undefined,
-        keywords: Array.isArray(node.topics) ? node.topics.slice(0, 12).map(String) : [],
+        keywords: keywordsOf(node, pkg),
         labels: [
           rec.isBundle ? "dsh-bundle" : "dsh-bundle-unconfirmed",
           ...(rec.hasClient ? ["has-client"] : []),
+          ...(freshRelease ? ["recent-release"] : []),
+          ...(chosen.subdir ? ["subdir-package"] : []),
+          "star-cta", // 行动号召：所有条目都挂（用户要求）
         ],
         sortKeys: { stars: Number(node.stars) || 0, downloads: chosen.downloads },
       },
@@ -393,8 +475,8 @@ async function main() {
     format: 1,
     title: { en: "DSH Plugin Ecosystem · " + plugins.length, zh: "DSH 插件生态图 · " + plugins.length },
     description: {
-      en: "Installable DSH plugin bundles catalogued by the dsh-plugin-mesh ecosystem graph. The two numbers at the start of a description are GitHub stars and weekly npm downloads (— when npm has no figure yet).",
-      zh: "由 dsh-plugin-mesh 生态图整理的可安装 DSH 插件组合包。每条描述开头的两个数字是星标数与周 npm 下载量（显示「—」表示 npm 还没统计到）。",
+      en: "Installable DSH plugin bundles catalogued by the dsh-plugin-mesh ecosystem graph. A description starts with GitHub stars (shown once the repo has at least 10) and weekly npm downloads (— when npm has no figure yet).",
+      zh: "由 dsh-plugin-mesh 生态图整理的可安装 DSH 插件组合包。描述开头是星标数与周 npm 下载量（星标不足 10 的只显示下载量；显示「—」表示 npm 还没统计到）。",
     },
     metadata: {
       categories: declaredCategories,

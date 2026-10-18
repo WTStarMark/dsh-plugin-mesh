@@ -26,7 +26,7 @@ const FRESH_LIGHT = {
     "--board-npm": "#0b8375",
     "--shadow": "0 8px 24px rgba(23,66,124,.10)",
   },
-  canvas: { bg: "#f6faff", ink: "#0f2540", dim: "#4a6b90", faint: "#7f9dbd", accent: "#2f7df6", warn: "#e08a00", ball: "#ffffff", text: "#000000" },
+  canvas: { bg: "#f6faff", ink: "#0f2540", dim: "#4a6b90", faint: "#7f9dbd", accent: "#2f7df6", warn: "#e08a00", ball: "#ffffff", text: "#000000", npm: "#0b8375" },
   groups: ["#2f7df6", "#4f9bff", "#1f5fd0", "#6db6ff", "#3f8ae0", "#57c7f0", "#2aa8d8", "#7fa8f0", "#1b4fa8", "#8ed0ff", "#4d6ff0", "#26bec0",
     "#0f8bd0", "#5aa8e8", "#2c6fd6", "#79c2f2", "#1a7fb8", "#4a9de0", "#3ec4d4", "#6f9ae8", "#2560b8", "#9ad8f5", "#3b7be0", "#2fb4c8"],
 };
@@ -52,7 +52,7 @@ const FRESH_DARK = {
     "--board-npm": "#3fd0bd",
     "--shadow": "0 10px 28px rgba(0,0,0,.42)",
   },
-  canvas: { bg: "#0a1524", ink: "#eaf3ff", dim: "#a9c3de", faint: "#7d97b3", accent: "#5a9dff", warn: "#f0a83c", ball: "#0a0e13", text: "#ffffff" },
+  canvas: { bg: "#0a1524", ink: "#eaf3ff", dim: "#a9c3de", faint: "#7d97b3", accent: "#5a9dff", warn: "#f0a83c", ball: "#0a0e13", text: "#ffffff", npm: "#3fd0bd" },
   groups: ["#5a9dff", "#7ab8ff", "#4f8ef7", "#9fd4ff", "#6fb6f5", "#6fd3f0", "#4fc4e8", "#9db8ff", "#7f9cf5", "#a8e0ff", "#6f8ffb", "#5fd8d8",
     "#4fb0ff", "#7fc8ff", "#3f8fe8", "#a8d8ff", "#5fc8e8", "#8fbcff", "#6fd8f0", "#4fa8e0", "#9fc8ff", "#bfe4ff", "#5f9fff", "#7fe0f0"],
 };
@@ -79,7 +79,7 @@ const ROUGE_LIGHT = {
     "--board-npm": "#0d7d70",
     "--shadow": "0 8px 24px rgba(120,40,80,.10)",
   },
-  canvas: { bg: "#fff7fa", ink: "#3d1526", dim: "#8a5570", faint: "#b98aa3", accent: "#e8608f", warn: "#d98200", ball: "#ffffff", text: "#000000" },
+  canvas: { bg: "#fff7fa", ink: "#3d1526", dim: "#8a5570", faint: "#b98aa3", accent: "#e8608f", warn: "#d98200", ball: "#ffffff", text: "#000000", npm: "#0d7d70" },
   groups: ["#e8608f", "#f07fa8", "#d94f7f", "#f2a0bd", "#e0709a", "#c86fae", "#b45f9e", "#f5b8cf", "#d98cb0", "#a8557f", "#ef8fb0", "#c9809f",
     "#d9557f", "#e87fa8", "#c44f8f", "#f2a8c8", "#d4708f", "#b8609f", "#c98fb8", "#e8a0c0", "#b8578f", "#f0c0d8", "#dd7fa8", "#bf6f9f"],
 };
@@ -105,7 +105,7 @@ const ROUGE_DARK = {
     "--board-npm": "#4ad3c0",
     "--shadow": "0 10px 28px rgba(0,0,0,.42)",
   },
-  canvas: { bg: "#1a0f16", ink: "#fdeaf3", dim: "#d9aec4", faint: "#b0869c", accent: "#ff7fae", warn: "#f0a83c", ball: "#160f14", text: "#ffffff" },
+  canvas: { bg: "#1a0f16", ink: "#fdeaf3", dim: "#d9aec4", faint: "#b0869c", accent: "#ff7fae", warn: "#f0a83c", ball: "#160f14", text: "#ffffff", npm: "#4ad3c0" },
   groups: ["#ff7fae", "#ff9dc0", "#f56a97", "#ffb8d2", "#ff8fb5", "#e58fc4", "#d47ab5", "#ffc9dd", "#f0a3c0", "#c4709a", "#ffa0c0", "#e09fb5",
     "#ff6f9f", "#ff8fb8", "#f05f9f", "#ffb0cf", "#ff9fc0", "#e87fb8", "#ffa8d0", "#d98fb0", "#ff7fb0", "#ffc8e0", "#f590b8", "#e58fc0"],
 };

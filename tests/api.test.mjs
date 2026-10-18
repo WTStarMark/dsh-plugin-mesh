@@ -468,6 +468,109 @@ test("npm 榜：只收确实是 DSH 组合包的包，同名只留一行，官�
   }
 });
 
+test("npm 光环名单：只收确认有包（status=ok）的仓库，并带上反查发现的子目录包", async () => {
+  const nowIso = new Date().toISOString();
+  const tmp = await mkdtemp(join(tmpdir(), "mesh-npmnodes-"));
+  try {
+    await mkdir(join(tmp, "data", "cache"), { recursive: true });
+    await writeFile(
+      join(tmp, "data", "mesh.json"),
+      JSON.stringify({ meta: { generatedAt: nowIso }, tags: [], clusters: [], hubs: [], edges: [], nodes: [] }),
+    );
+    await writeFile(
+      join(tmp, "data", "cache", "npm-downloads.json"),
+      JSON.stringify({
+        updatedAt: nowIso,
+        repos: {
+          "a/ok": { status: "ok", package: "pkg-a", downloads: 3 },
+          "b/none": { status: "no-package", package: null },
+          "c/err": { status: "error", package: "pkg-c" },
+        },
+      }),
+    );
+    await writeFile(
+      join(tmp, "data", "cache", "npm-packages.json"),
+      JSON.stringify({
+        updatedAt: nowIso,
+        packages: {
+          "@openviking/dsh-memory-plugin": { status: "ok", repoId: "volcengine/OpenViking", downloads: 6601 },
+          "bad-pkg": { status: "error", repoId: "x/y" },
+        },
+      }),
+    );
+    const local = createApi({ root: tmp });
+    const out = await local.npmNodes();
+    assert.deepEqual(out.ids, ["a/ok", "volcengine/OpenViking"], "no-package / error 都不算「有包」");
+    assert.deepEqual(out.subdirIds, ["volcengine/OpenViking"], "子目录包要单独列出来");
+    assert.equal(out.count, 2);
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("npm 榜并进子目录包：仓库根没有 package.json 也能上榜，并标出它在仓库里的目录", async () => {
+  // 真实案例：volcengine/OpenViking 根目录没有 package.json（缓存里是 no-package），
+  // 官方插件住在 examples/dsh-memory-plugin —— 靠 npm 反查发现的那批就走这条并集路径。
+  const nowIso = new Date().toISOString();
+  const tmp = await mkdtemp(join(tmpdir(), "mesh-subdir-"));
+  try {
+    await mkdir(join(tmp, "data", "cache"), { recursive: true });
+    await writeFile(
+      join(tmp, "data", "mesh.json"),
+      JSON.stringify({
+        meta: { generatedAt: nowIso },
+        tags: [], clusters: [], hubs: [], edges: [],
+        nodes: [{
+          id: "volcengine/OpenViking", name: "OpenViking", owner: "volcengine", stars: 40186,
+          htmlUrl: "https://github.com/volcengine/OpenViking", pushedAt: nowIso,
+          archived: false, fork: false, matchedTags: ["dsh-plugin"], topics: [],
+        }],
+      }),
+    );
+    await writeFile(
+      join(tmp, "data", "cache", "npm-downloads.json"),
+      JSON.stringify({ updatedAt: nowIso, repos: { "volcengine/OpenViking": { status: "no-package", package: null, downloads: null } } }),
+    );
+    await writeFile(
+      join(tmp, "data", "cache", "npm-packages.json"),
+      JSON.stringify({
+        updatedAt: nowIso,
+        packages: {
+          "@openviking/dsh-memory-plugin": {
+            package: "@openviking/dsh-memory-plugin", repoId: "volcengine/OpenViking", repoKey: "volcengine/openviking",
+            status: "ok", downloads: 1234, window: { start: "2026-10-06", end: "2026-10-12" },
+            days: [{ day: "2026-10-06", downloads: 1234 }], at: nowIso,
+          },
+        },
+      }),
+    );
+    await writeFile(
+      join(tmp, "data", "cache", "npm-registry.json"),
+      JSON.stringify({
+        updatedAt: nowIso,
+        packages: {
+          "@openviking/dsh-memory-plugin": {
+            isBundle: true, dshKeys: ["@deepseek-ai/dsh-llm"],
+            repository: "https://github.com/volcengine/OpenViking",
+            repositoryDirectory: "examples/dsh-memory-plugin",
+          },
+        },
+      }),
+    );
+    const local = createApi({ root: tmp });
+    const board = (await local.ranking(new URLSearchParams("limit=10"))).boards.npm;
+    assert.equal(board.total, 1, "子目录包应该成一行");
+    assert.equal(board.items[0].npmPackage, "@openviking/dsh-memory-plugin");
+    assert.equal(board.items[0].id, "volcengine/OpenViking", "行属于它所在的那个仓库节点");
+    assert.equal(board.items[0].npmSubdir, true, "要标出这是子目录包");
+    assert.equal(board.items[0].npmDir, "examples/dsh-memory-plugin", "要能指到仓库里的目录");
+    assert.equal(board.coverage.subdirPackages, 1);
+    assert.ok(board.note.includes("子目录包"), "口径要写进 note：" + board.note);
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("周更新热榜：窗口与横轴对齐（最左那天的版本必须被画出来）", async () => {
   // 复现过的线上 bug：窗口按"现在往前 7x24 小时"（起点比横轴早一天），
   // 于是最早那天的版本被算进总数却不画柱子（实测第 5 行 12 个版本 vs 柱子和 6）。

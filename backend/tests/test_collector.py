@@ -26,6 +26,8 @@ sys.path.insert(0, str(BACKEND))
 from dsh_mesh import snapshot as snap  # noqa: E402
 from dsh_mesh import releases as rel  # noqa: E402
 from dsh_mesh import npm_downloads as npm  # noqa: E402
+from dsh_mesh import npm_packages as npmp  # noqa: E402
+from dsh_mesh import npm_search as npms  # noqa: E402
 from dsh_mesh import admin_config as admin_cfg  # noqa: E402
 from dsh_mesh.build import build_mesh, limit_for_frontend, relevance_score  # noqa: E402
 from dsh_mesh import build as build_mod  # noqa: E402
@@ -2692,6 +2694,267 @@ class EcosystemSourceTest(unittest.TestCase):
             self.assertEqual(admin_cfg.ecosystem_path(self.curated), self.curated, "显式指定的清单不能被管理副本插队")
             eco = build_mod.load_ecosystem(self.curated)
             self.assertIn("curated/base", eco)
+
+
+class NpmSearchTest(unittest.TestCase):
+    """npm 反查发现：分页、预算、断点、容错。
+
+    关键词池是混杂池（dsh 也可能是别的缩写），本模块只负责"如实抓到包 → 仓库"，
+    精度过滤留给消费端复用市场索引那套判据 —— 所以这里断言的都是"抓没抓对、断没断对"。
+    """
+
+    class _Resp:
+        def __init__(self, body: bytes):
+            self._body = body
+
+        def read(self):
+            return self._body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    @staticmethod
+    def _pkg(name: str, repo: str) -> dict:
+        return {
+            "package": {
+                "name": name,
+                "version": "1.0.0",
+                "description": "d",
+                "keywords": ["dsh"],
+                "date": "2026-01-01T00:00:00.000Z",
+                "links": {"repository": repo},
+            }
+        }
+
+    @staticmethod
+    def _opener(pages: dict, total: int):
+        """按 URL 里的 from= 返回对应页；每页几条由数据决定（不依赖真实分页大小）。"""
+        import urllib.parse as up
+
+        def open_(req, timeout=25):
+            query = up.parse_qs(up.urlparse(req.full_url).query)
+            offset = int((query.get("from") or ["0"])[0])
+            return NpmSearchTest._Resp(json.dumps({"total": total, "objects": pages.get(offset, [])}).encode())
+
+        return open_
+
+    @staticmethod
+    def _fake_search_page(pages: dict, total: int):
+        """给 collect.fetch_npm_search 用：sweep 调的是模块级 search_page(keyword, offset, **kw)。"""
+
+        def page(keyword, offset, **_kw):
+            return {"total": total, "objects": pages.get(offset, [])}
+
+        return page
+
+    def setUp(self):
+        shutil.rmtree(TMP, ignore_errors=True)
+        TMP.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self):
+        shutil.rmtree(TMP, ignore_errors=True)
+
+    def test_repo_key_normalizes_github_urls(self):
+        self.assertEqual(npms.repo_key("git+https://github.com/volcengine/OpenViking.git"), "volcengine/openviking")
+        self.assertEqual(npms.repo_key({"url": "git@github.com:Owner/Repo.git"}), "owner/repo")
+        self.assertEqual(npms.repo_key("ssh://git@github.com/a/b.git"), "a/b")
+        self.assertEqual(npms.repo_key("git://github.com/a/b"), "a/b")
+        self.assertEqual(npms.repo_key("https://github.com/a/b/"), "a/b")
+        self.assertIsNone(npms.repo_key("https://gitlab.com/a/b"))
+        self.assertIsNone(npms.repo_key(None))
+        self.assertIsNone(npms.repo_key(""))
+
+    def test_slim_object_keeps_repo_and_skips_others(self):
+        rec = npms.slim_object(self._pkg("@openviking/dsh-memory-plugin", "git+https://github.com/volcengine/OpenViking.git"))
+        self.assertEqual(rec["name"], "@openviking/dsh-memory-plugin")
+        self.assertEqual(rec["repoKey"], "volcengine/openviking")
+        self.assertEqual(rec["repoUrl"], "git+https://github.com/volcengine/OpenViking.git")
+        self.assertIsNone(npms.slim_object({"package": {"name": "x", "links": {}}}), "没有仓库就跳过，绝不猜")
+        self.assertIsNone(npms.slim_object({"package": {"name": "", "links": {"repository": "https://github.com/a/b"}}}))
+        self.assertIsNone(npms.slim_object({}))
+
+    def test_sweep_respects_budget_and_resumes_from_cursor(self):
+        pages = {
+            0: [self._pkg("a", "https://github.com/o/a"), self._pkg("b", "https://github.com/o/b")],
+            2: [self._pkg("c", "https://github.com/o/c"), self._pkg("d", "https://github.com/o/d")],
+        }
+        payload = npms.empty_payload(["kw"])
+        stats = npms.sweep(payload, budget=3, opener=self._opener(pages, 100), sleep=lambda _s: None)
+        self.assertEqual(stats["pages"], 2, "预算 3 条、每页 2 条 → 取两页（允许超出一页）")
+        self.assertEqual(stats["items"], 4)
+        self.assertEqual(payload["cursor"]["kw"], 4, "断点必须落在游标上")
+        self.assertFalse(payload["done"]["kw"], "没扫完不许标 done")
+        self.assertEqual(sorted(payload["packages"]), ["a", "b", "c", "d"])
+        self.assertEqual(stats["added"], 4)
+
+        pages[4] = [self._pkg("e", "https://github.com/o/e")]
+        stats2 = npms.sweep(payload, budget=10, opener=self._opener(pages, 5), sleep=lambda _s: None)
+        self.assertEqual(payload["cursor"]["kw"], 5)
+        self.assertTrue(payload["done"]["kw"], "游标追平 total 才算扫完")
+        self.assertEqual(stats2["added"], 1)
+        self.assertEqual(payload["count"], 5)
+
+    def test_sweep_dedupes_and_keeps_first_seen(self):
+        pages = {0: [self._pkg("a", "https://github.com/o/a")]}
+        payload = npms.empty_payload(["kw1", "kw2"])
+        npms.sweep(payload, budget=10, opener=self._opener(pages, 1), sleep=lambda _s: None)
+        self.assertEqual(payload["count"], 1, "两个关键词抓到同一个包只算一个")
+        first = payload["packages"]["a"]["firstSeenAt"]
+        payload["cursor"]["kw2"] = 0
+        payload["done"]["kw2"] = False
+        stats = npms.sweep(payload, budget=10, keywords=["kw2"], opener=self._opener(pages, 1), sleep=lambda _s: None)
+        self.assertEqual(stats["added"], 0, "见过的包不再计入新增")
+        self.assertEqual(payload["packages"]["a"]["firstSeenAt"], first, "firstSeenAt 不能被后来的抓取覆盖")
+
+    def test_sweep_settles_when_pages_stop_adding_new_packages(self):
+        # 深翻页会重复甚至回卷：整页都是见过的包，连续两页就结算，别继续烧请求
+        pages = {0: [self._pkg("a", "https://github.com/o/a")], 1: [self._pkg("a", "https://github.com/o/a")], 2: [self._pkg("a", "https://github.com/o/a")]}
+        payload = npms.empty_payload(["kw"])
+        stats = npms.sweep(payload, budget=5000, opener=self._opener(pages, 100), sleep=lambda _s: None)
+        self.assertEqual(stats["pages"], 3, "第 1 页有新增、后两页零新增后结算")
+        self.assertTrue(payload["done"]["kw"], "结算后必须标 done")
+        self.assertEqual(payload["settled"]["kw"], 3, "结算位置要记下来（溯源用）")
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(stats["added"], 1)
+
+    def test_sweep_never_raises_and_keeps_cache_on_network_error(self):
+        def boom(req, timeout=25):
+            raise urllib.error.URLError("断网")
+
+        payload = npms.empty_payload(["kw"])
+        stats = npms.sweep(payload, budget=5000, opener=boom, sleep=lambda _s: None)
+        self.assertIsNotNone(stats["error"], "失败要如实记一笔")
+        self.assertEqual(stats["pages"], 0)
+        self.assertEqual(payload["packages"], {}, "失败不写脏数据")
+        self.assertEqual(payload["cursor"]["kw"], 0, "失败不能推进游标")
+        self.assertFalse(payload["done"]["kw"], "失败不能标扫完")
+
+    def test_cache_roundtrip_and_corruption(self):
+        path = TMP / "npm-search.json"
+        payload = npms.empty_payload()
+        payload["packages"]["a"] = {"name": "a", "repoKey": "o/a"}
+        self.assertGreater(npms.save_cache(payload, path), 0)
+        loaded = npms.load_cache(path)
+        self.assertEqual(loaded["packages"]["a"]["repoKey"], "o/a")
+        self.assertEqual(loaded["count"], 1)
+        self.assertEqual(loaded["keywords"], npms.DEFAULT_KEYWORDS)
+        path.write_text("{坏掉的 json", encoding="utf-8")
+        self.assertEqual(npms.load_cache(path)["packages"], {}, "坏文件当空表，绝不抛")
+        self.assertEqual(npms.load_cache(TMP / "missing.json")["count"], 0)
+
+    def test_collect_step_offline_guard_and_persist(self):
+        import collect
+
+        offline = argparse.Namespace(npm_search_budget=10, dry_run=False, from_raw=True, from_store=False)
+        self.assertFalse(collect.fetch_npm_search(offline, lambda *a: None)["enabled"], "--from-raw 绝不联网")
+        zero = argparse.Namespace(npm_search_budget=0, dry_run=False, from_raw=False, from_store=False)
+        self.assertFalse(collect.fetch_npm_search(zero, lambda *a: None)["enabled"], "预算 0 = 关闭")
+
+        path = TMP / "npm-search.json"
+        pages = {0: [self._pkg("@openviking/dsh-memory-plugin", "git+https://github.com/volcengine/OpenViking.git")]}
+        args = argparse.Namespace(npm_search_budget=10, dry_run=False, from_raw=False, from_store=False)
+        with mock.patch.object(collect, "NPM_SEARCH_CACHE", path), mock.patch.object(
+            collect.npm_search, "search_page", self._fake_search_page(pages, 1)
+        ):
+            summary = collect.fetch_npm_search(args, lambda *a: None)
+        self.assertTrue(summary["enabled"])
+        self.assertEqual(summary["added"], 1)
+        # 默认三个关键词各翻一页（同一个包在三个关键词下都被抓到，只算一次新增）
+        self.assertEqual(summary["pages"], len(npms.DEFAULT_KEYWORDS))
+        self.assertEqual(summary["packages"], 1)
+        self.assertTrue(all(summary["done"].values()), "三词都扫完了")
+        self.assertIn("settled", summary, "结算位置要能进 last-crawl.json 溯源")
+        self.assertTrue(path.exists(), "必须落盘到指定缓存路径")
+        saved = npms.load_cache(path)
+        self.assertEqual(saved["packages"]["@openviking/dsh-memory-plugin"]["repoKey"], "volcengine/openviking")
+
+
+class NpmPackagesTest(unittest.TestCase):
+    """子目录包：候选挑选（谁该查、谁不该查）与采集步落盘。"""
+
+    def setUp(self):
+        shutil.rmtree(TMP, ignore_errors=True)
+        TMP.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self):
+        shutil.rmtree(TMP, ignore_errors=True)
+
+    @staticmethod
+    def _ago(hours: float) -> str:
+        return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(time.time() - hours * 3600))
+
+    def test_due_for_refresh_states(self):
+        now = time.time()
+        self.assertTrue(npmp.due_for_refresh(None, now), "没查过的要查")
+        self.assertFalse(npmp.due_for_refresh({"status": "ok", "at": self._ago(1)}, now), "刚查过的不重查")
+        self.assertTrue(npmp.due_for_refresh({"status": "ok", "at": self._ago(48)}, now), "过了刷新窗口要重查")
+        self.assertFalse(npmp.due_for_refresh({"status": "unknown", "at": self._ago(999)}, now), "npm 确认 404 是终态，不再试")
+        self.assertTrue(npmp.due_for_refresh({"status": "error", "at": self._ago(100)}, now), "暂时失败要重试")
+        self.assertFalse(npmp.due_for_refresh({"status": "error", "at": self._ago(1)}, now), "刚失败过先别急着重试")
+
+    def test_pick_candidates_filters_and_sorts(self):
+        search = {
+            "packages": {
+                "root-pkg": {"repoKey": "o/a"},
+                "extra-new": {"repoKey": "o/a"},
+                "outside": {"repoKey": "o/none"},
+                "fresh": {"repoKey": "o/b"},
+                "retry": {"repoKey": "o/c"},
+                "gone": {"repoKey": "o/d"},
+                "in-archived": {"repoKey": "o/arch"},
+            }
+        }
+        downloads = {"repos": {"o/a": {"package": "root-pkg", "status": "ok"}}}
+        payload = {
+            "packages": {
+                "fresh": {"status": "ok", "at": self._ago(1)},
+                "retry": {"status": "error", "at": self._ago(100)},
+                "gone": {"status": "unknown", "at": self._ago(999)},
+            }
+        }
+        nodes = [
+            {"id": "o/a", "stars": 10, "archived": False},
+            {"id": "o/b", "stars": 5, "archived": False},
+            {"id": "o/c", "stars": 30, "archived": False},
+            {"id": "o/d", "stars": 50, "archived": False},
+            {"id": "o/arch", "stars": 99, "archived": True},
+        ]
+        picked = npmp.pick_candidates(payload, search, downloads, nodes, limit=10)
+        self.assertEqual([p["package"] for p in picked], ["retry", "extra-new"], "根包/图外/未到期/终态/归档 都不该进")
+        self.assertEqual(picked[0]["repoId"], "o/c", "按星标排序，大项目优先")
+        self.assertEqual(npmp.pick_candidates(payload, search, downloads, nodes, limit=1), picked[:1], "预算要生效")
+
+    def test_collect_step_offline_guard_and_persist(self):
+        import collect
+
+        offline = argparse.Namespace(npm_extra_budget=5, dry_run=False, from_raw=True, from_store=False)
+        self.assertFalse(collect.fetch_npm_packages(offline, {"nodes": []}, lambda *a: None)["enabled"])
+        zero = argparse.Namespace(npm_extra_budget=0, dry_run=False, from_raw=False, from_store=False)
+        self.assertFalse(collect.fetch_npm_packages(zero, {"nodes": []}, lambda *a: None)["enabled"])
+
+        search_path, downloads_path, packages_path = TMP / "npm-search.json", TMP / "npm-downloads.json", TMP / "npm-packages.json"
+        search_path.write_text(
+            json.dumps({"packages": {"@openviking/dsh-memory-plugin": {"repoKey": "volcengine/openviking"}}}), encoding="utf-8"
+        )
+        downloads_path.write_text(json.dumps({"repos": {}}), encoding="utf-8")
+        mesh = {"nodes": [{"id": "volcengine/OpenViking", "stars": 40186, "archived": False}]}
+        args = argparse.Namespace(npm_extra_budget=5, dry_run=False, from_raw=False, from_store=False)
+        hit = {"status": "ok", "downloads": 42, "window": {"start": "2026-10-06", "end": "2026-10-12"}, "days": [{"day": "2026-10-06", "downloads": 42}]}
+        with mock.patch.object(collect, "NPM_PACKAGES_CACHE", packages_path), mock.patch.object(
+            collect, "NPM_SEARCH_CACHE", search_path
+        ), mock.patch.object(collect, "NPM_DOWNLOADS_CACHE", downloads_path), mock.patch.object(
+            collect.npm, "fetch_npm_downloads", lambda pkg, sleep=None: dict(hit, package=pkg)
+        ):
+            summary = collect.fetch_npm_packages(args, mesh, lambda *a: None)
+        self.assertEqual(summary["fetched"], 1)
+        self.assertEqual(summary["failed"], 0)
+        entry = npmp.load(packages_path)["packages"]["@openviking/dsh-memory-plugin"]
+        self.assertEqual(entry["downloads"], 42, "下载量按包名落盘")
+        self.assertEqual(entry["repoId"], "volcengine/OpenViking", "要记住它属于哪个节点")
+        self.assertEqual(sum(entry["days"][i]["downloads"] for i in range(len(entry["days"]))), 42, "逐日求和 == 总量")
 
 
 if __name__ == "__main__":

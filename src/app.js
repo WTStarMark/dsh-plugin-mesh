@@ -24,6 +24,7 @@ const dom = {
   edgeTypes: document.getElementById("edge-types"),
   search: document.getElementById("search"),
   searchClear: document.getElementById("search-clear"),
+  searchFan: document.getElementById("search-fan"),
   palette: document.getElementById("palette"),
   deck: document.querySelector(".deck"),
   toggleRail: document.getElementById("toggle-rail"),
@@ -85,6 +86,7 @@ const state = {
   palette: DEFAULT_PALETTE,
   avatars: true,
   labels: false, // 标签默认关闭：球太密时标签反而糊成一片
+  indexed: false, // 「索引仓库」小标默认关：两千多个球全挂上会糊成一片
   hideRail: false,
   hideDossier: false,
   groupBy: "category",
@@ -102,6 +104,8 @@ const state = {
   centerId: null, // 以某个仓库为中心重建扇形图（null = 以官方仓库为圆心）
   query: "",
   searchHits: null,
+  searchFan: false, // 搜索扇形图：圆心=官方仓库、节点=命中项（命中 <100 自动成图）
+  searchFanHold: null, // null=按命中数自动 / "on"=用户手动进入 / "off"=用户手动退出（换查询词后重置）
   readmeHits: null, // README 正文命中（服务端返回，只给 id）：与本地命中合并后一起高亮/画线
   readmeTotal: 0,
   readmeIndexed: 0,
@@ -176,8 +180,15 @@ const LAYOUT_CACHE_MAX = 6;
 export const internalStats = { layoutBuilds: 0, layoutHits: 0 };
 
 function layoutCacheKey() {
-  return [state.seed, state.groupBy, state.focusCategory ?? "-", state.centerId ?? "-"].join("|");
+  // 搜索扇形图也必须进缓存键：否则同 seed 下「搜索前 / 搜索后」会拿到同一份旧布局
+  return [state.seed, state.groupBy, state.focusCategory ?? "-", state.centerId ?? "-", state.searchFan ? state.query : "-"].join("|");
 }
+
+// 搜索扇形图最多画多少个命中（星标由高到低取）；命中更多时提示里会写清楚"只画了前 N 个"
+const SEARCH_FAN_MAX = 400;
+// 命中数少于它 → 自动成图（与"命中多时不画放射线"同一思路：少就画成图，多就只高亮）。
+// 手动点过「成图 / 返回全图」就以用户为准，换了查询词再恢复自动。
+const SEARCH_FAN_AUTO_MAX = 100;
 
 function clearLayoutCache() {
   layoutCache.clear();
@@ -201,6 +212,24 @@ function buildLayoutUncached() {
   const focus = state.focusCategory;
   // 以某个仓库为中心重建扇形图（双击球 / 从「关联」跳到布局外的仓库）：节点 = 它 + 它的关联
 // （直接关联 + 同作者兄弟，口径与右栏「关联」一致），扇区 = 这些关联按当前「划分依据」分出的分类。
+  // 搜索扇形图：圆心固定官方仓库，节点 = 命中的仓库，扇区 = 功能分类。
+  // 命中可能上千（本地匹配不限量），只画星标最高的 SEARCH_FAN_MAX 个，避免布局/渲染卡顿。
+  if (state.searchFan && state.query) {
+    const hits = searchMatchIds() ?? new Set();
+    const members = prepared.nodes
+      .filter((n) => n.id !== HUB_ID && hits.has(n.id))
+      .sort((a, b) => (b.stars ?? 0) - (a.stars ?? 0))
+      .slice(0, SEARCH_FAN_MAX);
+    const hub = prepared.byId ? prepared.byId.get(HUB_ID) : null;
+    if (hub) members.unshift(hub);
+    return createSectorLayout({
+      nodes: members,
+      centerId: HUB_ID,
+      groupOf: groupKeyOf,
+      labelOf: labelOfGroup,
+      seed: state.seed + "|search|" + state.query,
+    });
+  }
   const center = state.centerId;
   if (!focus && center && center !== HUB_ID) {
     const keep = new Set([center, ...(prepared.adjacency.get(center) ?? []).map((n) => n.id), ...ownerSiblings(prepared, center)]);
@@ -324,6 +353,25 @@ function resetView() {
   state.edgeTypes = new Set();
 }
 
+/** 搜索命中的仓库 id：本地命中（id/描述/topics）∪ 服务端 README 正文命中。
+ *  高亮、放射线、搜索扇形图三处共用同一套判据，避免"图上画的"和"提示里说的"不一致。 */
+function searchMatchIds() {
+  const q = state.query;
+  if (!q) return null;
+  const set = new Set();
+  for (const n of prepared.nodes) {
+    if (matches(n, q) || (state.readmeHits ? state.readmeHits.has(n.id) : false)) set.add(n.id);
+  }
+  return set;
+}
+
+/** 「成图 / 返回全图」按钮：跟着查询词与扇形图状态走，由 apply() 统一刷新 */
+function syncSearchFanButton() {
+  if (!dom.searchFan) return;
+  dom.searchFan.hidden = !state.query;
+  dom.searchFan.textContent = state.searchFan ? "返回全图" : "成图";
+}
+
 function computeHighlight() {
   const now = Date.now();
   const neighborSet = state.neighborFocus
@@ -336,13 +384,10 @@ function computeHighlight() {
   // 每位作者在图上被收录的仓库数（区间筛选用；prepared 不变时复用）
   const ownerRepoCounts = countReposByOwner(prepared.nodes);
   const set = new Set();
-  // 搜索命中：单独记一份，不受其它筛选影响 —— 放射线指向的是"搜索命中的仓库"
-  let searchSet = null;
+  // 搜索命中：单独记一份，不受其它筛选影响 —— 放射线 / 搜索扇形图都指向"搜索命中的仓库"
+  const searchSet = searchMatchIds();
   for (const n of prepared.nodes) {
-    // 本地命中（id/描述/topics）当场算；README 命中来自服务端（正文太大，不放进前端契约）
-    const readmeHit = state.query && state.readmeHits ? state.readmeHits.has(n.id) : false;
-    const hit = state.query ? matches(n, state.query) || readmeHit : false;
-    if (hit) (searchSet ??= new Set()).add(n.id);
+    const hit = searchSet ? searchSet.has(n.id) : false;
     // 标签之间取「与」：仓库必须同时具备所有已开启的标签才高亮。取「或」会失效 —— 标签高度重叠（多数仓库同时挂 dsh 与 dsh-plugin），关掉任何一个都几乎筛不掉东西。
     if (!n.matchedTags.every((t) => state.tags.has(t))) continue;
     if (state.minStars > 0 && n.stars < state.minStars) continue;
@@ -379,8 +424,10 @@ function computeHighlight() {
 function apply(options = {}) {
   const highlight = computeHighlight();
   view.setHighlight(highlight);
-  view.setSearchHits(state.searchHits);
+  // 搜索扇形图里每个节点都是命中项，放射线没有信息量（只会糊成一片），只在全景搜索时画
+  view.setSearchHits(state.searchFan ? null : state.searchHits);
   view.setSelected(state.selectedId);
+  syncSearchFanButton();
   updateStatus(highlight);
   const info = viewInfo();
   // 放大模式下圆里全是该扇区，不需要再淡化别的
@@ -408,6 +455,16 @@ function updateStatus(highlight) {
       : "它的关联 " + related + " 个仓库，分 " + arms + " 个扇区" + (arms ? "（每个 " + (360 / arms).toFixed(1) + "°）" : "") + "，" + byLine;
     dom.hint.textContent = "圆心：" + state.centerId + " · " + body + " · 双击别的仓库可再聚焦，Esc 或左栏「← 返回全景」回到全图";
     dom.hint.title = title + " · 当前是以 " + state.centerId + " 为中心重建的扇形图：画面里只有它的关联仓库";
+    return;
+  }
+  // 搜索扇形图：说清"这是一张什么图、怎么回去"，否则用户会以为筛选坏了
+  if (state.searchFan && state.query) {
+    const hits = state.searchHits ? state.searchHits.size : 0;
+    const shown = Math.max(0, (layout?.size ?? 0) - 1);
+    dom.hint.textContent = "圆心：" + HUB_ID + " · 搜索「" + state.query + "」命中 " + hits + " 个仓库"
+      + (shown < hits ? "（图中画星标最高的 " + shown + " 个）" : "")
+      + " · 分 " + arms + " 个扇区，" + byLine + " · 清空搜索框或按 Esc 回到全图";
+    dom.hint.title = "搜索扇形图：圆心固定为官方仓库，节点只保留命中的仓库，扇区按" + by + "划分；回车进入，Esc 回到全图";
     return;
   }
   const head = "圆心：" + HUB_ID + " · 共 " + arms + " 个扇区，每个 " + (arms ? (360 / arms).toFixed(1) : "0") + "°，" + byLine;
@@ -451,6 +508,27 @@ const actions = {
     // 这时改为以它为中心重建扇形图，保证它一定落在画面正中央。
     if (layout?.index?.has(id)) actions.centerOn(id);
     else actions.centerRepo(id);
+  },
+  /** 回车：把搜索结果画成一张扇形图（圆心固定官方仓库，节点只留命中项，扇区按当前划分依据）。
+   *  与"双击球以某仓库为中心"是两种视图：这个回答"搜到的都在哪"，那个回答"这个仓库连着什么"。 */
+  focusSearch() {
+    if (!state.query) return;
+    state.searchFanHold = "on"; // 用户手动进入：不再按命中数自动切回
+    state.searchFan = true;
+    state.centerId = null;
+    state.focusCategory = null;
+    state.clusterFocus = null;
+    state.neighborFocus = null;
+    rebuildLayout();
+    apply();
+  },
+  /** 退出搜索扇形图，回到全图（保留搜索词与高亮，再回车可重新进入） */
+  exitSearch() {
+    if (!state.searchFan) return;
+    state.searchFanHold = "off"; // 用户手动退出：命中再少也不再自动成图（换查询词后重置）
+    state.searchFan = false;
+    rebuildLayout();
+    apply();
   },
   /** 双击球：以它为中心重建一张扇形图（圆心 = 它，扇区 = 它的关联按当前划分依据分出的分类） */
   centerRepo(id) {
@@ -609,18 +687,51 @@ function scheduleReadmeSearch(q) {
       state.readmeHits = new Set(data.readme?.ids ?? []);
       state.readmeTotal = data.readme?.total ?? 0;
       state.readmeIndexed = data.readme?.indexed ?? 0;
-      apply({ rail: false, inspector: false, edgeChips: false });
+      // README 正文命中会改变命中集（可能跨过自动成图的阈值），统一走同一套刷新
+      refreshSearchView();
     } catch {
       /* 接口不可用或请求被取消：保留本地检索结果 */
     }
   }, 260);
 }
 
+/** 搜索视图的统一刷新：先同步命中集，再决定「要不要 / 要不要继续」画成扇形图。
+ *  自动规则与放射线同一思路 —— 命中少（<100）就成图，命中多就只高亮；手动点过按钮听人的。 */
+function refreshSearchView() {
+  apply({ inspector: false, edgeChips: false }); // computeHighlight 里同步算出 state.searchHits
+  const hits = state.searchHits ? state.searchHits.size : 0;
+  // 命中 1 个 = 精准定位某个仓库，不画图（图里只剩它 + 圆心，没有"关系"可看）；
+  // 从 2 个起才算"浏览一片结果"，自动成图。
+  const auto = hits > 1 && hits < SEARCH_FAN_AUTO_MAX;
+  const want = state.searchFanHold === "on" ? true : state.searchFanHold === "off" ? false : auto;
+  if (want !== state.searchFan) {
+    state.searchFan = want;
+    rebuildLayout();
+    return;
+  }
+  // 已在成图态：命中集变了就重画（节点少，重建很快）；全景态只需重新高亮（上面 apply 已做）
+  if (state.searchFan) rebuildLayout();
+}
+
 function runSearch() {
   const q = dom.search.value.trim();
+  const changed = q !== state.query;
+  const wasFan = state.searchFan;
   state.query = q;
+  if (changed) state.searchFanHold = null; // 换了查询词：恢复"按命中数自动决定"
   dom.searchClear.hidden = !q;
-  apply({ inspector: false, edgeChips: false });
+  syncSearchFanButton();
+  if (!q) {
+    // 清空搜索框 = 回到全景
+    state.searchFan = false;
+    state.readmeHits = null;
+    state.readmeTotal = 0;
+    if (wasFan) rebuildLayout();
+    else apply({ inspector: false, edgeChips: false });
+    scheduleReadmeSearch("");
+    return;
+  }
+  refreshSearchView();
   scheduleReadmeSearch(q);
 }
 
@@ -684,10 +795,21 @@ function bindChrome() {
   dom.search.addEventListener("input", runSearch);
   dom.search.addEventListener("keydown", (ev) => {
     if (ev.key !== "Enter") return;
+    // 单独回车仍是原来的「定位到星标最高的命中」；Shift/Ctrl/Cmd + 回车才把它画成扇形图。
+    // 为什么不占用单独回车：它是既有交互（右栏/连线/相机都依赖"选中某个命中"），换掉会连带打断别的流程。
+    if (ev.shiftKey || ev.ctrlKey || ev.metaKey) {
+      ev.preventDefault();
+      actions.focusSearch();
+      return;
+    }
     const hit = firstMatch();
     if (!hit) return;
     actions.selectRepo(hit.id);
     view.focusNode(hit.id);
+  });
+  dom.searchFan?.addEventListener("click", () => {
+    if (state.searchFan) actions.exitSearch();
+    else actions.focusSearch();
   });
   dom.searchClear.addEventListener("click", () => {
     dom.search.value = "";
@@ -715,6 +837,10 @@ function bindChrome() {
         state.avatars = !view.avatars;
         view.setAvatars(state.avatars);
         btn.classList.toggle("on", state.avatars);
+      } else if (act === "indexed") {
+        state.indexed = !view.indexed;
+        view.setIndexed(state.indexed);
+        btn.classList.toggle("on", state.indexed);
       }
     });
   });
@@ -750,7 +876,11 @@ function bindChrome() {
         rankingBoard.setOpen(false);
         return;
       }
-      // 退出顺序：先退出单扇区放大，再退出"以某仓库为中心"的扇形图，最后才是清选中
+      // 退出顺序：先退出搜索扇形图，再退出单扇区放大，再退出"以某仓库为中心"的扇形图，最后才是清选中
+      if (state.searchFan) {
+        actions.exitSearch();
+        return;
+      }
       if (state.focusCategory) {
         actions.focusGroup(null);
         return;
@@ -770,6 +900,8 @@ function bindChrome() {
 let booted = false;
 let precomputed = null;
 let details = null;
+// 有 npm 包的仓库 id（与市场索引源重叠）：从 /api/npm-nodes 取，喂给渲染器画外圈光环
+let npmNodeIds = null;
 let panels = null;
 
 /** 面板是动态载入的：首屏先把画布画出来，不为了几个面板阻塞解析 */
@@ -843,6 +975,8 @@ function syncView() {
   view.setEdgeTypes(state.edgeTypes);
   view.setAvatars(state.avatars);
   view.setLabels(state.labels);
+  view.setIndexed(state.indexed);
+  view.setNpmIds(npmNodeIds);
   applyTheme();
   apply();
 }
@@ -938,6 +1072,17 @@ async function main() {
   const { mesh, core, fromCache, revalidate } = await loadMeshBest("./data/mesh.json", { store });
   await bootMesh(mesh, { resetFilters: true, core });
   loadPanels();
+
+  // npm 光环名单：单独一个小接口（只回 id）。晚到就晚画，绝不阻塞首屏；失败也不影响页面。
+  fetch("/api/npm-nodes")
+    .then((res) => (res.ok ? res.json() : null))
+    .then((data) => {
+      if (!data || !Array.isArray(data.ids) || !data.ids.length) return;
+      npmNodeIds = new Set(data.ids);
+      view?.setNpmIds?.(npmNodeIds);
+      apply();
+    })
+    .catch(() => {});
   if (fromCache) dom.hint.title = "已用本地缓存渲染，正在后台校验是否有新快照…";
 
   // 在线实时更新：数据每次核对都带 ETag，没变就是 304（几乎零成本），变了才重建

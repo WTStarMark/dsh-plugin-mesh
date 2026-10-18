@@ -463,6 +463,11 @@ async function handleApi(req, res, method, pathname, url) {
     sendJson(res, await api.ranking(url.searchParams), 200, { ...API_CACHE, ...CORS });
     return;
   }
+  if (pathname === "/api/npm-nodes") {
+    // 生态图外圈光环用的名单（有 npm 包的仓库）：只是 id 列表，跟着 5 分钟公共缓存
+    sendJson(res, await api.npmNodes(), 200, { ...API_CACHE, ...CORS });
+    return;
+  }
   if (pathname === "/api/search") {
     const result = await api.searchIds(url.searchParams);
     sendJson(res, result, 200, { ...API_CACHE, ...CORS });

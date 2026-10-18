@@ -23,6 +23,8 @@ STAR_HISTORY = CACHE_DIR / "star-history.json"
 UPDATE_LOG = CACHE_DIR / "update-log.json"
 RELEASES_CACHE = CACHE_DIR / "releases.json"     # 版本缓存（每仓库最近几个 release）
 NPM_DOWNLOADS_CACHE = CACHE_DIR / "npm-downloads.json"  # npm 周下载量（可选列；不动 mesh.json）
+NPM_SEARCH_CACHE = CACHE_DIR / "npm-search.json"        # npm 反查发现：包 → 仓库（可含子目录）；同样不动 mesh.json
+NPM_PACKAGES_CACHE = CACHE_DIR / "npm-packages.json"    # 反查发现的子目录包 + 真实下载量（按包名做 key）
 STAR_DAILY = CACHE_DIR / "star-daily.json"
 
 # 按该时区的 00:00 切天，而不是 UTC 00:00（否则北京时间早 8 点才换天）；前端 tools/api.mjs 有同一常量。
