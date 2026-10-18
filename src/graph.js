@@ -8,7 +8,6 @@ import { themeOf } from "./palettes.js";
 import { createAvatarStore } from "./avatars.js";
 
 const LABEL_MAX = 90;
-const INDEX_BADGE_MAX = 300;
 const RING_STEPS = [200, 500, 1000, 2000, 4000, 8000];
 
 /**
@@ -50,8 +49,8 @@ export function createGraphView(canvas, hooks = {}) {
   let searchHits = null;
   // 有 npm 包的仓库 id 集合（与市场索引源重叠的那批）：给它们的外圈套一层青绿光环
   let npmIds = null;
-  // 「索引仓库」开关（默认关）：开 = 青绿光环 + 头像右侧的青绿小标；关 = 两者都不画。
-  // 语义必须一致 —— 之前光环是常开的，和「默认关」矛盾，用户会以为开关没生效。
+  // 「索引仓库」开关（默认关）：开 = 给有 npm 包的球套一层青绿光环；关 = 不画。
+  // 只留光环不挂文字：全图两千多个这类球，逐个挂「索引仓库」四个字会把画面糊掉、还会把球名挤走。
   let showIndexed = false;
   // 同作者兄弟缓存：一帧可能要画上千条线，别每帧都重新过滤一遍 owner 索引
   let siblingCache = { id: null, ids: null };
@@ -127,6 +126,8 @@ export function createGraphView(canvas, hooks = {}) {
     warn: theme.canvas.warn,
     ball: theme.canvas.ball ?? "#ffffff",
     text: theme.canvas.text ?? "#ffffff",
+    // npm 青绿：有 npm 包的仓库外圈光环用。P() 是白名单式取色，漏了它就会静默回退到 accent（蓝）
+    npm: theme.canvas.npm ?? theme.canvas.accent,
     grid: gridRGB,
   });
   const rgba = (parts, a) => "rgba(" + parts + "," + a + ")";
@@ -524,7 +525,7 @@ export function createGraphView(canvas, hooks = {}) {
       ctx.lineWidth = glow ? 1.6 : 1.1;
       ctx.strokeStyle = hexA(color, active ? (glow ? 0.95 : inFocus ? 0.62 : 0.16) : 0.1);
       ctx.stroke();
-      // 有 npm 包的仓库（与市场索引源重叠）：打开「索引仓库」开关后，外圈套一层青绿光环。
+      // 有 npm 包的仓库（与市场索引源重叠）：打开「索引仓库」开关后，外圈套一层青绿光环（不挂文字）。
       // 用「宽而淡 + 窄而实」两圈描边代替 shadowBlur —— 这类节点全图有两千多个，逐个发光会明显掉帧。
       if (showIndexed && npmIds && active && inFocus && npmIds.has(node.id) && r > 1.6) {
         const haloR = r + 2.6;
@@ -639,43 +640,6 @@ export function createGraphView(canvas, hooks = {}) {
     ctx.textAlign = "left";
   }
 
-  /** 「索引仓库」小标：已被市场索引收录（有 npm 包）的球，在头像右侧挂一枚青绿小标。
-   *  独立开关、默认关 —— 全图两千多个这类球，全挂上会糊成一片；只在球够大（r ≥ 3）时才画。 */
-  function drawIndexBadges() {
-    if (!layout || !showIndexed || !npmIds || lowDetail) return;
-    const nodes = layout.nodes;
-    const color = P().npm ?? P().accent;
-    const text = "索引仓库";
-    ctx.textAlign = "left";
-    ctx.textBaseline = "middle";
-    ctx.font = "10px " + FONT;
-    let drawn = 0;
-    for (let i = 0; i < nodes.length; i++) {
-      const node = nodes[i];
-      if (!npmIds.has(node.id)) continue;
-      if (!isActive(node)) continue;
-      if (focusIds !== null && !focusIds.has(node.id)) continue;
-      const r = Math.max(2, layout.radius[i] * view.k);
-      if (r < 3) continue; // 球太小，挂了也读不清
-      const [sx, sy] = toScreen(layout.x[i], layout.y[i]);
-      if (sx < -80 || sy < -20 || sx > cssW + 80 || sy > cssH + 20) continue;
-      const x = sx + r + 5;
-      // 青绿小圆点 + 带底色描边的白字（沿用标签画法，避免和球糊在一起）
-      ctx.beginPath();
-      ctx.arc(x + 2.4, sy, 2.4, 0, Math.PI * 2);
-      ctx.fillStyle = hexA(color, 0.9);
-      ctx.fill();
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = hexA(P().bg, 0.9);
-      ctx.strokeText(text, x + 8, sy);
-      ctx.fillStyle = hexA(color, 0.95);
-      ctx.fillText(text, x + 8, sy);
-      if (++drawn >= INDEX_BADGE_MAX) break;
-    }
-    ctx.textAlign = "left";
-    ctx.textBaseline = "alphabetic";
-  }
-
   function computeFocusIds() {
     const focus = hoverId ?? selectedId;
     if (!focus || !layout) return null;
@@ -707,7 +671,6 @@ export function createGraphView(canvas, hooks = {}) {
     drawTargetRings();
     drawHub();
     drawLabels();
-    drawIndexBadges();
     avatars.endFrame();
   }
 
