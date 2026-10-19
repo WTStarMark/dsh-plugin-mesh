@@ -380,6 +380,21 @@ def load_from_store(args, log):
     return raws, tag_totals_from(store.state), None, {"mode": "store-rebuild", "token": "-"}
 
 
+def core_floor(client, configured: int) -> int:
+    """core 配额剩多少就收手 —— 按**本次实际拿到的上限**打折，不能写死。
+
+    CORE_FLOOR 原本写死 300，是按"有令牌 core 5000/小时"定的。匿名运行时 core 上限只有
+    60/小时，第一次请求之后 remaining 就恒小于 300 —— 于是每轮只抓 1 个仓库就收手
+    （线上实测 last-crawl.json 里 releases.fetched = 1、npmDownloads.fetched = 1，两处一起卡住）。
+    按上限的一半收手：有令牌时结果不变（5000 → min(300, 2500) = 300），
+    匿名时也能把 60 个配额用起来（→ 30），不再空转。
+    """
+    limit = getattr(getattr(client, "stats", None), "core_limit", None)
+    if not limit or limit <= 0:
+        return configured
+    return max(1, min(configured, int(limit * 0.5)))
+
+
 def fetch_releases_safe(args, mesh: dict, log) -> dict:
     """跑版本抓取，但永不抛异常：版本缓存只是"周更新热榜"的加分项，失败不该让前端数据不落盘
     （曾有一次 RemoteDisconnected 在写 mesh 前打断整轮，站点白等一小时）。"""
@@ -423,7 +438,7 @@ def fetch_releases(args, mesh: dict, log) -> dict:
     fetched = failed = 0
     streak = 0
     for repo_id in picked:
-        if client.stats.core_remaining is not None and client.stats.core_remaining < rel.CORE_FLOOR:
+        if client.stats.core_remaining is not None and client.stats.core_remaining < core_floor(client, rel.CORE_FLOOR):
             log("版本：core 配额只剩 " + str(client.stats.core_remaining) + "，本轮提前收手（下一轮接着抓）")
             break
         try:
@@ -587,7 +602,7 @@ def fetch_npm_downloads(args, mesh: dict, log) -> dict:
     now = utcnow()
 
     for repo_id in pkg_ids:
-        if client is not None and client.stats.core_remaining is not None and client.stats.core_remaining < npm.CORE_FLOOR:
+        if client is not None and client.stats.core_remaining is not None and client.stats.core_remaining < core_floor(client, npm.CORE_FLOOR):
             log("npm：core 配额只剩 " + str(client.stats.core_remaining) + "，本轮提前收手（下一轮接着抓）")
             break
         try:
@@ -609,6 +624,10 @@ def fetch_npm_downloads(args, mesh: dict, log) -> dict:
             "status": parsed["status"],
             "package": parsed["package"],
             "multiPackage": parsed["multiPackage"],
+            # 仓库 package.json 自报的 repository 与 version：归属核对（npm 声明的仓库 ↔ 仓库自报的家）
+            # 与复制品识别都靠它。缺了就不写键，前端/工具按"未知"处理，不编值。
+            "repository": parsed.get("repository"),
+            "version": parsed.get("version"),
             "packageAt": now,
             "downloads": prev.get("downloads") if isinstance(prev.get("downloads"), int) else None,
             "window": prev.get("window") if isinstance(prev.get("window"), dict) else None,

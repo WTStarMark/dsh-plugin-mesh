@@ -34,7 +34,7 @@ from dsh_mesh import build as build_mod  # noqa: E402
 from dsh_mesh.classify import apply_categories, classify_node  # noqa: E402
 from dsh_mesh.config import HUB_ID, ROOT, SAMPLE_MESH, SAMPLE_RAW, WHITELIST_TAGS  # noqa: E402
 from dsh_mesh.github import GitHubClient, load_token  # noqa: E402
-from collect import seconds_until_next  # noqa: E402
+from collect import seconds_until_next, core_floor  # noqa: E402
 
 TMP = Path(__file__).resolve().parent / ".tmp"
 
@@ -1643,27 +1643,66 @@ class NpmDownloadsTest(unittest.TestCase):
         return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(time.time() - hours_ago * 3600))
 
     def test_parse_package_json_scoped_private_rename_and_workspaces(self):
+        base = {"repository": None, "version": None}
         self.assertEqual(
             npm.parse_package_json('{"name":"@deepseek-harness-tui/dsh-tui"}'),
-            {"status": "ok", "package": "@deepseek-harness-tui/dsh-tui", "multiPackage": False},
+            {"status": "ok", "package": "@deepseek-harness-tui/dsh-tui", "multiPackage": False, **base},
         )
         self.assertEqual(
             npm.parse_package_json('{"name":"secret","private":true}'),
-            {"status": "private", "package": None, "multiPackage": False},
+            {"status": "private", "package": None, "multiPackage": False, **base},
         )
         self.assertEqual(
             npm.parse_package_json('{"name":"dsh-market"}'),
-            {"status": "ok", "package": "dshmarket", "multiPackage": False},
+            {"status": "ok", "package": "dshmarket", "multiPackage": False, **base},
             "改名表：dsh-market → dshmarket",
         )
         self.assertEqual(
             npm.parse_package_json('{"name":"root","workspaces":["packages/*"]}'),
-            {"status": "ok", "package": "root", "multiPackage": True},
+            {"status": "ok", "package": "root", "multiPackage": True, **base},
             "有 workspaces 只取根，标多包",
         )
         self.assertEqual(npm.parse_package_json(None)["status"], "no-package")
         self.assertEqual(npm.parse_package_json("{bad")["status"], "unknown")
         self.assertEqual(npm.parse_package_json("{}")["status"], "unknown")
+
+    def test_parse_package_json_keeps_repository_and_version(self):
+        """归属核对与"复制品识别"都靠这两个字段，必须原样存下来。
+
+        真实数据：dsh-plugin-wallpaper-engine 这个包名有 4 个仓库声明，其中 2 个复制品的
+        repository 都指向真主 elysia395/dsh-wallpaper-engine —— 照抄 package.json 会把这行一起抄过来。
+        """
+        parsed = npm.parse_package_json(
+            '{"name":"dsh-plugin-wallpaper-engine","version":"1.3.3",'
+            '"repository":{"type":"git","url":"git+https://github.com/elysia395/dsh-wallpaper-engine.git"}}'
+        )
+        self.assertEqual(parsed["repository"], "git+https://github.com/elysia395/dsh-wallpaper-engine.git")
+        self.assertEqual(parsed["version"], "1.3.3")
+        self.assertEqual(
+            npm.parse_package_json('{"name":"x","repository":"https://github.com/a/b"}')["repository"],
+            "https://github.com/a/b",
+            "字符串形式的 repository 也要认",
+        )
+        self.assertEqual(
+            npm.parse_package_json('{"name":"s","private":true,"repository":"https://github.com/a/b"}')["repository"],
+            "https://github.com/a/b",
+            "private 的仓库也要记：它可能正是 npm 上那个包的真主",
+        )
+        self.assertIsNone(npm.parse_package_json('{"name":"x"}')["repository"])
+        self.assertIsNone(npm.parse_package_json('{"name":"x","version":"   "}')["version"], "空白版本号当没有")
+        self.assertIsNone(npm.parse_package_json("{}")["repository"])
+
+    def test_core_floor_adapts_to_the_real_limit(self):
+        """写死 300 的收手线是线上"每轮只抓 1 个仓库"的根因，必须按实际上限打折。"""
+
+        class FakeClient:
+            def __init__(self, limit):
+                self.stats = type("S", (), {"core_limit": limit, "core_remaining": None})()
+
+        self.assertEqual(core_floor(FakeClient(None), 300), 300, "拿不到上限就沿用配置值")
+        self.assertEqual(core_floor(FakeClient(5000), 300), 300, "有令牌（5000/小时）时行为不变")
+        self.assertEqual(core_floor(FakeClient(60), 300), 30, "匿名（60/小时）时要真能把配额花掉，而不是每轮抓 1 个就收手")
+        self.assertEqual(core_floor(FakeClient(0), 300), 300, "上限为 0 视为未知")
 
     def test_fetch_npm_downloads_ok_404_and_retry(self):
         class FakeResp:

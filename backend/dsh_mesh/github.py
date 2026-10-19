@@ -49,6 +49,9 @@ class CrawlStats:
     # 搜索与 core 是两个独立的桶（搜索 30/分钟、core 5000/小时）。
     # rate_limit_remaining 是"最后那次请求"的，混着用会误判；core_remaining 只记非搜索请求。
     core_remaining: int | None = None
+    # core 桶的**上限**（有令牌 5000、匿名 60）。"剩多少就收手"的阈值必须按它打折，
+    # 否则匿名跑起来剩余永远小于阈值 —— 实测每轮只抓到 1 个仓库就收手（fetched: 1）。
+    core_limit: int | None = None
     seconds: float = 0.0
 
     def as_dict(self) -> dict:
@@ -110,6 +113,9 @@ class GitHubClient:
                     # 搜索走独立的桶（30/分钟），别把它的数字当成 core 的
                     if "/search/" not in url:
                         self.stats.core_remaining = int(remaining)
+                        limit = resp.headers.get("X-RateLimit-Limit")
+                        if limit is not None:
+                            self.stats.core_limit = int(limit)
                 return body
         except urllib.error.HTTPError as err:
             # 有些环境下 HTTPError 没有可读的 body（fp 为空），读失败也不能把重试路径带崩

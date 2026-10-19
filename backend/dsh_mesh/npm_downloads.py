@@ -105,8 +105,23 @@ def resolve_package_name(raw_name: str | None, *, repo_id: str | None = None) ->
     return PACKAGE_RENAMES.get(name, name)
 
 
+def declared_repository(data: dict) -> str | None:
+    """仓库 package.json 里作者自报的"家"（repository 字段，字符串或 {url}）。
+
+    这是识别**复制品**的金字段：照抄别人 package.json 建的仓库会把这行一起抄过来，
+    于是"谁抄了谁"直接写在文件里。实测 dsh-plugin-wallpaper-engine 这个包名有 4 个仓库声明，
+    其中 2 个的 repository 都指向真主 elysia395/dsh-wallpaper-engine。
+    """
+    value = data.get("repository")
+    if isinstance(value, dict):
+        value = value.get("url")
+    if not isinstance(value, str):
+        return None
+    return value.strip() or None
+
+
 def parse_package_json(text: str | None, *, repo_id: str | None = None) -> dict:
-    """解析根 package.json → {status, package, multiPackage}。
+    """解析根 package.json → {status, package, multiPackage, repository, version}。
     private=true → private；无 name / 坏 JSON → unknown；其余 ok / 经改名表映射。"""
     if text is None:
         return {"status": "no-package", "package": None, "multiPackage": False}
@@ -117,12 +132,16 @@ def parse_package_json(text: str | None, *, repo_id: str | None = None) -> dict:
     if not isinstance(data, dict):
         return {"status": "unknown", "package": None, "multiPackage": False}
     multi = bool(data.get("workspaces"))
+    # repository / version 一律跟着记录走：归属核对与"复制品识别"都靠它们，多存两行几乎没有成本。
+    home = declared_repository(data)
+    raw_version = data.get("version")
+    version = raw_version.strip() if isinstance(raw_version, str) and raw_version.strip() else None
     if data.get("private") is True:
-        return {"status": "private", "package": None, "multiPackage": multi}
+        return {"status": "private", "package": None, "multiPackage": multi, "repository": home, "version": version}
     pkg = resolve_package_name(data.get("name"), repo_id=repo_id)
     if not pkg:
-        return {"status": "unknown", "package": None, "multiPackage": multi}
-    return {"status": "ok", "package": pkg, "multiPackage": multi}
+        return {"status": "unknown", "package": None, "multiPackage": multi, "repository": home, "version": version}
+    return {"status": "ok", "package": pkg, "multiPackage": multi, "repository": home, "version": version}
 
 
 def npm_downloads_url(package: str) -> str:
