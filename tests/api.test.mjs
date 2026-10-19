@@ -1203,3 +1203,47 @@ test("HTTP：写方法被拒，预检请求被放行", async () => {
   assert.equal(opt.status, 204, "预检应被放行");
   assert.equal(opt.headers.get("access-control-allow-origin"), "*");
 });
+
+test("索引仓库光环：以市场索引的归属为准，清单缺失时才退回旧判据", async () => {
+  /* 线上事故：/api/npm-nodes 原来看的是"仓库 package.json 里写了个 npm 上存在的包名"，不校验归属。
+   * 实测 9830 个这样的仓库里 2091 个的包在索引里其实归别人（dsh-desktop 一个包名被 97 个仓库声明），
+   * 图上有 10144 个球被标成「索引仓库」。现在改成读索引自己产出的 dist/market/index-nodes.json。 */
+  const tmp = await mkdtemp(join(tmpdir(), "mesh-halo-"));
+  try {
+    await mkdir(join(tmp, "data", "cache"), { recursive: true });
+    await mkdir(join(tmp, "dist", "market"), { recursive: true });
+    // 两个仓库都声明了同一个包名 —— 旧判据会把两个都点亮
+    await writeFile(
+      join(tmp, "data", "cache", "npm-downloads.json"),
+      JSON.stringify({
+        updatedAt: "2026-10-19T00:00:00Z",
+        repos: {
+          "real/owner": { status: "ok", package: "dsh-x", downloads: 5 },
+          "copycat/one": { status: "ok", package: "dsh-x", downloads: 5 },
+        },
+      }),
+    );
+    await writeFile(join(tmp, "data", "cache", "npm-packages.json"), JSON.stringify({ updatedAt: null, packages: {} }));
+
+    const fallback = await createApi({ root: tmp }).npmNodes();
+    assert.deepEqual(fallback.ids.slice().sort(), ["copycat/one", "real/owner"], "没有清单时退回旧判据：两个都在");
+    assert.equal(fallback.source, "npm-downloads");
+
+    // 索引把 dsh-x 归给了 real/owner
+    await writeFile(
+      join(tmp, "dist", "market", "index-nodes.json"),
+      JSON.stringify({ generatedAt: "2026-10-19T00:00:00Z", count: 1, ids: ["real/owner"] }),
+    );
+    const fromIndex = await createApi({ root: tmp }).npmNodes();
+    assert.deepEqual(fromIndex.ids, ["real/owner"], "有清单时只认索引归属的那个，抢名的不再点亮");
+    assert.equal(fromIndex.source, "market-index");
+    assert.equal(fromIndex.updatedAt, "2026-10-19T00:00:00Z", "时间戳要透出索引的生成时刻");
+
+    // 清单坏了也不能把接口打成 500，退回旧判据
+    await writeFile(join(tmp, "dist", "market", "index-nodes.json"), "{坏掉的 json");
+    const broken = await createApi({ root: tmp }).npmNodes();
+    assert.ok(broken.ids.length >= 1, "坏清单要退回旧判据，而不是空列表或抛异常");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});

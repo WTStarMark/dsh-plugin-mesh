@@ -512,6 +512,9 @@ async function main() {
   let mergedClaimants = 0;
   /** 归属证据分布：运维要能一眼看出"多少条是确证的、多少条是待确认的"。 */
   const evidenceCounts = new Map();
+  /* 生态图「索引仓库」光环名单：只有"索引把插件归给了它"的仓库才配叫索引仓库。
+   * 单独落一份小文件给 /api/npm-nodes 读，免得为了几十 KB 的名单去解析 8.5MB 的索引。 */
+  const haloIds = new Set();
   /* 同名认领的统计（只进日志，不进索引）：一个包名被几个仓库抢。 */
   for (const [pkg, claimants] of byPkg) {
     const rec = cache.packages[pkg];
@@ -577,6 +580,10 @@ async function main() {
     for (const key of Object.keys(entry)) if (entry[key] === undefined) delete entry[key];
     if (entry.metadata.category === undefined) delete entry.metadata.category;
     plugins.push(entry);
+    /* 光环按【索引的归属】收，不按"仓库里写了个包名"收 —— 后者会把抢名的路人一起点亮。
+     * 图里有的用原始 id（大小写必须与节点一致），图外的用 repoKey 的小写（那种本来也没球可点）。 */
+    if (node?.id) haloIds.add(node.id);
+    else if (resolved.repoId) haloIds.add(resolved.repoId);
   }
 
   /* 分类计数：索引格式里 category 声明**只有 title、没有计数字段**（前端 displayDeclarations 也只渲染 title），
@@ -621,6 +628,13 @@ async function main() {
 
   mkdirSync(dirname(OUT), { recursive: true });
   writeFileSync(OUT, JSON.stringify(index, null, 1));
+  /* 生态图外圈光环名单（serve 的 /api/npm-nodes 读它）。
+   * 为什么必须由索引产出：旧判据是"仓库 package.json 里写了个 npm 上存在的包名"，不校验归属 ——
+   * 线上实测 9830 个这样的仓库里，2091 个的包在索引里其实归别人（同名抢注），
+   * 图上有 10144 个球被标成「索引仓库」。名单与索引同源，两处口径就不可能再漂。 */
+  const haloPath = join(dirname(OUT), "index-nodes.json");
+  writeFileSync(haloPath, JSON.stringify({ generatedAt: new Date().toISOString(), count: haloIds.size, ids: [...haloIds].sort() }));
+  console.log("写入 " + haloPath + "：" + haloIds.size + " 个仓库（生态图「索引仓库」光环名单，与索引归属同源）");
   console.log("写入 " + OUT + "：" + plugins.length + " 个插件 · " + (JSON.stringify(index).length / 1024).toFixed(0) + " KB");
   if (mergedClaimants) {
     console.log("同名认领合并: " + mergedClaimants + " 条仓库记录归到同一个包名下");

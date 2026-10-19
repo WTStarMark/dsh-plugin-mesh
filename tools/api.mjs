@@ -1487,14 +1487,56 @@ export function createApi({ root }) {
     };
   }
 
-  /* 哪些仓库「有 npm 包」——即与市场索引源重叠的那批，生态图给它们外圈套一层青绿光环。
-     只回 id 列表（两千来个 id 只有几十 KB），不回下载量数字。
-     状态不是 ok 的一律不算：no-package / unknown / error 都表示「没确认有包」，缺数据不是「有包」。 */
+  /* 生态图「索引仓库」光环名单：dist/market/index-nodes.json，由 tools/market-index.mjs 与索引一起产出。
+     只回 id 列表，不回下载量数字。清单缺失（老部署 / 索引还没生成）时退回旧判据，接口不空白。 */
+  let indexNodesCache = { mtimeMs: -2, data: null };
+
+  async function loadIndexNodes() {
+    const file = join(root, "dist", "market", "index-nodes.json");
+    const info = await stat(file).catch(() => null);
+    if (!info) return null;
+    if (indexNodesCache.mtimeMs === info.mtimeMs) return indexNodesCache.data;
+    try {
+      const data = JSON.parse(await readFile(file, "utf8"));
+      const ids = Array.isArray(data.ids) ? data.ids.filter((x) => typeof x === "string" && x) : [];
+      indexNodesCache = { mtimeMs: info.mtimeMs, data: { ids, updatedAt: data.generatedAt ?? null } };
+    } catch {
+      indexNodesCache = { mtimeMs: info.mtimeMs, data: null };
+    }
+    return indexNodesCache.data;
+  }
+
+  /* 哪些仓库配叫「索引仓库」：以【市场索引的归属】为准 —— 索引说这个包归谁，就点亮谁。
+     旧判据只看"仓库 package.json 里写了个 npm 上存在的包名"，不校验归属：线上实测 9830 个这样的
+     仓库里，2091 个的包在索引里其实归别人（同名抢注，dsh-desktop 一个包名被 97 个仓库声明），
+     图上有 10144 个球被标成「索引仓库」，约三分之一名不副实。 */
   async function npmNodes() {
     const npmIndex = await loadNpmDownloads();
     const npmExtra = await loadNpmPackages();
     const ids = [];
     const seen = new Set();
+    const halo = await loadIndexNodes();
+    if (halo && halo.ids.length) {
+      for (const id of halo.ids) {
+        if (seen.has(id)) continue;
+        seen.add(id);
+        ids.push(id);
+      }
+      ids.sort();
+      const subdirIds = [...new Set(Object.values(npmExtra.packages)
+        .filter((rec) => rec && rec.status === "ok" && rec.repoId)
+        .map((rec) => String(rec.repoId)))]
+        .filter((id) => seen.has(id))
+        .sort();
+      return {
+        updatedAt: halo.updatedAt ?? npmIndex.updatedAt ?? null,
+        count: ids.length,
+        subdirCount: subdirIds.length,
+        ids,
+        subdirIds,
+        source: "market-index",
+      };
+    }
     for (const [id, entry] of Object.entries(npmIndex.repos)) {
       if (!entry || entry.status !== "ok" || !entry.package) continue;
       if (seen.has(id)) continue;
@@ -1517,6 +1559,7 @@ export function createApi({ root }) {
       subdirCount: subdirIds.length,
       ids,
       subdirIds,
+      source: "npm-downloads",
     };
   }
 
