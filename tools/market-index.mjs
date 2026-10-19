@@ -230,7 +230,13 @@ function readPackument(doc) {
       ? latestFull.repository.directory
       : null;
   const author = typeof latestFull.author === "string" ? latestFull.author : latestFull.author?.name ?? null;
-  return { versions: picked, dshKeys, repository, repositoryDirectory, author, latestTag, isBundle, hasClient, bundlePatch: isBundle ? bundle.patch : null };
+  /* 发布账号：npm 认证过的"谁按下了发布键"（publish 必须登录）。比作者自己填的 author 字段可信，
+   * 用途是"包与包之间的桥"——改包名不会换账号。注意开了 trusted publishing 的包这里是
+   * "GitHub Actions"，那种情况该信 provenance 而不是账号。
+   * 这三行是**追加式**字段：老缓存记录缺它读到 undefined（= 未知），不会造出错误数据，
+   * 所以刻意不升 CACHE_VERSION —— 升了会让下一次全量重抓 7500 份 packument。 */
+  const npmUser = typeof doc._npmUser?.name === "string" ? doc._npmUser.name : null;
+  return { versions: picked, dshKeys, repository, repositoryDirectory, author, npmUser, latestTag, isBundle, hasClient, bundlePatch: isBundle ? bundle.patch : null };
 }
 
 async function loadRegistryCache() {
@@ -277,6 +283,80 @@ export function collectCandidates(downloads, extra, byId) {
   return candidates;
 }
 
+/** 归属判定的证据级别。只有"有据"和"明说无据"两种状态，没有"大概是"。 */
+export const OWNER_EVIDENCE = {
+  /** ① 确证：npm 包自己声明的仓库，就是声明了这个包名的候选之一（两边一致） */
+  DECLARED_IN_CLAIMANTS: "declared-in-claimants",
+  /** ② 未验证：npm 声明的仓库在图里，但它没有声明这个包名（包名标了 private / 改过名 / 没 package.json） */
+  DECLARED_IN_MESH: "declared-in-mesh",
+  /** ③ 未验证：npm 声明的仓库不在本地数据里（已删 / 已改名 / 没被采集到），只能拿到一个字符串 */
+  DECLARED_ONLY: "declared-only",
+  /** ④ 未验证：npm 根本没写 repository，但这个名字只有唯一一个声明者 */
+  SOLE_CLAIMANT: "sole-claimant",
+  /** ⑤ 无从判断：npm 没写 repository，且多个仓库抢同一个包名 —— 谁都不认 */
+  AMBIGUOUS: "ambiguous",
+};
+
+/**
+ * 决定索引里这一行的作者/仓库是谁。
+ *
+ * 背景：市场索引按 npm 包名收录（一个包名一行），但"这个包是谁的"只有一条证据 ——
+ * npm 包自己声明的 repository。历史写法是把它当筛子用（在候选里找），筛不出来就按
+ * 复刻/星标/下载量/仓库名排序**挑一个顶上**；线上实测 6644 行里有 263 行挂的仓库与 npm
+ * 声明冲突（222 行是完全不同的作者）。把别人的项目说成是你的，比"作者未知"严重得多 ——
+ * 所以这里的规矩是：拿不到证据就不署名，绝不硬挑。
+ *
+ * 优先级：npm 声明的仓库（作者自己的声明，最权威）> 唯一声明者（弱证）> 不署名。
+ * 注意**不验证也不猜**的一种情况：npm 声明的仓库不在图里时，我们无法在本地核实它还在不在，
+ * 所以照实署名（那是发布者自己的声明），但整条打上 owner-unverified 标签。
+ *
+ * @param {{npmRepo?: string|null, claimants?: Array<{node: object, repoId: string}>, meshById?: Map<string, object>}} input
+ * @returns {{item: object|null, node: object|null, owner: string|null, verified: boolean, evidence: string, repoId: string|null}}
+ */
+export function resolveOwner({ npmRepo, claimants, meshById } = {}) {
+  const list = Array.isArray(claimants) ? claimants : [];
+  const wanted = repoKey(npmRepo);
+  if (wanted) {
+    const hit = list.find((x) => repoKey(x?.node?.htmlUrl) === wanted) ?? null;
+    if (hit) {
+      const owner = hit.node?.owner ?? wanted.split("/")[0];
+      return { item: hit, node: hit.node ?? null, owner, verified: true, evidence: OWNER_EVIDENCE.DECLARED_IN_CLAIMANTS, repoId: wanted };
+    }
+    const node = meshById?.get(wanted) ?? null;
+    if (node) {
+      return { item: null, node, owner: node.owner ?? wanted.split("/")[0], verified: false, evidence: OWNER_EVIDENCE.DECLARED_IN_MESH, repoId: node.id ?? wanted };
+    }
+    return { item: null, node: null, owner: wanted.split("/")[0], verified: false, evidence: OWNER_EVIDENCE.DECLARED_ONLY, repoId: wanted };
+  }
+  if (list.length === 1) {
+    const only = list[0];
+    return { item: only, node: only?.node ?? null, owner: only?.node?.owner ?? null, verified: false, evidence: OWNER_EVIDENCE.SOLE_CLAIMANT, repoId: only?.repoId ?? null };
+  }
+  return { item: null, node: null, owner: null, verified: false, evidence: OWNER_EVIDENCE.AMBIGUOUS, repoId: null };
+}
+
+/**
+ * 构建后的自检：把"不许猜"这条规矩钉进产物，而不是只写在注释里。
+ * 只要有一行的作者/仓库与 npm 包自己的声明冲突、却没打 owner-unverified，就算违规。
+ * @returns {Array<{pkg: string, why: string, declared: string|null, listed: string|null}>}
+ */
+export function auditOwnership(plugins, packages) {
+  const bad = [];
+  for (const p of plugins ?? []) {
+    const declared = repoKey(packages?.[p.name]?.repository);
+    const listed = repoKey(p.repository?.url);
+    const flagged = (p.metadata?.labels ?? []).includes("owner-unverified");
+    if (declared && listed && declared !== listed && !flagged) {
+      bad.push({ pkg: p.name, why: "仓库与 npm 声明不一致，却当成确证", declared, listed });
+      continue;
+    }
+    if (!flagged && !p.author) {
+      bad.push({ pkg: p.name, why: "既没写作者名，也没标 owner-unverified", declared, listed });
+    }
+  }
+  return bad;
+}
+
 async function main() {
   // --mesh：默认本机前端数据；拿远端清单出索引时一并指向远端那份，避免"清单里有、画像里没有"被静默丢掉
   const meshPath = resolve(ROOT, argOf("mesh", "data/mesh.json"));
@@ -288,6 +368,9 @@ async function main() {
   if (!downloads?.repos) throw new Error("读不到 " + npmCachePath);
 
   const byId = new Map(mesh.nodes.map((n) => [n.id, n]));
+  /* 小写索引：npm 的 repository 字段大小写随意（实测 blank-not-black/dsh-remote 对
+   * Blank-not-black/dsh-Remote），而 repoKey() 一律返回小写，所以这条查表必须按小写建。 */
+  const meshById = new Map(mesh.nodes.map((n) => [String(n.id).toLowerCase(), n]));
   // 子目录包缓存（采集器的可选产物）：缺失/损坏都当空表，不影响主流程
   const extra = readJson(resolve(ROOT, argOf("npm-packages", "data/cache/npm-packages.json")), null);
   const candidates = collectCandidates(downloads, extra, byId);
@@ -388,6 +471,9 @@ async function main() {
   labels.set("has-client", { title: { en: "Has UI", zh: "带界面" } });
   labels.set("recent-release", { title: { en: "Updated this week", zh: "近 7 天有新版" } });
   labels.set("subdir-package", { title: { en: "Bundle in subdir", zh: "仓库内子包" } });
+  /* 归属没被两边对上的条目：作者名来自 npm 包自己的声明或唯一声明者，没做过双向核对。
+   * 打这枚标签是为了"不把猜测当事实"——用户能看到这一条的作者是待确认的。 */
+  labels.set("owner-unverified", { title: { en: "Owner unverified", zh: "作者待确认" } });
   /* 行动号召（CTA）：每个条目都挂，提醒用户去仓库点 Star。
    * 注意两个已知代价：① 这枚胶囊很长（12 个汉字 + Star），会把标题挤窄；② 若标签文案进检索字段，会命中全部条目。 */
   labels.set("star-cta", { title: { en: "Star it to cheer the author on", zh: "点个Star鼓励对应作者吧" } });
@@ -424,19 +510,28 @@ async function main() {
     return 0;
   };
   let mergedClaimants = 0;
+  /** 归属证据分布：运维要能一眼看出"多少条是确证的、多少条是待确认的"。 */
+  const evidenceCounts = new Map();
+  /* 同名认领的统计（只进日志，不进索引）：一个包名被几个仓库抢。 */
   for (const [pkg, claimants] of byPkg) {
     const rec = cache.packages[pkg];
-    /* 门面怎么挑：npm 包自己 repository 指的仓库最权威；没写或对不上，再退回「非复刻 → 星标多 → 下载量多」。 */
-    const wanted = repoKey(rec.repository);
-    const matched = wanted ? claimants.find((x) => repoKey(x.node.htmlUrl) === wanted) : null;
-    const chosen = matched ?? claimants.slice().sort(compareRank)[0];
+    /* 归属只认证据，不认人气：见 resolveOwner 的注释。
+     * compareRank 现在**只**用来挑"这一行显示哪份下载量/排序数字"，不再用来决定作者是谁。 */
+    const resolved = resolveOwner({ npmRepo: rec.repository, claimants, meshById });
+    evidenceCounts.set(resolved.evidence, (evidenceCounts.get(resolved.evidence) ?? 0) + 1);
     if (claimants.length > 1) mergedClaimants += claimants.length - 1;
-    const node = chosen.node;
-    const repoUrl = typeof node.htmlUrl === "string" && /^https:\/\/github\.com\/[^/?#]+\/[^/?#]+$/u.test(node.htmlUrl) ? node.htmlUrl : null;
+    const fallback = claimants.slice().sort(compareRank)[0] ?? null;
+    const chosen = resolved.item ?? fallback;
+    const node = resolved.node;
+    const repoUrl = node && typeof node.htmlUrl === "string" && /^https:\/\/github\.com\/[^/?#]+\/[^/?#]+$/u.test(node.htmlUrl)
+      ? node.htmlUrl
+      : resolved.repoId
+        ? "https://github.com/" + resolved.repoId
+        : null;
     const freshRelease = isFreshRelease(rec.versions);
     const entry = {
       name: pkg,
-      title: node.name && node.name !== pkg ? node.name : undefined,
+      title: node && node.name && node.name !== pkg ? node.name : undefined,
       /* 人气数字：索引格式里**没有"显示数字"的字段**（sortKeys 只进排序菜单，值不显示），
        * 而前端渲染的字段只有 标题 / 标签胶囊 / 描述 / 版本·作者·日期。描述是唯一能放自由文本的位，
        * 且列表里两行截断 —— 所以把数字放**开头**，放结尾会被截掉。
@@ -449,26 +544,30 @@ async function main() {
        * 数字本身几乎无害（实测「8k」命中 23 个、「6」命中 199 个），而数字是这套格式里唯一能让用户
        * 看到"人气"的办法，所以保留数字、去掉中文词。数字的含义写在索引级 description 里（那段不进检索）。 */
       description: (() => {
-        const tone = toneOf(node.stars, chosen.hasDownloads, chosen.downloads);
-        // 子目录包（插件住在仓库子目录）优先用包自己的描述：母仓库描述讲的是整个产品，不是插件本身
-        const own = chosen.subdir ? pkgDescriptions.get(pkg) ?? "" : "";
-        const body = own || (typeof node.description === "string" ? node.description.trim() : "");
+        const tone = toneOf(node?.stars ?? 0, chosen?.hasDownloads ?? false, chosen?.downloads ?? 0);
+        /* 归属没定下来时（evidence=ambiguous）没有仓库描述可用，退回 npm 自己的描述：
+         * 宁可描述朴素，也不能拿别人的仓库描述冒充。 */
+        const own = chosen?.subdir || !node ? pkgDescriptions.get(pkg) ?? "" : "";
+        const body = own || (typeof node?.description === "string" ? node.description.trim() : "");
         return body ? tone + " —— " + body : tone;
       })(),
-      icon: typeof node.avatar === "string" && node.avatar.startsWith("https://") ? node.avatar : undefined,
-      author: node.owner ?? undefined,
+      icon: node && typeof node.avatar === "string" && node.avatar.startsWith("https://") ? node.avatar : undefined,
+      // 作者名只来自证据：resolveOwner 认不出就留空，不再按人气挑一个顶上
+      author: resolved.owner ?? undefined,
       repository: repoUrl ? { url: repoUrl } : undefined,
       metadata: {
-        category: categories.has(node.category) ? node.category : undefined,
-        keywords: keywordsOf(node, pkg),
+        category: node && categories.has(node.category) ? node.category : undefined,
+        keywords: keywordsOf(node ?? { topics: [] }, pkg),
         labels: [
           rec.isBundle ? "dsh-bundle" : "dsh-bundle-unconfirmed",
           ...(rec.hasClient ? ["has-client"] : []),
           ...(freshRelease ? ["recent-release"] : []),
-          ...(chosen.subdir ? ["subdir-package"] : []),
+          ...(chosen?.subdir ? ["subdir-package"] : []),
+          // 作者名不是"两边一致"证实的，就明说待确认 —— 不静默把一个可能错的名字当事实
+          ...(resolved.verified ? [] : ["owner-unverified"]),
           "star-cta", // 行动号召：所有条目都挂（用户要求）
         ],
-        sortKeys: { stars: Number(node.stars) || 0, downloads: chosen.downloads },
+        sortKeys: { stars: Number(node?.stars) || 0, downloads: chosen?.downloads ?? 0 },
       },
       /* 不写 engines：DSH 的校验器（@deepseek-ai/dsh-plugin-market-index 的 marketVersion）对这一项是
        * optional(...) ?? {}，缺失就补一个空对象 —— 写与不写完全等价，21852 个版本各带一个 "engines":{}
@@ -524,7 +623,37 @@ async function main() {
   writeFileSync(OUT, JSON.stringify(index, null, 1));
   console.log("写入 " + OUT + "：" + plugins.length + " 个插件 · " + (JSON.stringify(index).length / 1024).toFixed(0) + " KB");
   if (mergedClaimants) {
-    console.log("同名认领合并: " + mergedClaimants + " 条仓库记录归到同一个包名下（挑的是 npm 包自己声明的那个仓库）");
+    console.log("同名认领合并: " + mergedClaimants + " 条仓库记录归到同一个包名下");
+  }
+  /* 归属证据分布必须每次都打：这是"索引里多少条的作者是确证的"唯一可见来源。
+   * 数字变差（ambiguous 变多）说明采集侧出问题了，不是"指数正常波动"。 */
+  const EVIDENCE_ZH = {
+    [OWNER_EVIDENCE.DECLARED_IN_CLAIMANTS]: "确证（npm 声明的仓库就是声明者之一）",
+    [OWNER_EVIDENCE.DECLARED_IN_MESH]: "待确认（npm 声明的仓库在图里，但它没声明这个包名）",
+    [OWNER_EVIDENCE.DECLARED_ONLY]: "待确认（npm 声明的仓库不在本地数据里）",
+    [OWNER_EVIDENCE.SOLE_CLAIMANT]: "待确认（npm 没写仓库，只有唯一声明者）",
+    [OWNER_EVIDENCE.AMBIGUOUS]: "不署名（npm 没写仓库且有多个声明者）",
+  };
+  const evidenceTotal = [...evidenceCounts.values()].reduce((a, b) => a + b, 0) || 1;
+  console.log("归属证据：");
+  for (const [key, label] of Object.entries(EVIDENCE_ZH)) {
+    const n = evidenceCounts.get(key) ?? 0;
+    console.log("   " + String(n).padStart(5) + "  " + (100 * n / evidenceTotal).toFixed(1).padStart(5) + "%  " + label);
+  }
+  const unverified = plugins.filter((p) => (p.metadata.labels ?? []).includes("owner-unverified")).length;
+  const nameless = plugins.filter((p) => !p.author).length;
+  console.log("待确认 " + unverified + " 条（其中 " + nameless + " 条没写作者名）· 确证 " + (plugins.length - unverified) + " 条");
+  /* 自检：产物已经写盘，这里只做"喊出来"。退出码非 0 不会毁掉这一轮 —— 采集器的
+   * _market_index_fresh 只看产物是否完整写出，所以日志里能看到失败、索引仍然可用。 */
+  const violations = auditOwnership(plugins, cache.packages);
+  if (violations.length) {
+    console.error("✗ 归属自检未通过：" + violations.length + " 条把猜测当事实");
+    for (const v of violations.slice(0, 8)) {
+      console.error("   - " + v.pkg + "：" + v.why + "（npm 声明 " + v.declared + " / 索引写的 " + v.listed + "）");
+    }
+    process.exitCode = 1;
+  } else {
+    console.log("✓ 归属自检通过：没有一行把猜测当事实");
   }
   const skipped = [...skipReasons.entries()].map(([pkg, why]) => ({ pkg, why }));
   if (skipped.length) {

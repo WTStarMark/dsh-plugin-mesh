@@ -6,7 +6,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { toneOf, versionEntries, collectCandidates, keywordsOf, isFreshRelease, seededRandom, shuffled, MIN_STARS_FOR_BADGE, FRESH_RELEASE_DAYS } from "../tools/market-index.mjs";
+import { toneOf, versionEntries, collectCandidates, keywordsOf, isFreshRelease, seededRandom, shuffled, MIN_STARS_FOR_BADGE, FRESH_RELEASE_DAYS, resolveOwner, auditOwnership, OWNER_EVIDENCE } from "../tools/market-index.mjs";
 
 test("人气前缀只放两个数字，不放中文词", () => {
   assert.equal(toneOf(6786, true, 160042), "★6.8k · 160k");
@@ -106,3 +106,105 @@ test("版本条目不写 engines：与 DSH 校验器补出来的空对象等价"
   assert.ok(!("engines" in out[0]), "engines 缺失时 DSH 自己补 {}，写上是纯体积");
   assert.deepEqual(versionEntries([]), []);
 });
+
+/* ---------------------------------------------------------------------------
+ * 归属判定：这条线钉的是线上真实事故 —— 6644 行索引里 263 行挂的仓库与 npm 包
+ * 自己声明的仓库冲突（222 行是完全不同的作者）。旧写法是
+ *   matched ?? claimants.sort(compareRank)[0]
+ * 筛不出来就按复刻/星标/下载量/仓库名排序挑一个顶上，等于把猜测当事实输出。
+ * 现在的规矩：只有"两边一致 = 确证"和"明说无据 = 待确认"两种状态。
+ * ------------------------------------------------------------------------- */
+const claimant = (id, opts = {}) => ({
+  repoId: id,
+  node: { id, owner: id.split("/")[0], htmlUrl: opts.htmlUrl ?? "https://github.com/" + id, stars: opts.stars ?? 0 },
+  pkg: "pkg",
+  downloads: 5,
+  hasDownloads: true,
+});
+
+test("归属：npm 声明的仓库就是声明者之一 → 确证", () => {
+  const claimants = [claimant("yxxbc/dsh-balance-plugin"), claimant("luokai-demo/dsh-plugins")];
+  const r = resolveOwner({ npmRepo: "git+https://github.com/luokai-demo/dsh-plugins.git", claimants });
+  assert.equal(r.evidence, OWNER_EVIDENCE.DECLARED_IN_CLAIMANTS);
+  assert.equal(r.verified, true, "两边一致才算确证");
+  assert.equal(r.owner, "luokai-demo");
+  assert.equal(r.node.id, "luokai-demo/dsh-plugins");
+});
+
+test("归属：大小写不影响匹配（repoKey 一律小写）", () => {
+  const claimants = [claimant("Blank-not-black/dsh-Remote", { htmlUrl: "https://github.com/Blank-not-black/dsh-Remote" })];
+  const r = resolveOwner({ npmRepo: "git+https://github.com/blank-not-black/dsh-remote.git", claimants });
+  assert.equal(r.verified, true, "GitHub 的 owner/repo 大小写不敏感，不能因为大小写就判成不一致");
+  assert.equal(r.node.id, "Blank-not-black/dsh-Remote");
+});
+
+test("归属：npm 声明的仓库在图里、但它没声明这个包名 → 用它，但标待确认", () => {
+  const meshById = new Map([["blank-not-black/dsh-remote", { id: "Blank-not-black/dsh-Remote", owner: "Blank-not-black", htmlUrl: "https://github.com/Blank-not-black/dsh-Remote" }]]);
+  const claimants = [claimant("Blank-not-black/dsh-remote-plugin")];
+  const r = resolveOwner({ npmRepo: "git+https://github.com/Blank-not-black/dsh-remote.git", claimants, meshById });
+  assert.equal(r.evidence, OWNER_EVIDENCE.DECLARED_IN_MESH);
+  assert.equal(r.verified, false, "单边证据不能算确证");
+  assert.equal(r.node.id, "Blank-not-black/dsh-Remote", "要拿回真主那份完整画像（头像/分类/星标）");
+});
+
+test("归属：npm 没写 repository、只有唯一声明者 → 用它，但标待确认", () => {
+  const r = resolveOwner({ npmRepo: null, claimants: [claimant("only/one")] });
+  assert.equal(r.evidence, OWNER_EVIDENCE.SOLE_CLAIMANT);
+  assert.equal(r.verified, false);
+  assert.equal(r.owner, "only");
+});
+
+test("回归 dsh-video-studio：npm 声明的仓库已死、两个仓库抢同一个包名 → 谁都不挑，署发布者自己的名", () => {
+  // 真实数据：npm 上 dsh-video-studio 的 repository 指向 litao36253（仓库已 404），
+  // 而生态图里 jonah791 和 lakeofsky347 都写了同一个包名。
+  const claimants = [claimant("jonah791/dsh-video-studio"), claimant("lakeofsky347/dsh-video-studio")];
+  const r = resolveOwner({ npmRepo: "git+https://github.com/litao36253/dsh-video-studio.git", claimants, meshById: new Map() });
+  assert.equal(r.evidence, OWNER_EVIDENCE.DECLARED_ONLY);
+  assert.equal(r.owner, "litao36253", "署名要给 npm 自己声明的发布者");
+  assert.equal(r.verified, false);
+  assert.notEqual(r.owner, "jonah791");
+  assert.notEqual(r.owner, "lakeofsky347");
+  assert.equal(r.node, null);
+});
+
+test("回归 dsh-plugin-store：真主改了仓库名 → 仍按 npm 声明的旧路径署名，不挑同名的路人", () => {
+  // 真主 yunhuantian 把仓库改成了 dsh-plugin-hub，npm 上的旧包 dsh-plugin-store 还指着旧路径。
+  const claimants = [claimant("0xKcyzz/dsh-plugin-store"), claimant("maoruoyu/dsh-plugin-store")];
+  const r = resolveOwner({ npmRepo: "git+https://github.com/yunhuantian/dsh-plugin-store.git", claimants, meshById: new Map() });
+  assert.equal(r.owner, "yunhuantian");
+  assert.equal(r.verified, false, "旧路径没法在本地核实，只能标待确认");
+  assert.notEqual(r.owner, "0xKcyzz", "旧写法按字母序会挑中 0xKcyzz —— 这是冒名，不是归属");
+});
+
+test("归属：npm 没写 repository 且多个仓库抢同一个包名 → 不署名（宁缺毋错）", () => {
+  // 真实数据：dsh-schedule 有两个仓库声明，npm 元数据里没有 repository 字段。
+  const r = resolveOwner({ npmRepo: null, claimants: [claimant("magicOF2/dsh-schedule"), claimant("Wang-Lin-Chang/dsh-schedule")] });
+  assert.equal(r.evidence, OWNER_EVIDENCE.AMBIGUOUS);
+  assert.equal(r.owner, null, "拿不到证据就不写作者名，绝不按人气挑一个");
+  assert.equal(r.node, null);
+  assert.equal(r.verified, false);
+});
+
+test("归属：空输入不炸", () => {
+  assert.equal(resolveOwner({}).evidence, OWNER_EVIDENCE.AMBIGUOUS);
+  assert.equal(resolveOwner({ npmRepo: "not a url", claimants: [] }).owner, null);
+});
+
+test("自检：与 npm 声明冲突却没标待确认的条目必须被抓出来", () => {
+  const packages = { "pkg-a": { repository: "git+https://github.com/real/owner.git" } };
+  const ok = [
+    { name: "pkg-a", author: "real", repository: { url: "https://github.com/real/owner" }, metadata: { labels: [] } },
+    { name: "pkg-a", author: "real", repository: { url: "https://github.com/real/owner" }, metadata: { labels: ["owner-unverified"] } },
+  ];
+  assert.deepEqual(auditOwnership(ok, packages), [], "一致、或标了待确认，都不算违规");
+
+  const bad = [{ name: "pkg-a", author: "someone-else", repository: { url: "https://github.com/someone-else/fork" }, metadata: { labels: [] } }];
+  const found = auditOwnership(bad, packages);
+  assert.equal(found.length, 1, "挂错人又没标记，必须报出来");
+  assert.equal(found[0].pkg, "pkg-a");
+
+  const nameless = [{ name: "pkg-a", metadata: { labels: [] } }];
+  assert.equal(auditOwnership(nameless, packages).length, 1, "没作者名又没标待确认，同样算违规");
+  assert.equal(auditOwnership([], packages).length, 0);
+});
+
