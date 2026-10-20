@@ -129,6 +129,8 @@ const hudButtons = [...indexHtml.matchAll(/<button[^>]*data-act="([^"]+)"[^>]*>/
   const b = new FakeNode("button");
   b.dataset.act = m[1];
   b.className = /class="on"/.test(m[0]) ? "on" : "";
+  // 真实 DOM 里 className 与 classList 是联动的；桩里手动同步，默认选中态才测得到
+  if (/class="on"/.test(m[0])) b.classList.add("on");
   return b;
 });
 const deckNode = new FakeNode("main");
@@ -219,6 +221,36 @@ globalThis.fetch = async (url) => {
             items: starRows,
           },
         },
+      }),
+    };
+  }
+  if (target.includes("/api/review-nodes")) {
+    // 评测站公开测评（桩）：形状与 tools/review-source.mjs 的 snapshot 一致
+    const picked = mesh.nodes.filter((n) => n.id !== "deepseek-ai/deepseek-harness").slice(0, 3);
+    const pluginUrl = "https://review.lingshulab.com/plugins/01a1aaaa-1111-7000-8000-000000000001";
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      json: async () => ({
+        enabled: true,
+        loading: false,
+        ok: true,
+        stale: false,
+        expired: false,
+        error: null,
+        source: "plugins-pages",
+        site: "https://review.lingshulab.com",
+        fetchedAt: new Date().toISOString(),
+        count: picked.length,
+        reviews: picked.length,
+        ids: picked.map((n) => n.id),
+        byId: Object.fromEntries(
+          picked.map((n) => [
+            n.id,
+            { count: 1, url: pluginUrl, plugins: [{ pluginId: "01a1aaaa-1111-7000-8000-000000000001", pluginPath: ".", count: 1 }] },
+          ]),
+        ),
       }),
     };
   }
@@ -1197,5 +1229,20 @@ test("榜单弹窗：点奖杯 → 渲染榜单 → 切榜 → 点行跳转 → 
   for (const fn of windowListeners.keydown ?? []) fn({ key: "Escape", target: {} });
   assert.equal(modal.hidden, true, "Esc 应关闭榜单弹窗");
   assert.equal(trophy.attrs["aria-expanded"], "false");
+});
+
+test("评测联动：HUD「有测评」按钮默认开、点一下可关、再点可开", async () => {
+  const reviewed = document.querySelectorAll(".hud-tl button").find((b) => b.dataset.act === "reviewed");
+  assert.ok(reviewed, "HUD 应有「有测评」按钮（由 index.html 提供）");
+  assert.equal(reviewed.hidden, false, "数据可用时按钮应可见");
+  assert.ok(reviewed.classList.contains("on"), "默认开");
+  assert.match(reviewed.title, /评测站/, "title 应说明数据来源与行为");
+
+  reviewed.fire("click");
+  await new Promise((r) => setTimeout(r, 20));
+  assert.ok(!reviewed.classList.contains("on"), "点一下应关闭");
+  reviewed.fire("click");
+  await new Promise((r) => setTimeout(r, 20));
+  assert.ok(reviewed.classList.contains("on"), "再点一次应打开");
 });
 

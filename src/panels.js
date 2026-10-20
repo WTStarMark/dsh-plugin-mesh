@@ -347,6 +347,10 @@ export function renderInspector(root, prepared, state, actions, view = {}) {
   const node = state.selectedId ? prepared.byId.get(state.selectedId) : null;
   const arm = view.armOf && node ? view.armOf.get(node.id) : null;
   const counts = view.linkCounts ?? {};
+  // 评测站公开测评（app 从 /api/review-nodes 注入）：只给有测评的仓库显示入口，绝不显示「0 篇」。
+  // 注意与 node.review（待人工复核）不是一回事。
+  const review = node ? view.reviewInfo?.[node.id] ?? null : null;
+  const reviewMeta = view.reviewMeta ?? null;
 
   const legendSec = sec("图例", [
       el(
@@ -446,7 +450,25 @@ export function renderInspector(root, prepared, state, actions, view = {}) {
         // 预计算契约里没有 htmlUrl（为省载荷丢弃），统一从 id 推导；老数据仍可用 htmlUrl
         el("a", { href: node.htmlUrl ?? "https://github.com/" + node.id, target: "_blank", rel: "noreferrer", text: "在 GitHub 打开" }),
         node.homepage ? el("a", { href: node.homepage, target: "_blank", rel: "noreferrer", text: "项目主页" }) : null,
+        // 评测站入口：落到该仓库主插件的测评页（服务端已按「篇数 → 根目录 → 路径」选出主插件）
+        review
+          ? el("a", {
+              href: review.url,
+              target: "_blank",
+              rel: "noopener noreferrer",
+              text: "在评测站看 " + review.count + " 篇测评",
+            })
+          : null,
       ]),
+      review
+        ? el("div", {
+            class: "note",
+            text:
+              reviewMeta && reviewMeta.fetchedAt
+                ? "测评数据同步于 " + formatDate(reviewMeta.fetchedAt) + (reviewMeta.stale ? "（上游暂不可达，可能延迟）" : "")
+                : "测评数据同步时间未知",
+          })
+        : null,
       el("div", { class: "links" }, [
         el("a", {
           href: "#",

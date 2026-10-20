@@ -52,6 +52,10 @@ export function createGraphView(canvas, hooks = {}) {
   // 「索引仓库」开关（默认关）：开 = 给有 npm 包的球套一层青绿光环；关 = 不画。
   // 只留光环不挂文字：全图两千多个这类球，逐个挂「索引仓库」四个字会把画面糊掉、还会把球名挤走。
   let showIndexed = false;
+  // 评测站公开测评（review.lingshulab.com）：「有测评」开关（默认开）+ 有测评的仓库 id 集合。
+  // 注意：这里的 reviewed 指「评测站有公开测评」，与节点字段 node.review（待人工复核）无关。
+  let reviewIds = null;
+  let showReviewed = false;
   // 同作者兄弟缓存：一帧可能要画上千条线，别每帧都重新过滤一遍 owner 索引
   let siblingCache = { id: null, ids: null };
   function siblingsOf(id) {
@@ -128,6 +132,8 @@ export function createGraphView(canvas, hooks = {}) {
     text: theme.canvas.text ?? "#ffffff",
     // npm 青绿：有 npm 包的仓库外圈光环用。P() 是白名单式取色，漏了它就会静默回退到 accent（蓝）
     npm: theme.canvas.npm ?? theme.canvas.accent,
+    // 评测紫：有公开测评的仓库外圈光环用（同样必须在白名单里，否则会静默回退到 accent）
+    review: theme.canvas.review ?? "#7c5cf5",
     grid: gridRGB,
   });
   const rgba = (parts, a) => "rgba(" + parts + "," + a + ")";
@@ -541,9 +547,26 @@ export function createGraphView(canvas, hooks = {}) {
         ctx.strokeStyle = hexA(haloColor, 0.78);
         ctx.stroke();
       }
+      // 评测站有公开测评的仓库：打开「有测评」后外圈套一层紫色光环（宽而淡 + 窄而实两圈，不用 shadowBlur）。
+      // 半径预算（避免与既有环重叠）：基础 r+1 / 青绿 r+2.6（宽 3.6，占 r+0.8~4.4）/ 紫 r+6.2 /
+      // 待复核虚线 r+8.6 / 选中 r+10.6。改半径时请同步这张表，否则「紫+青绿+待复核」同球会糊成一圈。
+      if (showReviewed && reviewIds && active && inFocus && reviewIds.has(node.id) && r > 1.4) {
+        const haloR = r + 6.2;
+        const haloColor = p.review;
+        ctx.beginPath();
+        ctx.arc(sx, sy, haloR, 0, Math.PI * 2);
+        ctx.lineWidth = 2.8;
+        ctx.strokeStyle = hexA(haloColor, 0.14);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(sx, sy, haloR, 0, Math.PI * 2);
+        ctx.lineWidth = 1.1;
+        ctx.strokeStyle = hexA(haloColor, 0.78);
+        ctx.stroke();
+      }
       if ((node.review || node.verdict === "noise") && active && r > 2.6) {
         ctx.beginPath();
-        ctx.arc(sx, sy, r + 4.5, 0, Math.PI * 2);
+        ctx.arc(sx, sy, r + 8.6, 0, Math.PI * 2);
         ctx.setLineDash([2, 3]);
         ctx.strokeStyle = hexA(p.warn, 0.55);
         ctx.stroke();
@@ -551,7 +574,7 @@ export function createGraphView(canvas, hooks = {}) {
       }
       if (isSel) {
         ctx.beginPath();
-        ctx.arc(sx, sy, r + 8, 0, Math.PI * 2);
+        ctx.arc(sx, sy, r + 10.6, 0, Math.PI * 2);
         ctx.lineWidth = 2;
         ctx.strokeStyle = hexA(p.accent, 0.9);
         ctx.stroke();
@@ -930,6 +953,19 @@ export function createGraphView(canvas, hooks = {}) {
     },
     get indexed() {
       return showIndexed;
+    },
+    /** 有公开测评的仓库 id 集合（应用层从 /api/review-nodes 取）：外圈紫色光环 */
+    setReviewIds(set) {
+      reviewIds = set && set.size ? set : null;
+      invalidate();
+    },
+    /** 「有测评」开关（默认开）：开 = 画紫色光环，关 = 不画 */
+    setReviewed(on) {
+      showReviewed = !!on;
+      invalidate();
+    },
+    get reviewed() {
+      return showReviewed;
     },
     setEdgeTypes(set) {
       edgeTypes = new Set(set);

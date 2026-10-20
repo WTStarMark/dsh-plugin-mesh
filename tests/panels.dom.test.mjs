@@ -262,3 +262,51 @@ test("回归：右栏「在 GitHub 打开」必须有真实 href（核心路径�
   const link2 = root2.all.find((n) => String(n.textContent ?? "") === "在 GitHub 打开");
   assert.equal(link2.attrs.href, "https://github.com/example/custom", "有 htmlUrl 时应优先使用");
 });
+
+/* ---------- 评测联动：右栏的「在评测站看 N 篇测评」 ---------- */
+
+const REVIEW_URL = "https://review.lingshulab.com/plugins/01a1aaaa-1111-7000-8000-000000000001";
+
+test("renderInspector：有公开测评时渲染主链接与同步时间（rel 带 noopener）", () => {
+  const root = new FakeNode();
+  const node = prepared.nodes.find((n) => n.id !== "deepseek-ai/deepseek-harness");
+  const view = {
+    reviewInfo: {
+      [node.id]: { count: 3, url: REVIEW_URL, plugins: [{ pluginId: "01a1aaaa-1111-7000-8000-000000000001", pluginPath: ".", count: 3 }] },
+    },
+    reviewMeta: { fetchedAt: "2026-10-20T09:10:00.000Z", stale: false },
+  };
+  panels.renderInspector(root, prepared, { ...baseState(), selectedId: node.id }, actions, view);
+  const link = root.all.find((n) => n.tagName === "a" && /在评测站看 3 篇测评/.test(n.textContent));
+  assert.ok(link, "应渲染「在评测站看 N 篇测评」");
+  assert.equal(link.attrs.href, REVIEW_URL);
+  assert.equal(link.attrs.target, "_blank");
+  assert.match(link.attrs.rel, /noopener/);
+  const note = root.all.find((n) => n.className === "note" && /测评数据同步于/.test(n.textContent));
+  assert.ok(note, "应渲染测评数据同步时间");
+  assert.match(note.textContent, /2026|10-20/, "同步时间应可读，实际 " + note.textContent);
+});
+
+test("renderInspector：无测评时不渲染入口，也不显示「0 篇」字样", () => {
+  const root = new FakeNode();
+  const node = prepared.nodes[0];
+  panels.renderInspector(root, prepared, { ...baseState(), selectedId: node.id }, actions, {
+    reviewInfo: {},
+    reviewMeta: { fetchedAt: null, stale: false },
+  });
+  const text = root.all.map((n) => n.textContent ?? "").join(" ");
+  assert.doesNotMatch(text, /在评测站看/, "无测评不应有入口");
+  assert.doesNotMatch(text, /0 篇测评/, "不能把「没有」画成「0 篇」");
+});
+
+test("renderInspector：stale 时同步时间旁标注可能延迟", () => {
+  const root = new FakeNode();
+  const node = prepared.nodes.find((n) => n.id !== "deepseek-ai/deepseek-harness");
+  panels.renderInspector(root, prepared, { ...baseState(), selectedId: node.id }, actions, {
+    reviewInfo: { [node.id]: { count: 1, url: REVIEW_URL, plugins: [] } },
+    reviewMeta: { fetchedAt: "2026-10-20T09:10:00.000Z", stale: true },
+  });
+  const note = root.all.find((n) => n.className === "note" && /测评数据同步于/.test(n.textContent));
+  assert.ok(note, "应渲染同步时间");
+  assert.match(note.textContent, /可能延迟/, "stale 时要说清可能延迟");
+});

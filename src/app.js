@@ -155,6 +155,7 @@ const state = {
   avatars: true,
   labels: false, // 标签默认关闭：球太密时标签反而糊成一片
   indexed: false, // 「索引仓库」小标默认关：两千多个球全挂上会糊成一片
+  reviewed: true, // 「有测评」紫环默认开：全站只有几十个仓库有公开测评，不会糊（注意与 node.review 待复核无关）
   hideRail: false,
   hideDossier: false,
   groupBy: "category",
@@ -362,6 +363,9 @@ function viewInfo() {
   return {
     groupBy: state.groupBy,
     hubId: HUB_ID,
+    // 评测站数据（面板用）：只带引用，不复制大对象
+    reviewInfo,
+    reviewMeta,
     centerId,
     groups: computeGroups(),
     armOf,
@@ -885,6 +889,8 @@ function bindChrome() {
   });
 
   document.querySelectorAll(".hud-tl button").forEach((btn) => {
+    // 记下「有测评」按钮：数据不可用（未配置/过期）时要隐藏它
+    if (btn.dataset.act === "reviewed") reviewedBtn = btn;
     btn.addEventListener("click", () => {
       const act = btn.dataset.act;
       if (act === "zoom-in") view.zoomBy(1.25);
@@ -909,6 +915,10 @@ function bindChrome() {
         state.indexed = !view.indexed;
         view.setIndexed(state.indexed);
         btn.classList.toggle("on", state.indexed);
+      } else if (act === "reviewed") {
+        state.reviewed = !view.reviewed;
+        view.setReviewed(state.reviewed);
+        btn.classList.toggle("on", state.reviewed);
       }
     });
   });
@@ -981,6 +991,11 @@ let precomputed = null;
 let details = null;
 // 有 npm 包的仓库 id（与市场索引源重叠）：从 /api/npm-nodes 取，喂给渲染器画外圈光环
 let npmNodeIds = null;
+// 评测站公开测评（/api/review-nodes）：ids 用于画紫环，byId 给详情面板注入链接，meta 给「同步时间/延迟」提示
+let reviewIds = null;
+let reviewInfo = {};
+let reviewMeta = null;
+let reviewedBtn = null;
 let panels = null;
 
 /** 面板是动态载入的：首屏先把画布画出来，不为了几个面板阻塞解析 */
@@ -1055,6 +1070,8 @@ function syncView() {
   view.setLabels(state.labels);
   view.setIndexed(state.indexed);
   view.setNpmIds(npmNodeIds);
+  view.setReviewIds(reviewIds);
+  view.setReviewed(state.reviewed && !!reviewIds);
   applyTheme();
   apply();
 }
@@ -1154,6 +1171,45 @@ async function main() {
   await bootMesh(mesh, { resetFilters: true, core });
   loadPanels();
 
+  /** 评测站公开测评：服务端内存快照（请求零等待），失败不影响页面；冷启动/无数据时短退避重试几次 */
+  const REVIEW_RETRY_MS = [5000, 10000, 20000];
+  function applyReviewMeta(data) {
+    reviewMeta = data && typeof data === "object" ? data : null;
+    const available = !!reviewMeta && reviewMeta.enabled !== false && reviewMeta.expired !== true;
+    reviewIds = available && Array.isArray(reviewMeta.ids) ? new Set(reviewMeta.ids) : null;
+    reviewInfo = available && reviewMeta.byId && typeof reviewMeta.byId === "object" ? reviewMeta.byId : {};
+    if (reviewedBtn) {
+      reviewedBtn.hidden = !available;
+      reviewedBtn.title = !available
+        ? "评测数据暂不可用（未配置、上游不可达或数据过期），已隐藏"
+        : "打开后：在评测站有公开测评的仓库（数据来自 review.lingshulab.com，每 10 分钟同步" +
+          (reviewMeta && reviewMeta.stale ? "；当前数据可能延迟" : "") +
+          "）外圈会套一层紫色光环；默认开";
+    }
+    if (view) {
+      view.setReviewIds(available ? reviewIds : null);
+      view.setReviewed(state.reviewed && available);
+    }
+    apply({ rail: false, inspector: false });
+  }
+
+  function loadReviews(attempt = 0) {
+    fetch("/api/review-nodes")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!data) throw new Error("HTTP");
+        applyReviewMeta(data);
+        // 冷启动 / 首拉还没完成：服务端在后台预热，这里短退避再问几次，光环不用等用户刷新页面
+        const waiting = data.enabled !== false && data.expired !== true && data.ok !== true;
+        if (waiting && attempt < REVIEW_RETRY_MS.length) {
+          setTimeout(() => loadReviews(attempt + 1), REVIEW_RETRY_MS[attempt]);
+        }
+      })
+      .catch(() => {
+        if (attempt < REVIEW_RETRY_MS.length) setTimeout(() => loadReviews(attempt + 1), REVIEW_RETRY_MS[attempt]);
+      });
+  }
+
   // npm 光环名单：单独一个小接口（只回 id）。晚到就晚画，绝不阻塞首屏；失败也不影响页面。
   fetch("/api/npm-nodes")
     .then((res) => (res.ok ? res.json() : null))
@@ -1164,6 +1220,7 @@ async function main() {
       apply();
     })
     .catch(() => {});
+  loadReviews();
   if (fromCache) dom.hint.title = "已用本地缓存渲染，正在后台校验是否有新快照…";
 
   // 在线实时更新：数据每次核对都带 ETag，没变就是 304（几乎零成本），变了才重建
