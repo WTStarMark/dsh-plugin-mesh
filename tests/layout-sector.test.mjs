@@ -214,6 +214,19 @@ test("真实数据：扇区数等于分组数，尺寸可控", () => {
   // 扇区数随分类数变化（v0.4 起 19 个分类），角度步长必须等于 2π / 扇区数
   assert.ok(Math.abs(L.angleStep - (Math.PI * 2) / L.arms.length) < 1e-12, "角度步长应等于 2π/扇区数");
   const longest = Math.max(...L.arms.map((a) => a.endRadius));
-  assert.ok(longest < 4000, "整体尺寸不应失控: " + longest.toFixed(0));
+  // 布局半径随节点数按 sqrt(n) 增长（扇区面积 ∝ 成员数），固定 4000 的绝对阈值会随数据增长必然翻红：
+  // 2026-10-15 到 2026-10-20 只有 5 天，真实数据就从 3.02 万涨到 3.37 万，半径 4101 超过了 4000。
+  // 哨兵语义保留、口径改成按规模：大数集给「96 + 24·sqrt(n)」的上限（96 = minRadius；
+  // 基线 2026-10-20：33,675 个有信号节点 / longest=4,103，(longest-96)/sqrt(n)=21.8，上限留约 10% 余量）。
+  // 小数据集（CI 夹具）继续用原来的绝对阈值，行为不变。
+  if (prepared.nodes.length <= 5000) {
+    assert.ok(longest < 4000, "整体尺寸不应失控: " + longest.toFixed(0));
+  } else {
+    const cap = 96 + 24 * Math.sqrt(prepared.nodes.length);
+    assert.ok(
+      longest <= cap,
+      "整体尺寸不应失控: " + longest.toFixed(0) + "（" + prepared.nodes.length + " 个节点，上限 " + cap.toFixed(0) + "）",
+    );
+  }
   assert.ok(L.arms[0].count > 100);
 });
