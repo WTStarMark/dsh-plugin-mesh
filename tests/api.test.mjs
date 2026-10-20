@@ -1066,7 +1066,8 @@ before(async () => {
   base = "http://127.0.0.1:" + port;
   child = spawn(process.execPath, [resolve(ROOT, "tools/serve.mjs")], {
     cwd: ROOT,
-    env: { ...process.env, PORT: String(port), HOST: "127.0.0.1" },
+    // 显式清空评测联动配置：测试不该依赖开发机 .env，也不该外呼
+    env: { ...process.env, PORT: String(port), HOST: "127.0.0.1", REVIEWS_SITE_URL: "", REVIEWS_ALLOW_HTTP: "" },
     stdio: "ignore",
   });
   for (let i = 0; i < 60; i++) {

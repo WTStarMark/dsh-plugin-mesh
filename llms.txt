@@ -20,6 +20,7 @@
 - `GET /api/search?q=&limit=` 紧凑检索：只回 id 与计数，含 README 正文命中
 - `GET /api/ranking?days=7&limit=50&noise=all|hide|only` 三张榜：周更新 / 周 star / 周 npm 下载
 - `GET /api/npm-nodes` 有 npm 包的仓库 id 列表
+- `GET /api/review-nodes` 在评测站（review.lingshulab.com）有公开测评的仓库 id 与插件测评页链接；每 10 分钟同步、响应缓存 60 秒（这里的 review 指评测站测评，不是节点里的「待复核」）
 - `GET /market/index.json` DSH 插件市场索引，format 1，可直接加进 DSH
 - `GET /api/card/:owner/:name.svg` 可分享的仓库卡片
 
@@ -38,6 +39,7 @@
 - `verdict` 三档：related / noise / manual；默认只标注、不过滤。
 - 各榜窗口互相独立：npm 的最近 7 天与 star 的 7 个自然日不一定重合，行里带窗口字段。
 - 星标与下载量都是采集快照，不是实时值。
+- 评测数据来自 review.lingshulab.com 的公开接口，最多延迟约 11 分钟；上游不可达时沿用旧数据（`stale`），超过 7 天标 `expired` 并停止展示光环。它是可选功能，默认关闭。
 
 ## 引用与礼仪
 

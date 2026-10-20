@@ -3,9 +3,9 @@
 插件生态图是一个网页：把 GitHub 上带 `dsh` 系列标签的仓库，按功能画成一张可交互的关系图。圆心固定是官方仓库 `deepseek-ai/deepseek-harness`，往外分成 21 个功能扇区（扇区就是功能分区），数据每小时自动更新。
 
 [![在线访问](https://img.shields.io/badge/在线访问-www.moc--chen.cn-2f7df6?style=flat-square)](https://www.moc-chen.cn/)
-[![测试](https://img.shields.io/badge/tests-253%20JS%20%2B%20148%20Python-3fb8a8?style=flat-square)](#测试与-ci)
+[![测试](https://img.shields.io/badge/tests-319%20JS%20%2B%20165%20Python-3fb8a8?style=flat-square)](#测试与-ci)
 [![依赖](https://img.shields.io/badge/dependencies-0-57b894?style=flat-square)](#技术选型)
-[![版本](https://img.shields.io/badge/version-v0.5.2-9b8cf0?style=flat-square)]()
+[![版本](https://img.shields.io/badge/version-v0.5.3-9b8cf0?style=flat-square)]()
 
 在线地址：<https://www.moc-chen.cn/>
 
@@ -31,6 +31,7 @@
 | 生态榜单 | 顶栏奖杯弹窗两个榜，各最多 50 行：周更新热榜（本周真发过 release 的项目）与周 star 热榜 |
 | 搜索与筛选 | 搜仓库名 / 作者 / 描述 / topics，README 正文走后端检索；筛选只淡化、不改变位置 |
 | 三类连线 | 同作者（完整关系）、主题共现（琥珀虚线）、生态共鸣（紫罗兰实线，基座 → 插件） |
+| 评测联动 | 在评测站（review.lingshulab.com）有公开测评的仓库外圈套一层紫色光环，右栏可跳该仓库的插件测评页；数据由服务端只读聚合、每 10 分钟同步，失败沿用旧数据、7 天后自动隐藏（默认关闭，配 `REVIEWS_SITE_URL` 才开） |
 | 管理后台 | 与站点同进程同端口，七个标签页；改完两份黑名单或共鸣清单点「应用变更」离线重建，采集参数下一轮自动生效 |
 | 数据出口 | 只读查询 API + 每个仓库一张自包含 SVG 卡片 |
 | 名单两档粒度 | 作者级（整个账号不可信）与单仓库级（那人有真项目，只剔这一个）；列表里能直接看到"加了他会少几个仓库" |
@@ -151,7 +152,7 @@ npm run serve                       # 然后访问 http://127.0.0.1:8788/<ADMIN_
 ## 测试与 CI
 
 ```bash
-npm test                           # 前端 + 后端（本机实测：前端 253 项、后端 148 项）
+npm test                           # 前端 + 后端（本机实测：前端 319 项、后端 165 项）
 npm run test:js                    # 只跑前端（node:test）
 npm run test:py                    # 只跑后端（unittest）
 npm run seed:fixture               # 用 data/sample-raw.json 生成夹具数据集（npm test 会自动调用）
@@ -174,6 +175,8 @@ pm2 save && pm2 startup systemd
 
 `tools/deploy-remote.sh` 是配套的同步脚本。它只同步代码，`data/`、`.env`、`.git` 都不动。同步后用远端自己的数据重算预计算产物，再重启 pm2。
 
+评测联动是可选功能、默认关闭：两个节点各自在 `.env` 里补 `REVIEWS_SITE_URL=https://review.lingshulab.com`（其余参数见 `.env.example`），再 `pm2 restart dsh-plugin-mesh --update-env`。它只读评测站公开接口、每 10 分钟同步一次；`REVIEWS_ENABLED=0` 可随时关闭；采集器不用改。
+
 ## 目录结构
 
 ```
@@ -183,12 +186,12 @@ admin/                   管理后台前端：index.html / admin.css / app.js / 
 tools/                   服务与工具：serve（静态服务 + API + 后台挂载）、api（查询 API + 卡片）、
                          admin / admin-auth / admin-config / admin-setup（后台四件套）、
                          precompute-layout、categories、relevance、ecosystem-bases、curate-ecosystem、
-                         preview-svg、snapshot-svg、dsh-tokens、reclassify、dedupe-renames、
+                         review-source（评测站只读取数）、preview-svg、snapshot-svg、dsh-tokens、reclassify、dedupe-renames、
                          seed-sample、seed-fixture、deploy-remote.sh
 backend/                 Python 采集器：collect.py（--once / --loop / --from-store / --from-raw /
                          --budget / --readme-budget / --releases-budget）、dsh_mesh/（github / segments /
                          classify / build / snapshot / releases / readmes / status / admin_config / config）、
-                         verify_parity.py、check_token.py、tests/（148 项后端测试）
+                         verify_parity.py、check_token.py、tests/（165 项后端测试）
 docs/                    data-contract.md、admin.md、frontend-design.md 与预览图
 ```
 
@@ -212,6 +215,7 @@ docs/                    data-contract.md、admin.md、frontend-design.md 与预
 | GET | `/api/repos` | 检索仓库（过滤 / 排序 / 翻页），`q` 同时匹配 README 正文；行带 `verdict` |
 | GET | `/api/search?q=&limit=` | 紧凑检索：只回命中 id 与计数 |
 | GET | `/api/ranking?days=7&limit=50` | 两个榜单，含口径字段与数据新鲜度；行带 `verdict`，可传 `noise=hide|only` |
+| GET | `/api/review-nodes` | 在评测站有公开测评的仓库：`ids` + `byId`（各插件篇数与插件测评页 URL）。每 10 分钟同步、响应缓存 60 秒；失败沿用旧数据并标 `stale`，超过 7 天标 `expired`。注意这里的 review 指「评测站测评」，不是节点字段 `node.review` 的「待人工复核」 |
 
 ### 详情、卡片与统计
 

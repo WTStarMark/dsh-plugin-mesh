@@ -28,6 +28,7 @@
   【数据来源与更新节奏】
     · GitHub 搜索接口：仓库、星标、主题标签、推送时间。
     · npm 官方接口：版本、周下载量。
+    · 评测站公开接口（可选，默认关闭）：在 review.lingshulab.com 有公开测评的仓库与插件页链接。
     · 每小时采集一次。页面上所有数字都是「采集那一刻的快照」，不是实时值。
 
   【API 调用规则】
@@ -38,6 +39,8 @@
     4. 请求请带 Accept-Encoding: gzip：市场索引有几 MB，不压缩容易超时。
     5. User-Agent 标明身份与用途，方便我们放行与排查。
     6. 索引源 GET /market/index.json 是 DSH 插件市场 format 1，可直接加进 DSH。
+    7. 评测数据走 GET /api/review-nodes（评测站公开测评，不是「待复核」）：每 10 分钟同步、
+       缓存 60 秒；上游不可达时沿用旧数据并标 stale，超过 7 天标 expired。
 
   【数据口径，读错会得出错误结论】
     · 缺数据一律是「—」或 unknown，不是 0；不要把「取不到」当成「没有」。
@@ -104,7 +107,7 @@
     <span class="sigil" aria-hidden="true">◈</span>
     <div class="brand-text">
       <b>插件生态图</b>
-      <small>插件生态扇区图 · v0.5.2</small>
+      <small>插件生态扇区图 · v0.5.3</small>
     </div>
   </div>
   <div class="prompt">
@@ -265,6 +268,7 @@
           <li><code>GET /api/search</code><span>紧凑检索：只回 id 与计数，含 README 正文命中</span></li>
           <li><code>GET /api/ranking</code><span>三张榜：周更新 / 周 star / 周 npm 下载，参数 days、limit、noise</span></li>
           <li><code>GET /api/npm-nodes</code><span>有 npm 包的仓库 id 列表</span></li>
+          <li><code>GET /api/review-nodes</code><span>在评测站有公开测评的仓库与插件测评页链接（每 10 分钟同步；非「待复核」）</span></li>
           <li><code>GET /market/index.json</code><span>DSH 插件市场索引，format 1，可直接加进 DSH</span></li>
           <li><code>GET /api/card/:owner/:name.svg</code><span>可分享的仓库卡片</span></li>
         </ul>
