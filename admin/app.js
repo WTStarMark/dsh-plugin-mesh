@@ -2663,6 +2663,20 @@ function buildSettingsView(root) {
   sec2.append(refs.cLive, refs.cPath, refs.cNote);
   root.append(sec2);
 
+  // 倡议书：正文原来写死在 index.html，现在后台可改，保存后前台 /api/manifesto 立刻生效
+  const sec3 = card("倡议书内容", [btn("保存", "primary", onSaveManifesto), btn("恢复默认", null, onResetManifesto)]);
+  refs.mfNotice = noticeEl();
+  refs.mfBody = el("div", "manifesto-edit");
+  sec3.append(refs.mfNotice, refs.mfBody);
+  root.append(sec3);
+
+  // 多节点（镜像）：节点清单供前台切换；同时开启「访问 / 在线」按所有节点合计
+  const sec4 = card("多节点（镜像）", [btn("添加节点", null, onAddClusterNode), btn("保存", "primary", onSaveCluster)]);
+  refs.clNotice = noticeEl();
+  refs.clBody = el("div", "cluster-edit");
+  sec4.append(refs.clNotice, refs.clBody);
+  root.append(sec4);
+
   return refs;
 }
 
@@ -2685,6 +2699,7 @@ async function loadSettingsView() {
   }
   renderSettings();
   renderSettingsLive();
+  await Promise.all([loadManifestoEditor(refs), loadClusterEditor(refs)]);
 }
 
 function ensureSettingsDraft() {
@@ -4110,4 +4125,239 @@ if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", boot);
 } else {
   boot();
+}
+
+/* ============================================================
+   设置页扩展：倡议书内容 / 多节点（镜像）
+   ============================================================ */
+
+let manifestoDraft = null;
+let clusterDraft = null;
+let clusterMeta = { nodeId: "", self: "", siteUrl: "" };
+
+function editField(label, control) {
+  const row = el("div", "edit-field");
+  row.append(el("span", "edit-label", label), control);
+  return row;
+}
+
+function textAreaField(value, rows) {
+  const area = el("textarea", "input edit-area");
+  area.rows = rows || 8;
+  area.spellcheck = false;
+  area.value = value ?? "";
+  return area;
+}
+
+function renderManifestoEditor(refs) {
+  const box = refs && refs.mfBody;
+  if (!box || !manifestoDraft) return;
+  box.textContent = "";
+  const title = inputEl("", "生态图倡议书", manifestoDraft.title);
+  title.addEventListener("input", () => { manifestoDraft.title = title.value; });
+  const subtitle = inputEl("", "一句话副标题", manifestoDraft.subtitle);
+  subtitle.addEventListener("input", () => { manifestoDraft.subtitle = subtitle.value; });
+  box.append(editField("标题", title), editField("副标题", subtitle));
+  for (const page of manifestoDraft.pages) {
+    const group = el("div", "manifesto-page-edit");
+    group.append(el("div", "hint", "页签 id：" + page.id));
+    const label = inputEl("", "页签文字", page.label);
+    label.addEventListener("input", () => { page.label = label.value; });
+    const area = textAreaField(page.html, 12);
+    area.addEventListener("input", () => { page.html = area.value; });
+    group.append(editField("页签文字", label), editField("正文 HTML（可用 mo-lead / mo-sec / mo-promise 等现有样式类）", area));
+    box.append(group);
+  }
+  box.append(el("div", "hint", "保存后前台顶栏「倡议书」立即用新内容；「恢复默认」写回内置版本。正文允许 HTML，请勿粘贴来路不明的脚本。"));
+}
+
+async function loadManifestoEditor(refs) {
+  if (!refs || !refs.mfBody) return;
+  try {
+    const data = await apiGet("api/manifesto");
+    const doc = data && data.manifesto ? data.manifesto : null;
+    if (!doc) throw new Error("返回内容缺失");
+    manifestoDraft = {
+      title: doc.title || "",
+      subtitle: doc.subtitle || "",
+      pages: (Array.isArray(doc.pages) ? doc.pages : []).map((p) => ({ id: p.id, label: p.label, html: p.html })),
+    };
+    hideNotice(refs.mfNotice);
+    renderManifestoEditor(refs);
+  } catch (e) {
+    if (!e || e.status !== 401) setNotice(refs.mfNotice, (e && e.message) || "读取倡议书失败", "err");
+  }
+}
+
+async function onSaveManifesto() {
+  const refs = V.settings;
+  if (!refs || !manifestoDraft) return;
+  if (!manifestoDraft.title.trim()) { setNotice(refs.mfNotice, "标题不能为空", "err"); return; }
+  try {
+    const data = await apiPost("api/manifesto", {
+      title: manifestoDraft.title,
+      subtitle: manifestoDraft.subtitle,
+      pages: manifestoDraft.pages.map((p) => ({ id: p.id, label: p.label, html: p.html })),
+    });
+    const doc = data && data.manifesto ? data.manifesto : null;
+    if (doc) {
+      manifestoDraft = {
+        title: doc.title,
+        subtitle: doc.subtitle,
+        pages: doc.pages.map((p) => ({ id: p.id, label: p.label, html: p.html })),
+      };
+      renderManifestoEditor(refs);
+    }
+    setNotice(refs.mfNotice, "已保存：前台刷新后生效（约 5 秒缓存）", "ok");
+    toast("倡议书已保存", "ok");
+  } catch (e) {
+    reportError(e);
+    setNotice(refs.mfNotice, (e && e.message) || "保存失败", "err");
+  }
+}
+
+async function onResetManifesto() {
+  const refs = V.settings;
+  try {
+    await apiPost("api/manifesto", { reset: true });
+    await loadManifestoEditor(refs);
+    setNotice(refs.mfNotice, "已恢复默认倡议书", "ok");
+    toast("已恢复默认", "ok");
+  } catch (e) {
+    reportError(e);
+    if (refs) setNotice(refs.mfNotice, (e && e.message) || "恢复默认失败", "err");
+  }
+}
+
+function clusterNodeRow(node, index) {
+  const wrap = el("div", "cluster-node");
+  const head = el("div", "cluster-node-head");
+  head.append(el("b", null, "节点 " + (index + 1)));
+  head.append(btn("移除", "danger small", () => {
+    clusterDraft.nodes.splice(index, 1);
+    renderClusterEditor(V.settings);
+  }));
+  const id = inputEl("mono", "节点 id（对应那台机器的 NODE_ID）", node.id);
+  id.addEventListener("input", () => { node.id = id.value; });
+  const label = inputEl("", "显示名（前台下拉里看到的名字）", node.label);
+  label.addEventListener("input", () => { node.label = label.value; });
+  const url = inputEl("mono", "对外访问地址，如 https://www.moc-chen.cn", node.url);
+  url.addEventListener("input", () => { node.url = url.value; });
+  const role = el("select", "input");
+  for (const [value, text] of [["primary", "主节点"], ["mirror", "镜像节点"]]) {
+    const option = el("option", null, text);
+    option.value = value;
+    role.append(option);
+  }
+  role.value = node.role === "primary" ? "primary" : "mirror";
+  role.addEventListener("change", () => { node.role = role.value; });
+
+  const probeUrl = inputEl("mono", "统计探针地址（默认取对外地址；内网可用 https://IP）", node.probeUrl);
+  probeUrl.addEventListener("input", () => { node.probeUrl = probeUrl.value; });
+  const probeHost = inputEl("", "Host 头（可选，如 www.moc-chen.cn）", node.probeHost);
+  probeHost.addEventListener("input", () => { node.probeHost = probeHost.value; });
+  const probeSni = inputEl("", "SNI（可选，证书域名与 IP 不同时填）", node.probeServername);
+  probeSni.addEventListener("input", () => { node.probeServername = probeSni.value; });
+  const insecure = makeSwitch(!!node.probeInsecure, (value) => { node.probeInsecure = value; });
+  const probeBox = el("details", "cluster-probe");
+  probeBox.append(el("summary", null, "统计探针（高级：跨机探活需要时再填）"));
+  probeBox.append(editField("探针地址", probeUrl), editField("Host", probeHost), editField("SNI", probeSni), inlineField("跳过证书校验", insecure.wrap));
+  if (node.probeUrl || node.probeHost || node.probeServername || node.probeInsecure) probeBox.open = true;
+
+  wrap.append(head, editField("id", id), editField("显示名", label), editField("对外地址", url), editField("角色", role), probeBox);
+  return wrap;
+}
+
+function renderClusterEditor(refs) {
+  const box = refs && refs.clBody;
+  if (!box || !clusterDraft) return;
+  box.textContent = "";
+  const meta = el("div", "hint",
+    "本节点 NODE_ID：" + (clusterMeta.nodeId || "（未设置，退回配置里的 currentId / 第一个节点）") +
+    (clusterMeta.self ? " · 生效节点：" + clusterMeta.self : "") +
+    " · 每台机器各配一个 NODE_ID 环境变量，和下面的 id 对应。");
+  const enable = makeSwitch(clusterDraft.enabled, (value) => { clusterDraft.enabled = value; });
+  const agg = makeSwitch(clusterDraft.aggregateStats, (value) => { clusterDraft.aggregateStats = value; });
+  const top = el("div", "cluster-toggles");
+  top.append(inlineField("启用多节点（镜像）", enable.wrap), inlineField("「访问 / 在线」按所有节点合计", agg.wrap));
+  const rows = el("div", "cluster-nodes");
+  clusterDraft.nodes.forEach((node, index) => rows.append(clusterNodeRow(node, index)));
+  box.append(meta, top, rows);
+  if (!clusterDraft.nodes.length) box.append(el("div", "hint", "还没有节点：点右上角「添加节点」；至少两个节点、且启用多节点后，前台才会出现「镜像节点」入口。"));
+}
+
+async function loadClusterEditor(refs) {
+  if (!refs || !refs.clBody) return;
+  try {
+    const data = await apiGet("api/cluster");
+    const cluster = data && data.cluster ? data.cluster : { nodes: [] };
+    clusterMeta = { nodeId: (data && data.nodeId) || "", self: (data && data.self) || "", siteUrl: (data && data.siteUrl) || "" };
+    clusterDraft = {
+      enabled: !!cluster.enabled,
+      aggregateStats: cluster.aggregateStats !== false,
+      nodes: (Array.isArray(cluster.nodes) ? cluster.nodes : []).map((node) => ({
+        id: node.id,
+        label: node.label,
+        url: node.url,
+        role: node.role,
+        probeUrl: node.probe && node.probe.url ? node.probe.url : "",
+        probeHost: node.probe && node.probe.host ? node.probe.host : "",
+        probeServername: node.probe && node.probe.servername ? node.probe.servername : "",
+        probeInsecure: !!(node.probe && node.probe.insecure),
+      })),
+    };
+    hideNotice(refs.clNotice);
+    renderClusterEditor(refs);
+  } catch (e) {
+    if (!e || e.status !== 401) setNotice(refs.clNotice, (e && e.message) || "读取多节点配置失败", "err");
+  }
+}
+
+function onAddClusterNode() {
+  if (!clusterDraft) return;
+  clusterDraft.nodes.push({
+    id: "node" + (clusterDraft.nodes.length + 1),
+    label: "新节点",
+    url: "",
+    role: "mirror",
+    probeUrl: "",
+    probeHost: "",
+    probeServername: "",
+    probeInsecure: false,
+  });
+  renderClusterEditor(V.settings);
+}
+
+async function onSaveCluster() {
+  const refs = V.settings;
+  if (!refs || !clusterDraft) return;
+  const ids = new Set();
+  for (const node of clusterDraft.nodes) {
+    const id = String(node.id || "").trim();
+    if (!/^[A-Za-z0-9_-]{1,40}$/.test(id)) { setNotice(refs.clNotice, "节点 id 只能用字母/数字/_/-（1~40 字）：" + id, "err"); return; }
+    if (ids.has(id)) { setNotice(refs.clNotice, "节点 id 重复：" + id, "err"); return; }
+    ids.add(id);
+    if (clusterDraft.enabled && !node.url) { setNotice(refs.clNotice, "启用多节点后每个节点都要填对外地址：" + id, "err"); return; }
+  }
+  const nodes = clusterDraft.nodes.map((node) => {
+    const probe = {};
+    if (node.probeUrl) probe.url = node.probeUrl;
+    if (node.probeHost) probe.host = node.probeHost;
+    if (node.probeServername) probe.servername = node.probeServername;
+    if (node.probeInsecure) probe.insecure = true;
+    return { id: String(node.id).trim(), label: node.label, url: node.url, role: node.role, ...(Object.keys(probe).length ? { probe } : {}) };
+  });
+  try {
+    const data = await apiPost("api/cluster", {
+      enabled: clusterDraft.enabled,
+      aggregateStats: clusterDraft.aggregateStats,
+      nodes,
+    });
+    await loadClusterEditor(refs);
+    setNotice(refs.clNotice, "已保存：前台 /api/nodes 与统计聚合立即生效（约 5 秒缓存）", "ok");
+    toast("多节点配置已保存", "ok");
+  } catch (e) {
+    reportError(e);
+    setNotice(refs.clNotice, (e && e.message) || "保存失败", "err");
+  }
 }

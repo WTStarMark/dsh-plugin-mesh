@@ -114,6 +114,10 @@
     <button id="search-fan" class="key" hidden title="把搜索结果画成一张扇形图：圆心是官方仓库，节点只保留命中的仓库（快捷键：Shift 或 Ctrl + 回车）">成图</button>
   </div>
   <div class="readouts">
+    <button class="ro ro-node" id="mirror-node" aria-expanded="false" aria-controls="mirror-node-panel" hidden
+            title="镜像节点：这套站点有多个部署节点，可切换到离你更近的一个，数据互通">
+      <i>镜像节点</i><b id="mirror-node-name">当前节点</b><span class="idx-caret" aria-hidden="true">▾</span>
+    </button>
     <button class="ro ro-idx" id="index-source" aria-expanded="false" aria-controls="index-source-panel"
             title="DSH 插件市场索引地址：复制后加到 DSH 的「插件 → 发现 → 添加索引源」">
       <i>索引源</i><b>插件市场</b><span class="idx-caret" aria-hidden="true">▾</span>
@@ -130,6 +134,11 @@
       <li>插件页 → <b>实验性插件</b> → 更多 → 启用「自定义插件市场」</li>
       <li>切到 <b>发现</b> → <b>添加索引源</b> → 粘贴上面的地址</li>
     </ol>
+  </div>
+  <div class="idx-panel node-panel" id="mirror-node-panel" hidden role="dialog" aria-label="镜像节点">
+    <p class="idx-lead">这套站点有多个部署节点，数据互通；切换到离你更近的节点访问：</p>
+    <ul class="node-list" id="mirror-node-list"></ul>
+    <p class="idx-foot">访问数与在线人数按所有节点合计。</p>
   </div>
   <div class="keys">
     <button id="manifesto" class="key" aria-expanded="false" aria-controls="manifesto-modal" title="生态图倡议书：这张图想干什么、怎么收录、以及我们的承诺">倡议书</button>
@@ -186,8 +195,8 @@
       <div class="mo-head-main">
         <span class="mo-sigil" aria-hidden="true">◈</span>
         <div class="mo-title-text">
-          <h3>生态图倡议书</h3>
-          <p class="mo-sub">让每个插件被找到，也让每个作者被看见</p>
+          <h3 id="manifesto-title">生态图倡议书</h3>
+          <p class="mo-sub" id="manifesto-subtitle">让每个插件被找到，也让每个作者被看见</p>
         </div>
         <div class="seg manifesto-seg" id="manifesto-tabs" role="tablist">
           <button id="manifesto-tab-letter" data-page="letter" class="on" role="tab">倡议书</button>

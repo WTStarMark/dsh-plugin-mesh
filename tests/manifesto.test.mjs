@@ -119,3 +119,43 @@ test("节点缺失也不抛：只在拿到节点时才挂事件", () => {
   m.close();
   assert.equal(m.isOpen(), false);
 });
+
+test("applyManifestoContent：把服务端内容写进标题/页签/正文，保留静态兜底", async () => {
+  const { applyManifestoContent } = await import("../src/manifesto.js");
+  const title = stub();
+  const subtitle = stub();
+  const letter = stub();
+  const ai = stub();
+  const tabLetter = stub();
+  const tabAi = stub();
+  const ok = applyManifestoContent(
+    {
+      title: "新倡议书",
+      subtitle: "新副标题",
+      pages: [
+        { id: "letter", label: "正文", html: "<p>新正文</p>" },
+        { id: "ai", label: "API", html: "<p>新 API</p>" },
+      ],
+    },
+    { title, subtitle, pages: { letter, ai }, tabs: { letter: tabLetter, ai: tabAi } },
+  );
+  assert.equal(ok, true);
+  assert.equal(title.textContent, "新倡议书");
+  assert.equal(subtitle.textContent, "新副标题");
+  assert.equal(tabLetter.textContent, "正文");
+  assert.equal(tabAi.textContent, "API");
+  assert.equal(letter.innerHTML, "<p>新正文</p>");
+  assert.equal(ai.innerHTML, "<p>新 API</p>");
+});
+
+test("applyManifestoContent：字段缺失时不动静态内容", async () => {
+  const { applyManifestoContent } = await import("../src/manifesto.js");
+  const title = stub();
+  title.textContent = "原来的标题";
+  const letter = stub();
+  letter.innerHTML = "原来的正文";
+  const ok = applyManifestoContent({ pages: [] }, { title, pages: { letter } });
+  assert.equal(ok, false);
+  assert.equal(title.textContent, "原来的标题");
+  assert.equal(letter.innerHTML, "原来的正文");
+});

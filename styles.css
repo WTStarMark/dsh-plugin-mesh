@@ -888,3 +888,28 @@ input[type="range"]::-moz-range-thumb {
     scroll-behavior: auto !important;
   }
 }
+
+/* ---------------- 顶栏「镜像节点」：多节点切换 ---------------- */
+.ro-node { cursor: pointer; font: inherit; color: inherit; }
+.ro-node:hover { background: var(--hover); border-color: var(--glass-line); }
+.ro-node.on { border-color: var(--accent-line); background: var(--accent-soft); }
+.ro-node[hidden] { display: none; }
+.ro-node .idx-caret { color: var(--label-3); font-size: 10px; line-height: 1; transition: transform var(--t); }
+.ro-node.on .idx-caret { transform: rotate(180deg); color: var(--accent-ink); }
+.node-panel { right: auto; left: 16px; width: min(380px, calc(100vw - 32px)); }
+.node-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; max-height: 46vh; overflow: auto; }
+.node-list li { margin: 0; }
+.node-item {
+  width: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  padding: 8px 10px; border: 1px solid var(--hairline); border-radius: var(--r-sm);
+  background: var(--bg-layer-2); color: var(--label-1); font: inherit; text-align: left; cursor: pointer;
+  transition: background var(--t), border-color var(--t);
+}
+.node-item:hover:not(:disabled) { background: var(--hover); border-color: var(--glass-line); }
+.node-item:disabled { cursor: default; opacity: .85; }
+.node-item b { font-size: 12.5px; font-weight: 600; }
+.node-item span { font-size: 11px; color: var(--label-3); font-family: var(--font-code); }
+.node-item.current { border-color: var(--accent-line); background: var(--accent-soft); }
+.node-item.current span { color: var(--accent-ink); }
+.node-empty { display: block; padding: 8px 10px; color: var(--label-3); font-size: 12px; }
+.idx-foot { margin: 10px 0 0; color: var(--label-3); font-size: 11px; line-height: 1.7; }

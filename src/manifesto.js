@@ -53,3 +53,38 @@ export function createManifesto({ button, modal, close, mask, pages } = {}) {
     setPage,
   };
 }
+
+/**
+ * 把服务端 /api/manifesto 的内容渲染进弹窗：标题、副标题、两个页签的文字与正文。
+ * refs：{ title, subtitle, pages: {letter, ai}, tabs: {letter, ai} }。
+ * 内容来自后台（data/admin/manifesto.json），缺失字段保持 index.html 里的静态兜底。
+ */
+export function applyManifestoContent(data, refs = {}) {
+  if (!data || typeof data !== "object") return false;
+  let applied = false;
+  const title = typeof data.title === "string" ? data.title.trim() : "";
+  const subtitle = typeof data.subtitle === "string" ? data.subtitle.trim() : "";
+  if (title && refs.title) {
+    refs.title.textContent = title;
+    applied = true;
+  }
+  if (subtitle && refs.subtitle) {
+    refs.subtitle.textContent = subtitle;
+    applied = true;
+  }
+  const pages = Array.isArray(data.pages) ? data.pages : [];
+  for (const page of pages) {
+    if (!page || typeof page !== "object" || typeof page.id !== "string") continue;
+    const node = refs.pages && refs.pages[page.id];
+    if (node && typeof page.html === "string") {
+      node.innerHTML = page.html;
+      applied = true;
+    }
+    const tab = refs.tabs && refs.tabs[page.id];
+    if (tab && typeof page.label === "string" && page.label.trim()) {
+      tab.textContent = page.label.trim();
+      applied = true;
+    }
+  }
+  return applied;
+}

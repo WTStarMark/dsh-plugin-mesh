@@ -11,8 +11,9 @@ import { PALETTES, themeOf, DEFAULT_PALETTE } from "./palettes.js";
 import { buildLinks, countByType } from "./links.js";
 import { createGraphView } from "./graph.js";
 import { createRankingBoard } from "./ranking.js";
-import { createManifesto } from "./manifesto.js";
+import { createManifesto, applyManifestoContent } from "./manifesto.js";
 import { createIndexSource } from "./index-source.js";
+import { createNodeSwitcher } from "./nodes.js";
 
 
 const dom = {
@@ -56,6 +57,12 @@ const dom = {
   indexSourcePanel: document.getElementById("index-source-panel"),
   indexSourceUrl: document.getElementById("index-source-url"),
   indexSourceCopy: document.getElementById("index-source-copy"),
+  mirrorNode: document.getElementById("mirror-node"),
+  mirrorNodePanel: document.getElementById("mirror-node-panel"),
+  mirrorNodeName: document.getElementById("mirror-node-name"),
+  mirrorNodeList: document.getElementById("mirror-node-list"),
+  manifestoTitle: document.getElementById("manifesto-title"),
+  manifestoSubtitle: document.getElementById("manifesto-subtitle"),
 };
 
 // 采集状态圆环已迁到管理后台（公开页不再暴露采集进度）：见 admin/status.js 与 tools/admin.mjs。
@@ -66,6 +73,15 @@ const indexSource = createIndexSource({
   panel: dom.indexSourcePanel,
   urlNode: dom.indexSourceUrl,
   copyButton: dom.indexSourceCopy,
+});
+
+/** 顶栏「镜像节点」：节点清单来自服务端 /api/nodes（后台配置）。单节点时按钮自动隐藏。 */
+const nodeSwitcher = createNodeSwitcher({
+  button: dom.mirrorNode,
+  panel: dom.mirrorNodePanel,
+  nameNode: dom.mirrorNodeName,
+  listNode: dom.mirrorNodeList,
+  nodes: [],
 });
 
 /** 榜单弹窗：画布顶端那枚奖杯（正好夹在左栏与右栏之间）；两个榜单都由 GET /api/ranking 算好，点某一行 = 选中它并把镜头移过去（与右栏「关联」同一套动作）。 */
@@ -99,6 +115,38 @@ const manifesto = createManifesto({
     { id: "ai", node: dom.manifestoAiPage, tab: dom.manifestoTabAi },
   ],
 });
+
+/** 拉一次节点清单：多节点部署时点亮「镜像节点」，失败就保持隐藏（单节点页面不受影响） */
+async function loadClusterUi() {
+  if (typeof fetch !== "function") return;
+  try {
+    const res = await fetch("/api/nodes");
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data || data.enabled !== true) return;
+    nodeSwitcher.setNodes(Array.isArray(data.nodes) ? data.nodes : []);
+  } catch {
+    /* 接口不可用：保持单节点视图 */
+  }
+}
+
+/** 拉一次后台编辑过的倡议书；拿不到就用 index.html 里的静态内容兜底 */
+async function loadManifestoContent() {
+  if (typeof fetch !== "function") return;
+  try {
+    const res = await fetch("/api/manifesto");
+    if (!res.ok) return;
+    const data = await res.json();
+    applyManifestoContent(data, {
+      title: dom.manifestoTitle,
+      subtitle: dom.manifestoSubtitle,
+      pages: { letter: dom.manifestoPage, ai: dom.manifestoAiPage },
+      tabs: { letter: dom.manifestoTabLetter, ai: dom.manifestoTabAi },
+    });
+  } catch {
+    /* 接口不可用：静态兜底 */
+  }
+}
 
 const HUB_ID = "deepseek-ai/deepseek-harness";
 
@@ -875,8 +923,11 @@ function bindChrome() {
 
   // 点气泡外面收起它（点自己或气泡里的任何东西都不收）
   document.addEventListener?.("click", (ev) => {
-    if (!indexSource.isOpen()) return;
     const target = ev.target;
+    if (nodeSwitcher.isOpen() && !(target && (target.closest?.("#mirror-node") || target.closest?.("#mirror-node-panel")))) {
+      nodeSwitcher.close();
+    }
+    if (!indexSource.isOpen()) return;
     if (target && (target.closest?.("#index-source") || target.closest?.("#index-source-panel"))) return;
     indexSource.close();
   });
@@ -886,7 +937,11 @@ function bindChrome() {
     if (!typing && ev.key === "[") { state.hideRail = !state.hideRail; applyPanels(); return; }
     if (!typing && ev.key === "]") { state.hideDossier = !state.hideDossier; applyPanels(); return; }
     if (ev.key === "Escape") {
-      // 索引源是个轻量气泡：开着就先收它（比榜单弹窗轻）
+      // 镜像节点 / 索引源都是轻量气泡：开着就先收它们（比榜单弹窗轻）
+      if (nodeSwitcher.isOpen()) {
+        nodeSwitcher.close();
+        return;
+      }
       if (indexSource.isOpen()) {
         indexSource.close();
         return;
@@ -1062,6 +1117,9 @@ async function main() {
   } catch {
   }
   applyPanels();
+  // 顶栏两块异步内容：镜像节点清单、后台编辑过的倡议书。失败都不影响首屏。
+  void loadClusterUi();
+  void loadManifestoContent();
   const narrow = window.matchMedia?.("(max-width: 900px)");
 
   // 手机端搜索框窄、字号又是 16px：长占位符会被截成半句，这里换短提示

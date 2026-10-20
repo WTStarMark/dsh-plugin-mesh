@@ -1022,3 +1022,15 @@ body.modal-open { overflow: hidden; }
   .apply-chip.err .apply-spinner { border-top-color: currentColor; }
   *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
 }
+
+/* 设置页：倡议书 / 多节点编辑器 */
+.edit-field { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
+.edit-label { font-size: 11px; color: var(--label-3, #8a93a6); letter-spacing: .02em; }
+.edit-area { min-height: 120px; resize: vertical; font-family: var(--font-code, ui-monospace, monospace); font-size: 12px; line-height: 1.55; padding: 8px 10px; white-space: pre-wrap; }
+.manifesto-page-edit { border-top: 1px solid var(--hairline, rgba(0,0,0,.08)); margin-top: 12px; padding-top: 10px; }
+.cluster-node { border: 1px solid var(--hairline, rgba(0,0,0,.08)); border-radius: 8px; padding: 10px 12px; margin: 10px 0; }
+.cluster-node-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.cluster-toggles { display: flex; flex-wrap: wrap; gap: 18px; margin: 8px 0; }
+.cluster-probe { margin-top: 6px; }
+.cluster-probe summary { cursor: pointer; font-size: 12px; color: var(--label-2, #5f6b80); }
+select.input { height: 30px; padding: 0 8px; }
