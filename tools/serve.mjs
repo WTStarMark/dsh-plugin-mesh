@@ -24,7 +24,8 @@ import { networkInterfaces } from "node:os";
 import { createApi, apiIndex, validNamePart } from "./api.mjs";
 import { renderPreviewSvg, sceneFromCore } from "./preview-svg.mjs";
 import { createAdmin } from "./admin.mjs";
-import { loadAdminConfig, loadManifesto, clusterPublic, selfNodeId } from "./admin-config.mjs";
+import { loadAdminConfig, loadManifesto, clusterPublic, selfNodeId, readEnv } from "./admin-config.mjs";
+import { createReviewSource } from "./review-source.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const VERSION = "0.5.2";
@@ -49,6 +50,62 @@ const PORT = Number(process.env.PORT ?? 8788);
 const HOST = process.env.HOST ?? "127.0.0.1";
 /** 本节点在多节点集群里的 id（每台机器各自配一个 NODE_ID；没配就退回配置里的 currentId/第一个节点） */
 const NODE_ID = String(process.env.NODE_ID ?? "").trim();
+
+// ---------- 评测站联动（只读） ----------
+// 只读 reviews 的公开接口，聚合「有公开测评的仓库」；默认关闭：没配 REVIEWS_SITE_URL 就完全不外呼。
+// 优先级：进程环境变量 > 项目根 .env（与后台口令同一套约定，不新增 dotenv 依赖）。
+const ENV_FILE = readEnv();
+const envValue = (key, fallback = "") => String(process.env[key] ?? ENV_FILE[key] ?? fallback).trim();
+const reviewSource = createReviewSource({
+  siteUrl: envValue("REVIEWS_ENABLED", "1") === "0" ? "" : envValue("REVIEWS_SITE_URL"),
+  ttlMs: Number(envValue("REVIEWS_TTL_MS", "600000")),
+  pageTimeoutMs: Number(envValue("REVIEWS_TIMEOUT_MS", "6000")),
+  refreshTimeoutMs: Number(envValue("REVIEWS_REFRESH_TIMEOUT_MS", "20000")),
+  maxStaleMs: Number(envValue("REVIEWS_MAX_STALE_MS", String(7 * 24 * 3600 * 1000))),
+  allowHttp: envValue("REVIEWS_ALLOW_HTTP", "0") === "1",
+});
+
+/** mesh 节点 id 集合：按 generatedAt 缓存；health 用它算 reviews 命中/未命中（/api/review-nodes 本身不读 mesh） */
+let meshIdCache = { key: "", ids: null };
+async function meshNodeIds() {
+  const mesh = await api.load();
+  const key = String(mesh?.meta?.generatedAt ?? "") + "|" + (mesh?.nodes?.length ?? 0);
+  if (meshIdCache.key !== key) meshIdCache = { key, ids: new Set((mesh?.nodes ?? []).map((n) => n.id)) };
+  return meshIdCache.ids;
+}
+
+/** health 里的评测概况：命中 mesh 的算 matched，没收录的如实报 unmatched（观测收录缺口用） */
+async function reviewHealth(snap) {
+  const base = {
+    enabled: snap.enabled,
+    loading: snap.loading,
+    ok: snap.ok,
+    stale: snap.stale,
+    expired: snap.expired,
+    error: snap.error ?? null,
+    source: snap.source,
+    site: snap.site,
+    fetchedAt: snap.fetchedAt ?? null,
+    ageSeconds: null,
+    count: snap.count ?? 0,
+    reviews: snap.reviews ?? 0,
+    matched: 0,
+    unmatched: 0,
+    unmatchedIds: [],
+  };
+  if (!snap.enabled || !Array.isArray(snap.ids) || !snap.ids.length) return base;
+  const ids = await meshNodeIds();
+  const matched = [];
+  const unmatched = [];
+  for (const id of snap.ids) (ids.has(id) ? matched : unmatched).push(id);
+  return {
+    ...base,
+    ageSeconds: snap.fetchedAt ? Math.max(0, Math.round((Date.now() - Date.parse(snap.fetchedAt)) / 1000)) : null,
+    matched: matched.length,
+    unmatched: unmatched.length,
+    unmatchedIds: unmatched.slice(0, 20),
+  };
+}
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -597,7 +654,17 @@ async function handleApi(req, res, method, pathname, url) {
     const starDaily = await api.starDailyStats().catch(() => null);
     sendJson(
       res,
-      { ok: true, version: VERSION, nodes: cats.total, generatedAt: cats.generatedAt, readme, starDaily, time: new Date().toISOString() },
+      {
+        ok: true,
+        version: VERSION,
+        nodes: cats.total,
+        generatedAt: cats.generatedAt,
+        readme,
+        starDaily,
+        // 评测联动概况：matched / unmatched 只在 health 里算（这里本来就要读 mesh），不拖慢 /api/review-nodes
+        review: await reviewHealth(reviewSource.snapshot()),
+        time: new Date().toISOString(),
+      },
       200,
       { ...API_CACHE, ...CORS },
     );
@@ -616,6 +683,12 @@ async function handleApi(req, res, method, pathname, url) {
   if (pathname === "/api/npm-nodes") {
     // 生态图外圈光环用的名单（有 npm 包的仓库）：只是 id 列表，跟着 5 分钟公共缓存
     sendJson(res, await api.npmNodes(), 200, { ...API_CACHE, ...CORS });
+    return;
+  }
+  if (pathname === "/api/review-nodes") {
+    // 评测站公开测评（不是节点字段 node.review 的「待复核」）：纯内存快照，请求路径零网络等待。
+    // 缓存 60 秒：上游 TTL 10 分钟，最坏延迟约 11 分钟；/api/review-nodes 不读 mesh，保持轻。
+    sendJson(res, reviewSource.snapshot(), 200, { "cache-control": "public, max-age=60", ...CORS });
     return;
   }
   if (pathname === "/api/search") {
@@ -1011,4 +1084,11 @@ server.listen(PORT, HOST, () => {
   console.log("      GET /api/card/:owner/:name.svg（卡片）· /card/:owner/:name（分享页）");
   console.log("      GET /api/stats · POST /api/ping（访问数 / 同时在线）");
   if (process.env.ALLOW_HOSTS) console.log("额外放行的 Host: " + process.env.ALLOW_HOSTS);
+  // 评测联动：启动即预热 + 周期刷新；请求路径只读内存快照，不等待网络
+  reviewSource.start();
+  console.log(
+    reviewSource.enabled
+      ? "评测联动: 已启用（每 10 分钟同步一次评测站公开数据；请求路径零等待）"
+      : "评测联动: 未启用（未配置 REVIEWS_SITE_URL 或 REVIEWS_ENABLED=0）",
+  );
 });

@@ -1578,6 +1578,7 @@ export function apiIndex(version) {
       { method: "GET", path: "/api/ranking?days=7&limit=50&fields=all&noise=all|hide|only", desc: "榜单：周更新热榜（本周发过 release 的项目，最多 50 行，含 updates / updatesSource / releases）+ 周 star 热榜（星标历史增量，最多 50 行；历史不足时如实返回实际窗口）+ 周 npm 下载热榜（npm 官方下载量真实计数，只收确认拿到数字的包；窗口取自采集时的 npm 区间，可能与另两榜不重合，见 boards.npm.window）。每行带 verdict（related/noise/manual）与 npm（周下载量可选列：status/package/downloads/window；缺省或失败为 unknown，不进排序）；noise=hide 排除已判定噪声，only 只看噪声，默认 all（只标注不过滤）" },
       { method: "GET", path: "/api/categories", desc: "扇区（功能分类）与细枝及各自数量" },
       { method: "GET", path: "/api/npm-nodes", desc: "有 npm 包的仓库 id 列表（与市场索引源重叠的那批，供生态图画外圈光环用）；只回 id，不回数字" },
+      { method: "GET", path: "/api/review-nodes", desc: "在评测站（review.lingshulab.com）有公开测评的仓库：ids + byId（各插件篇数与插件测评页 URL）。数据来自评测站公开接口，每 10 分钟同步、响应缓存 60 秒；失败沿用旧数据并标 stale，超过 7 天标 expired（前端隐藏光环）。注意：这里的 review 是「评测站测评」，不是节点字段 node.review 的「待人工复核」" },
       { method: "GET", path: "/api/repos?q=&category=&subcategory=&tag=&language=&minStars=&archived=&noise=&sort=stars|pushed|created|name&limit=&offset=&fields=all", desc: "检索仓库（默认 20 条，最多 100 条）。行带 verdict；noise=hide|only 按三档判定过滤，默认 all 只标注" },
       { method: "GET", path: "/api/search?q=&limit=", desc: "紧凑检索：只回命中 id 与计数（含 README 正文命中）" },
       { method: "GET", path: "/api/repos/:owner/:name", desc: "单个仓库详情，含同作者/主题共现连线" },

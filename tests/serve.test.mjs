@@ -4,7 +4,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { request } from "node:http";
+import { request, createServer } from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -34,7 +34,8 @@ before(async () => {
   statsDir = mkdtempSync(join(tmpdir(), "dsh-mesh-stats-"));
   child = spawn(process.execPath, ["tools/serve.mjs"], {
     cwd: ROOT,
-    env: { ...process.env, PORT: "0", HOST: "127.0.0.1", STATS_FILE: join(statsDir, "stats.json") },
+    // 显式清空评测联动配置：主服务的测试不能依赖开发机 .env，也不该外呼
+    env: { ...process.env, PORT: "0", HOST: "127.0.0.1", STATS_FILE: join(statsDir, "stats.json"), REVIEWS_SITE_URL: "", REVIEWS_ALLOW_HTTP: "" },
     stdio: ["ignore", "pipe", "pipe"],
   });
   base = await new Promise((resolvePromise, reject) => {
@@ -227,4 +228,183 @@ test("访问统计：raw=1 只回本节点原始计数（不带聚合明细）",
   assert.equal(typeof local.since, "string");
   assert.equal(local.aggregated, undefined, "raw=1 不能被聚合逻辑污染");
   assert.equal(local.nodes, undefined);
+});
+
+/* ---------- 评测联动：/api/review-nodes（stub 上游 + 真起服务） ---------- */
+
+const reviewUuid = (n) => ("0000000" + Number(n).toString(16)).slice(-8) + "-1111-7000-8000-000000000000";
+const REVIEW_REAL_REPO = "deepseek-ai/deepseek-harness"; // mesh 里一定有（圆心）
+const REVIEW_FAKE_REPO = "no-such-owner/no-such-repo-xyz"; // mesh 里一定没有（用来验 unmatched）
+
+/** 本地 stub 评测站：固定分页结构；delayMs 用来验证「冷启动不阻塞」，broken 用来验证坏结构降级 */
+function startStubReviews({ delayMs = 0, broken = false } = {}) {
+  return new Promise((resolvePromise, reject) => {
+    const server = createServer((req, res) => {
+      setTimeout(() => {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(
+          JSON.stringify(
+            broken
+              ? { ok: false, error: "upstream broken" }
+              : {
+                  ok: true,
+                  data: {
+                    items: [
+                      { pluginId: reviewUuid(1), pluginPath: ".", repositoryFullName: REVIEW_REAL_REPO, publicReviewCount: 3 },
+                      { pluginId: reviewUuid(2), pluginPath: "packages/x", repositoryFullName: REVIEW_FAKE_REPO, publicReviewCount: 1 },
+                    ],
+                    page: 1,
+                    page_size: 50,
+                    total: 2,
+                    total_pages: 1,
+                    has_next: false,
+                    has_previous: false,
+                  },
+                },
+          ),
+        );
+      }, delayMs);
+    });
+    server.on("error", reject);
+    server.listen(0, "127.0.0.1", () => resolvePromise(server));
+  });
+}
+
+/** 单独起一个 serve（带评测配置），返回 { proc, base, statsFile } */
+function spawnServe(env = {}) {
+  return new Promise((resolvePromise, reject) => {
+    const statsFile = join(tmpdir(), "dsh-mesh-stats-" + process.pid + "-" + Math.random().toString(16).slice(2) + ".json");
+    const proc = spawn(process.execPath, ["tools/serve.mjs"], {
+      cwd: ROOT,
+      env: { ...process.env, PORT: "0", HOST: "127.0.0.1", STATS_FILE: statsFile, ...env },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const timer = setTimeout(() => {
+      proc.kill();
+      reject(new Error("服务启动超时"));
+    }, 10000);
+    proc.stdout.on("data", (buf) => {
+      const match = /http:\/\/127\.0\.0\.1:(\d+)\//.exec(String(buf));
+      if (!match) return;
+      clearTimeout(timer);
+      resolvePromise({ proc, base: "http://127.0.0.1:" + match[1], statsFile });
+    });
+    proc.on("error", reject);
+  });
+}
+
+async function waitFor(check, label, timeoutMs = 8000) {
+  const start = Date.now();
+  for (;;) {
+    const value = await check();
+    if (value) return value;
+    if (Date.now() - start > timeoutMs) throw new Error("等待" + label + "超时");
+    await new Promise((r) => setTimeout(r, 100));
+  }
+}
+
+function stopStubServer(proc, statsFile, stub) {
+  try {
+    proc?.kill();
+  } catch {
+    /* 已退出 */
+  }
+  if (statsFile) {
+    try {
+      rmSync(statsFile, { force: true });
+    } catch {
+      /* 忽略 */
+    }
+  }
+  try {
+    stub?.close();
+  } catch {
+    /* 忽略 */
+  }
+}
+
+test("评测联动：未配置时端点关闭（不外呼），health 给出 review 概览", async () => {
+  const body = await (await fetch(base + "/api/review-nodes")).json();
+  assert.equal(body.enabled, false);
+  assert.equal(body.count, 0);
+  assert.ok(Array.isArray(body.ids));
+  assert.ok(body.error, "关闭态应说明原因");
+  const health = await (await fetch(base + "/api/health")).json();
+  assert.equal(health.review.enabled, false);
+  assert.equal(health.review.count, 0);
+  assert.equal(health.review.matched, 0);
+});
+
+test("评测联动：冷启动不阻塞、形状正确、health 分清 matched/unmatched", async () => {
+  const stub = await startStubReviews({ delayMs: 400 });
+  const { proc, base: reviewBase, statsFile } = await spawnServe({
+    REVIEWS_SITE_URL: "http://127.0.0.1:" + stub.address().port,
+    REVIEWS_ALLOW_HTTP: "1",
+  });
+  try {
+    // 冷启动：预热在后台跑，请求必须立刻返回（不能等上游分页）
+    const started = Date.now();
+    const cold = await (await fetch(reviewBase + "/api/review-nodes")).json();
+    const elapsed = Date.now() - started;
+    assert.ok(elapsed < 500, "冷启动请求不能等待上游（实测 " + elapsed + "ms）");
+    assert.equal(cold.ok, false, "首拉完成前不应假装有数据");
+    assert.equal(typeof cold.loading, "boolean");
+
+    const ready = await waitFor(async () => {
+      const snap = await (await fetch(reviewBase + "/api/review-nodes")).json();
+      return snap.ok ? snap : null;
+    }, "评测数据就绪");
+
+    assert.equal(ready.enabled, true);
+    assert.equal(ready.stale, false);
+    assert.equal(ready.expired, false);
+    assert.equal(ready.count, 2);
+    assert.equal(ready.reviews, 4);
+    assert.deepEqual(ready.ids, [REVIEW_REAL_REPO, REVIEW_FAKE_REPO].sort((a, b) => a.localeCompare(b)));
+    assert.equal(ready.byId[REVIEW_REAL_REPO].count, 3);
+    assert.equal(
+      ready.byId[REVIEW_REAL_REPO].url,
+      "http://127.0.0.1:" + stub.address().port + "/plugins/" + reviewUuid(1),
+      "主插件应落插件测评页",
+    );
+    assert.ok(Date.parse(ready.fetchedAt) > 0, "fetchedAt 应是可解析的时间");
+
+    const res = await fetch(reviewBase + "/api/review-nodes");
+    assert.equal(res.headers.get("cache-control"), "public, max-age=60");
+    assert.equal(res.headers.get("access-control-allow-origin"), "*");
+    assert.equal(res.headers.get("x-ratelimit-cost"), "1");
+
+    const health = await (await fetch(reviewBase + "/api/health")).json();
+    assert.equal(health.review.count, 2);
+    assert.equal(health.review.matched, 1, "只有 mesh 里存在的仓库算 matched");
+    assert.equal(health.review.unmatched, 1);
+    assert.deepEqual(health.review.unmatchedIds, [REVIEW_FAKE_REPO]);
+    assert.equal(health.review.reviews, 4);
+    assert.equal(typeof health.review.ageSeconds, "number");
+  } finally {
+    stopStubServer(proc, statsFile, stub);
+  }
+});
+
+test("评测联动：上游坏结构不 500，端点仍 200 并如实标错误", async () => {
+  const stub = await startStubReviews({ broken: true });
+  const { proc, base: reviewBase, statsFile } = await spawnServe({
+    REVIEWS_SITE_URL: "http://127.0.0.1:" + stub.address().port,
+    REVIEWS_ALLOW_HTTP: "1",
+  });
+  try {
+    const body = await waitFor(async () => {
+      const snap = await (await fetch(reviewBase + "/api/review-nodes")).json();
+      return !snap.loading && snap.error ? snap : null;
+    }, "坏结构失败被记录");
+    assert.equal(body.enabled, true);
+    assert.equal(body.ok, false);
+    assert.match(body.error, /接口结构变化/);
+    assert.equal((await fetch(reviewBase + "/api/review-nodes")).status, 200);
+    const health = await (await fetch(reviewBase + "/api/health")).json();
+    assert.equal(health.review.ok, false);
+    assert.ok(health.review.error);
+  } finally {
+    stopStubServer(proc, statsFile, stub);
+  }
 });
