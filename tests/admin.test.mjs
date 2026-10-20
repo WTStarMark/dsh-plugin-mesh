@@ -190,7 +190,7 @@ test("前后端不漂移：后台脚本引用的元素 id 与接口都必须真�
 
   const routes = new Set([
     "session", "login", "logout", "status", "overview", "repos", "workflow",
-    "lists", "lists/blacklist", "lists/whitelist", "settings",
+    "lists", "lists/blacklist", "lists/whitelist", "settings", "manifesto", "cluster",
     "resonance", "resonance/base", "resonance/child",
     "apply", "audit", "logs", "log",
   ]);
@@ -778,4 +778,68 @@ test("连续输错口令会被限流（429 + Retry-After），但正确口令永
   const owner = await call("login", { method: "POST", body: { password: PASSWORD }, sendCookie: false });
   assert.equal(owner.status, 200, "连错之后，带正确口令的主人必须仍然进得来");
   assert.ok((await json(owner)).csrf, "正确口令登录要照常发 CSRF 令牌");
+});
+
+// ---------- 多节点（镜像）与倡议书 ----------
+
+test("normalizeCluster：只留合法节点、id 去重、地址只收 http(s)、探针规范化", async () => {
+  const { normalizeCluster } = await import("../tools/admin-config.mjs");
+  const cluster = normalizeCluster({
+    enabled: true,
+    aggregateStats: false,
+    nodes: [
+      { id: "aws-syd", label: "主节点", url: "https://www.moc-chen.cn/", role: "primary", probe: { url: "https://13.239.177.223", host: "www.moc-chen.cn", servername: "www.moc-chen.cn", insecure: false } },
+      { id: "aws-syd", label: "重复 id", url: "https://dup.example" },
+      { id: "bad id!", label: "非法 id", url: "https://x.example" },
+      { id: "mirror", url: "ftp://nope", role: "weird" },
+      { id: "la", url: "https://104.129.51.126", probe: { insecure: true } },
+    ],
+  });
+  assert.equal(cluster.enabled, true);
+  assert.equal(cluster.aggregateStats, false);
+  assert.deepEqual(cluster.nodes.map((n) => n.id), ["aws-syd", "mirror", "la"]);
+  assert.equal(cluster.nodes[0].url, "https://www.moc-chen.cn", "URL 规整成 origin");
+  assert.equal(cluster.nodes[1].url, "", "非 http(s) 地址丢弃");
+  assert.equal(cluster.nodes[1].role, "mirror", "未知角色退回 mirror");
+  assert.equal(cluster.nodes[2].probe.insecure, true);
+  // enabled 必须有节点才成立
+  assert.equal(normalizeCluster({ enabled: true, nodes: [] }).enabled, false);
+});
+
+test("clusterPublic：公开投影剥掉 probe，并标出当前节点", async () => {
+  const { clusterPublic } = await import("../tools/admin-config.mjs");
+  const pub = clusterPublic(
+    {
+      enabled: true,
+      nodes: [
+        { id: "aws", label: "主", url: "https://www.moc-chen.cn", probe: { url: "https://13.239.177.223", insecure: true } },
+        { id: "la", label: "镜像", url: "https://104.129.51.126" },
+      ],
+    },
+    "la",
+  );
+  assert.equal(pub.currentId, "la");
+  assert.equal(pub.nodes.length, 2);
+  assert.equal(pub.nodes[0].current, false);
+  assert.equal(pub.nodes[1].current, true);
+  for (const node of pub.nodes) assert.equal("probe" in node, false, "探针配置不能出现在公开接口");
+});
+
+test("manifesto：默认内容可读；保存后可读回，且字段被规范化", async () => {
+  const { loadManifesto, saveManifesto, normalizeManifesto } = await import("../tools/admin-config.mjs");
+  const defaults = loadManifesto();
+  assert.ok(defaults.title && defaults.subtitle);
+  assert.ok(Array.isArray(defaults.pages) && defaults.pages.length >= 1, "文件缺失时回内置默认");
+  assert.equal(normalizeManifesto({ title: "", pages: [] }).title, defaults.title, "空标题回默认");
+  const saved = saveManifesto({
+    title: "  新倡议  ",
+    subtitle: "副标题",
+    pages: [{ id: "letter", label: "正文", html: "<p>hi</p>" }],
+  });
+  assert.equal(saved.title, "新倡议");
+  const back = loadManifesto();
+  assert.equal(back.title, "新倡议");
+  assert.equal(back.pages.length, 1);
+  assert.equal(back.pages[0].html, "<p>hi</p>");
+  assert.ok(back.updatedAt, "保存时写入时间戳");
 });

@@ -1584,7 +1584,9 @@ export function apiIndex(version) {
       { method: "GET", path: "/preview.svg?theme=dark|light&size=&sample=", desc: "README 预览图：按当前数据实时渲染的生态图；不带参数时 size=1400、sample=6000（也可走 /api/preview.svg）" },
       { method: "GET", path: "/api/card/:owner/:name.svg?theme=light|dark&link=", desc: "可分享的 SVG 卡片" },
       { method: "GET", path: "/card/:owner/:name", desc: "卡片分享页（预览 + 嵌入代码）" },
-      { method: "GET", path: "/api/stats", desc: "访问统计（只读）" },
+      { method: "GET", path: "/api/stats", desc: "访问统计（只读；多节点模式回到各节点合计，raw=1 只回本节点原始计数）" },
+      { method: "GET", path: "/api/nodes", desc: "多节点（镜像）清单：后台配置的部署节点，供前台切换；单节点部署时 enabled=false" },
+      { method: "GET", path: "/api/manifesto", desc: "倡议书内容（后台可编辑：标题 / 副标题 / 两个页签的正文 HTML）" },
       { method: "POST", path: "/api/ping", desc: "上报一次访问（前端自动调用，唯一接受 POST 的接口）" },
     ],
   };

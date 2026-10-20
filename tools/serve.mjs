@@ -8,7 +8,8 @@
  *   ⑤ 隐藏文件（.env 等）与路径穿越双重拦截；⑥ 协商缓存：ETag + 304，并对 JSON/JS/CSS 开 gzip。
  */
 
-import { createServer } from "node:http";
+import { createServer, request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import { readFileSync, writeFileSync, renameSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { extname, join, normalize, resolve, sep, dirname } from "node:path";
@@ -23,6 +24,7 @@ import { networkInterfaces } from "node:os";
 import { createApi, apiIndex, validNamePart } from "./api.mjs";
 import { renderPreviewSvg, sceneFromCore } from "./preview-svg.mjs";
 import { createAdmin } from "./admin.mjs";
+import { loadAdminConfig, loadManifesto, clusterPublic, selfNodeId } from "./admin-config.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const VERSION = "0.5.2";
@@ -45,6 +47,8 @@ function siteFrom(url) {
 const api = createApi({ root: ROOT });
 const PORT = Number(process.env.PORT ?? 8788);
 const HOST = process.env.HOST ?? "127.0.0.1";
+/** 本节点在多节点集群里的 id（每台机器各自配一个 NODE_ID；没配就退回配置里的 currentId/第一个节点） */
+const NODE_ID = String(process.env.NODE_ID ?? "").trim();
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -165,6 +169,149 @@ function pruneSeen(now) {
   if (ids.length <= MAX_SEEN) return;
   ids.sort((a, b) => stats.seen[a] - stats.seen[b]);
   for (const id of ids.slice(0, ids.length - MAX_SEEN)) delete stats.seen[id];
+}
+
+// ---------- 多节点（镜像）与公共配置 ----------
+// 节点清单、倡议书都在 data/admin 下，读得频繁但文件很小：按 5 秒缓存，避免每请求都读盘。
+let adminCache = { at: 0, config: null };
+function adminConfigCached() {
+  const now = Date.now();
+  if (adminCache.config && now - adminCache.at < 5000) return adminCache.config;
+  adminCache = { at: now, config: loadAdminConfig() };
+  return adminCache.config;
+}
+
+let manifestoCache = { at: 0, data: null };
+function manifestoPayload() {
+  const now = Date.now();
+  if (manifestoCache.data && now - manifestoCache.at < 5000) return manifestoCache.data;
+  manifestoCache = { at: now, data: loadManifesto() };
+  return manifestoCache.data;
+}
+
+function localStatsPayload(now) {
+  return { visits: stats.visits, visitors: stats.visitors, online: onlineCount(now), since: stats.since };
+}
+
+/** 探一个兄弟节点的 /api/stats?raw=1（只取该节点自己的数，不递归聚合，避免重复计数）。 */
+function probePeerStats(node, timeoutMs = 1500) {
+  const probe = node && node.probe && typeof node.probe === "object" ? node.probe : {};
+  const rawUrl = String(probe.url || node?.url || "");
+  let url;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return Promise.resolve({ ok: false, error: "bad-url" });
+  }
+  const isHttps = url.protocol === "https:";
+  const basePath = url.pathname.replace(/\/$/, "");
+  const options = {
+    method: "GET",
+    host: url.hostname,
+    port: Number(url.port) || (isHttps ? 443 : 80),
+    path: basePath + "/api/stats?raw=1",
+    timeout: timeoutMs,
+    rejectUnauthorized: probe.insecure !== true,
+    headers: {
+      host: String(probe.host || url.host).replace(/^https?:\/\//, "").replace(/\/.*$/, ""),
+      accept: "application/json",
+      "user-agent": "dsh-mesh-cluster/1",
+    },
+  };
+  if (isHttps && probe.servername) options.servername = String(probe.servername);
+  return new Promise((resolve) => {
+    const req = (isHttps ? httpsRequest : httpRequest)(options, (res) => {
+      let body = "";
+      res.setEncoding("utf8");
+      res.on("data", (chunk) => {
+        body += chunk;
+        if (body.length > 16_384) req.destroy();
+      });
+      res.on("end", () => {
+        try {
+          const data = JSON.parse(body);
+          resolve({
+            ok: true,
+            visits: Number(data.visits) || 0,
+            visitors: Number(data.visitors) || 0,
+            online: Number(data.online) || 0,
+            since: typeof data.since === "string" ? data.since : null,
+          });
+        } catch {
+          resolve({ ok: false, error: "bad-json" });
+        }
+      });
+    });
+    req.on("timeout", () => {
+      req.destroy();
+      resolve({ ok: false, error: "timeout" });
+    });
+    req.on("error", () => resolve({ ok: false, error: "unreachable" }));
+    req.end();
+  });
+}
+
+const AGGREGATE_TTL_MS = 8000;
+let aggregateCache = { at: 0, payload: null };
+
+/** 多节点模式下的「访问 / 在线」：本机 + 其它节点各自上报的原始计数相加（8 秒缓存，探活 1.5 秒超时）。 */
+async function aggregateStats(now) {
+  const config = adminConfigCached();
+  const cluster = config.cluster;
+  const self = selfNodeId(cluster, NODE_ID);
+  if (!cluster.enabled || !cluster.aggregateStats || cluster.nodes.length < 2) return localStatsPayload(now);
+  if (aggregateCache.payload && now - aggregateCache.at < AGGREGATE_TTL_MS) return aggregateCache.payload;
+  const peers = cluster.nodes.filter((node) => node.id !== self);
+  const local = localStatsPayload(now);
+  const probed = await Promise.all(peers.map(async (node) => ({ node, result: await probePeerStats(node) })));
+  const rows = [];
+  const selfNode = cluster.nodes.find((node) => node.id === self);
+  if (selfNode) {
+    rows.push({ id: selfNode.id, label: selfNode.label, url: selfNode.url, role: selfNode.role, ok: true, visits: local.visits, visitors: local.visitors, online: local.online });
+  }
+  let visits = local.visits;
+  let visitors = local.visitors;
+  let online = local.online;
+  for (const { node, result } of probed) {
+    rows.push({
+      id: node.id, label: node.label, url: node.url, role: node.role,
+      ok: result.ok === true,
+      visits: result.ok ? result.visits : 0,
+      visitors: result.ok ? result.visitors : 0,
+      online: result.ok ? result.online : 0,
+    });
+    if (result.ok) {
+      visits += result.visits;
+      visitors += result.visitors;
+      online += result.online;
+    }
+  }
+  const payload = { visits, visitors, online, since: local.since, aggregated: true, nodes: rows };
+  aggregateCache = { at: now, payload };
+  return payload;
+}
+
+/**
+ * 聚合结果里「本节点」这一行换成最新本地计数：聚合有 8 秒缓存，而 /api/ping 刚 +1 的访问
+ * 应该立刻反映到读数上（前端是用 ping 回包更新「访问 / 在线」的）。
+ */
+function overlayLocal(payload, now) {
+  const local = localStatsPayload(now);
+  if (!payload || payload.aggregated !== true || !Array.isArray(payload.nodes)) return local;
+  const self = selfNodeId(adminConfigCached().cluster, NODE_ID);
+  const nodes = payload.nodes.map((row) =>
+    row && row.id === self ? { ...row, ok: true, visits: local.visits, visitors: local.visitors, online: local.online } : row,
+  );
+  let visits = 0;
+  let visitors = 0;
+  let online = 0;
+  for (const row of nodes) {
+    if (!row || row.ok !== true) continue;
+    visits += Number(row.visits) || 0;
+    visitors += Number(row.visitors) || 0;
+    online += Number(row.online) || 0;
+  }
+  return { ...payload, visits, visitors, online, since: local.since, nodes };
 }
 
 function clientIp(req) {
@@ -510,13 +657,26 @@ async function handleApi(req, res, method, pathname, url) {
     sendSvg(res, svg);
     return;
   }
+  if (pathname === "/api/nodes") {
+    const cluster = adminConfigCached().cluster;
+    sendJson(res, { ...clusterPublic(cluster, NODE_ID), nodeId: NODE_ID || selfNodeId(cluster, NODE_ID), siteUrl: SITE_URL }, 200, { ...API_CACHE, ...CORS });
+    return;
+  }
+  if (pathname === "/api/manifesto") {
+    sendJson(res, manifestoPayload(), 200, { ...API_CACHE, ...CORS });
+    return;
+  }
   if (pathname === "/api/stats") {
     if (method !== "GET" && method !== "HEAD") {
       sendJson(res, { error: "只允许 GET" }, 405);
       return;
     }
     const now = Date.now();
-    sendJson(res, { visits: stats.visits, visitors: stats.visitors, online: onlineCount(now), since: stats.since });
+    // raw=1 只回本节点的原始计数：兄弟节点之间互相探活用的就是这个，绝不能回聚合值（否则重复计数）
+    const payload = url.searchParams.get("raw") === "1"
+      ? localStatsPayload(now)
+      : overlayLocal(await aggregateStats(now), now);
+    sendJson(res, payload);
     return;
   }
   if (pathname === "/api/ping") {
@@ -548,7 +708,10 @@ async function handleApi(req, res, method, pathname, url) {
     stats.seen[id] = now;
     pruneSeen(now);
     scheduleSave();
-    sendJson(res, { visits: stats.visits, visitors: stats.visitors, online: onlineCount(now), since: stats.since, fresh: isNew });
+    // 回包也必须是聚合值：前端「访问 / 在线」就是拿 ping 回包刷新的，
+    // 只回本节点数字的话，多节点页面上两边会各显示各的（曾经就是这样）。
+    const live = overlayLocal(await aggregateStats(now), now);
+    sendJson(res, { ...live, fresh: isNew });
     return;
   }
   sendJson(res, { error: "未知接口" }, 404);

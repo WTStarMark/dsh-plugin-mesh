@@ -205,3 +205,26 @@ test("预览图不带参数时落默认档位 1400，而不是最小档 600", as
   const light = await (await fetch(base + "/preview.svg?theme=light")).text();
   assert.match(light, /<rect width="1400" height="1400" fill="#f6faff"/, "浅色主题底色");
 });
+
+test("多节点与倡议书：/api/nodes 回公开投影，/api/manifesto 回可编辑内容", async () => {
+  const nodes = await (await fetch(base + "/api/nodes")).json();
+  assert.equal(typeof nodes.enabled, "boolean");
+  assert.ok(Array.isArray(nodes.nodes));
+  for (const node of nodes.nodes) {
+    assert.equal(typeof node.id, "string");
+    assert.equal("probe" in node, false, "公开投影不能带探针配置");
+  }
+  const manifesto = await (await fetch(base + "/api/manifesto")).json();
+  assert.equal(typeof manifesto.title, "string");
+  assert.ok(Array.isArray(manifesto.pages) && manifesto.pages.length >= 1);
+  assert.equal(typeof manifesto.pages[0].html, "string");
+});
+
+test("访问统计：raw=1 只回本节点原始计数（不带聚合明细）", async () => {
+  const local = await (await fetch(base + "/api/stats?raw=1")).json();
+  assert.equal(typeof local.visits, "number");
+  assert.equal(typeof local.online, "number");
+  assert.equal(typeof local.since, "string");
+  assert.equal(local.aggregated, undefined, "raw=1 不能被聚合逻辑污染");
+  assert.equal(local.nodes, undefined);
+});

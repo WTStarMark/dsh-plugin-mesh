@@ -31,8 +31,13 @@ import {
   collectorRanges,
   DEFAULT_COLLECTOR,
   loadAdminConfig,
+  loadManifesto,
+  saveManifesto,
+  MANIFESTO_FILE,
   normalizeAliases,
+  normalizeCluster,
   normalizeCollector,
+  selfNodeId,
   numSettingFor,
   readAudit,
   relFromRoot,
@@ -879,6 +884,36 @@ export function createAdmin({ version, api, securityHeaders }) {
       saveAdminConfig({ collector: normalized });
       write("settings-set", JSON.stringify(normalized));
       return sendJson(res, 200, { ok: true, applied: normalized, rejected, ...settingsPayload() });
+    }
+    // 倡议书：后台直接编辑标题/副标题/两个页签的正文（HTML 片段），保存后前台 /api/manifesto 立刻生效
+    if (name === "manifesto") {
+      if (!isWrite) {
+        return sendJson(res, 200, { manifesto: loadManifesto(), isDefault: !existsSync(MANIFESTO_FILE) });
+      }
+      const parsed = await readJsonBody(req);
+      if (parsed.error) return sendJson(res, 400, { error: parsed.error });
+      const body = parsed.value && typeof parsed.value === "object" && !Array.isArray(parsed.value) ? parsed.value : {};
+      const doc = saveManifesto(body.reset === true ? null : { title: body.title, subtitle: body.subtitle, pages: body.pages });
+      write(body.reset === true ? "manifesto-reset" : "manifesto-set", "pages=" + doc.pages.length);
+      return sendJson(res, 200, { ok: true, manifesto: doc, isDefault: false });
+    }
+    // 多节点（镜像）配置：节点清单 + 是否聚合各节点的「访问 / 在线」；前台 /api/nodes 用公开投影
+    if (name === "cluster") {
+      const config = loadAdminConfig();
+      if (!isWrite) {
+        return sendJson(res, 200, {
+          cluster: config.cluster,
+          nodeId: process.env.NODE_ID ?? "",
+          self: selfNodeId(config.cluster),
+          siteUrl: process.env.SITE_URL ?? "",
+        });
+      }
+      const parsed = await readJsonBody(req);
+      if (parsed.error) return sendJson(res, 400, { error: parsed.error });
+      const cluster = normalizeCluster(parsed.value);
+      saveAdminConfig({ cluster });
+      write("cluster-set", "nodes=" + cluster.nodes.length + " enabled=" + cluster.enabled + " aggregate=" + cluster.aggregateStats);
+      return sendJson(res, 200, { ok: true, cluster, nodeId: process.env.NODE_ID ?? "" });
     }
     if (name === "lists/whitelist") {
       if (!isWrite) return sendJson(res, 405, { error: "只允许 POST" });

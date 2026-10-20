@@ -10,6 +10,7 @@ import { appendFileSync, closeSync, copyFileSync, existsSync, mkdirSync, openSyn
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BUILTIN_BASES, CONTEXT_IDS, CONTEXT_RULES, DEFAULT_CONTEXT, builtinBase } from "./ecosystem-bases.mjs";
+import { DEFAULT_MANIFESTO } from "../src/manifesto-default.js";
 
 export const CONTEXTS = CONTEXT_IDS.map((id) => ({ id, label: CONTEXT_RULES[id].label, desc: CONTEXT_RULES[id].desc }));
 
@@ -34,6 +35,7 @@ export const ADMIN_DIR = process.env.ADMIN_DIR ? resolve(process.env.ADMIN_DIR) 
 // 累积索引所在目录：与 Python 侧 config.py 的 CACHE_DIR 同一处，只读用途（影响预估）
 export const CACHE_DIR = process.env.CACHE_DIR ? resolve(process.env.CACHE_DIR) : join(DATA_DIR, "cache");
 export const CONFIG_FILE = join(ADMIN_DIR, "config.json");
+export const MANIFESTO_FILE = join(ADMIN_DIR, "manifesto.json");
 export const JOB_FILE = join(ADMIN_DIR, "job.json");
 export const AUDIT_FILE = join(ADMIN_DIR, "audit.log");
 export const LOG_DIR = join(ADMIN_DIR, "logs");
@@ -333,6 +335,8 @@ export function normalizeConfig(raw) {
     resonance: { overrides },
     // 采集参数：读的时候没法区分"用户显式设过"和"用的是默认值"，所以保存入口会带 mark 再回写一次
     collector: normalizeCollector(raw && raw.collector),
+    // 多节点（镜像）配置：节点清单 + 是否聚合「访问/在线」统计
+    cluster: normalizeCluster(raw && raw.cluster),
   };
 }
 
@@ -373,6 +377,7 @@ export function saveAdminConfig(next, file = CONFIG_FILE) {
     whitelistAliases: known.whitelistAliases,
     resonance: known.resonance,
     collector: Object.prototype.hasOwnProperty.call(next || {}, "collector") ? known.collector : raw.collector ?? known.collector,
+    cluster: known.cluster,
   };
   ensureDir(dirname(file));
   const backedUp = backupOnce(file);
@@ -786,4 +791,138 @@ export function listDir(dir) {
   } catch {
     return [];
   }
+}
+
+// ---------- 多节点（镜像）配置 ----------
+// 节点清单同时服务两件事：① 前台「镜像节点」切换；② /api/stats 聚合各节点的「访问 / 在线」。
+// 每个节点的 probe 只给服务端用（探统计接口），公开接口 /api/nodes 会剥掉。
+
+const NODE_ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
+const NODE_ROLES = new Set(["primary", "mirror"]);
+const MAX_CLUSTER_NODES = 8;
+
+function safeUrl(value) {
+  try {
+    const url = new URL(String(value ?? ""));
+    if (url.protocol !== "http:" && url.protocol !== "https:") return "";
+    return url;
+  } catch {
+    return null;
+  }
+}
+
+/** 规范化多节点配置：非法节点丢掉、id 去重、地址只留 http(s)。 */
+export function normalizeCluster(raw) {
+  const src = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  const nodes = [];
+  const seen = new Set();
+  for (const item of Array.isArray(src.nodes) ? src.nodes : []) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const id = String(item.id ?? "").trim();
+    if (!NODE_ID_RE.test(id) || seen.has(id)) continue;
+    seen.add(id);
+    const url = safeUrl(item.url);
+    const probeRaw = item.probe && typeof item.probe === "object" && !Array.isArray(item.probe) ? item.probe : {};
+    const probeUrl = safeUrl(probeRaw.url);
+    const probe = {};
+    if (probeUrl) probe.url = probeUrl.href.replace(/\/$/, "");
+    const host = String(probeRaw.host ?? "").trim();
+    if (host) probe.host = host.slice(0, 120);
+    const servername = String(probeRaw.servername ?? "").trim();
+    if (servername) probe.servername = servername.slice(0, 120);
+    if (probeRaw.insecure === true) probe.insecure = true;
+    nodes.push({
+      id,
+      label: String(item.label ?? "").trim().slice(0, 40) || id,
+      url: url ? url.origin : "",
+      role: NODE_ROLES.has(item.role) ? item.role : "mirror",
+      ...(Object.keys(probe).length ? { probe } : {}),
+    });
+    if (nodes.length >= MAX_CLUSTER_NODES) break;
+  }
+  const ids = new Set(nodes.map((node) => node.id));
+  return {
+    enabled: src.enabled === true && nodes.length > 0,
+    aggregateStats: src.aggregateStats !== false,
+    currentId: ids.has(String(src.currentId ?? "")) ? String(src.currentId) : null,
+    nodes,
+  };
+}
+
+/** 公开投影：只给前台展示用，剥掉 probe（内部地址/证书设置不外泄）。 */
+export function clusterPublic(raw, nodeId = "") {
+  const cluster = normalizeCluster(raw);
+  const self = nodeId && cluster.nodes.some((node) => node.id === nodeId)
+    ? nodeId
+    : cluster.currentId ?? cluster.nodes[0]?.id ?? null;
+  return {
+    enabled: cluster.enabled,
+    aggregateStats: cluster.aggregateStats,
+    currentId: self,
+    nodes: cluster.nodes.map((node) => ({
+      id: node.id,
+      label: node.label,
+      url: node.url,
+      role: node.role,
+      current: node.id === self,
+    })),
+  };
+}
+
+/** 本节点 id：优先环境变量 NODE_ID（每台机器各配一个），否则退回配置里的 currentId / 第一个节点。 */
+export function selfNodeId(raw, envNodeId = process.env.NODE_ID) {
+  const cluster = normalizeCluster(raw);
+  const fromEnv = String(envNodeId ?? "").trim();
+  if (fromEnv && cluster.nodes.some((node) => node.id === fromEnv)) return fromEnv;
+  return cluster.currentId ?? cluster.nodes[0]?.id ?? "";
+}
+
+// ---------- 倡议书（后台可编辑） ----------
+
+const MANIFESTO_PAGE_RE = /^[A-Za-z0-9_-]{1,32}$/;
+const MAX_MANIFESTO_HTML = 200_000;
+
+/** 规范倡议书：标题/副标题/页签文字做长度限制，正文允许 HTML（后台管理员撰写）。 */
+export function normalizeManifesto(raw) {
+  const src = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  const pages = [];
+  for (const item of Array.isArray(src.pages) ? src.pages : []) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const id = String(item.id ?? "").trim();
+    if (!MANIFESTO_PAGE_RE.test(id)) continue;
+    pages.push({
+      id,
+      label: String(item.label ?? "").trim().slice(0, 40) || id,
+      html: typeof item.html === "string" ? item.html.slice(0, MAX_MANIFESTO_HTML) : "",
+    });
+    if (pages.length >= 4) break;
+  }
+  if (!pages.length) {
+    for (const page of DEFAULT_MANIFESTO.pages) pages.push({ id: page.id, label: page.label, html: page.html });
+  }
+  return {
+    version: 1,
+    updatedAt: typeof src.updatedAt === "string" ? src.updatedAt : null,
+    title: String(src.title ?? "").trim().slice(0, 80) || DEFAULT_MANIFESTO.title,
+    subtitle: String(src.subtitle ?? "").trim().slice(0, 160) || DEFAULT_MANIFESTO.subtitle,
+    pages,
+  };
+}
+
+/** 读倡议书；文件不存在/损坏一律回默认内容（和别的配置同一条铁律，绝不抛异常）。 */
+export function loadManifesto(file = MANIFESTO_FILE) {
+  try {
+    return normalizeManifesto(JSON.parse(readFileSync(file, "utf8")));
+  } catch {
+    return normalizeManifesto(null);
+  }
+}
+
+/** 写倡议书：原子写 + 留一次备份；返回落盘后的规范内容。 */
+export function saveManifesto(input, file = MANIFESTO_FILE) {
+  const doc = normalizeManifesto({ ...(input && typeof input === "object" ? input : {}), updatedAt: new Date().toISOString().replace(/\.\d{3}Z$/, "Z") });
+  ensureDir(dirname(file));
+  backupOnce(file);
+  atomicWriteJson(file, doc);
+  return doc;
 }
