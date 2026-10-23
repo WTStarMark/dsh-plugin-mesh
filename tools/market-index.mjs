@@ -4,6 +4,8 @@
  *
  * 用法：
  *   node tools/market-index.mjs [--limit 200] [--refresh] [--out dist/market/index.json] [--seed 12345]
+ *                               [--no-subdir-verify] [--subdir-cache data/cache/repo-dirs.json]
+ *                               [--subdir-ttl-hours 168] [--subdir-concurrency 4]
  *
  * 数据来源：
  *   · data/cache/npm-downloads.json —— 仓库 ↔ npm 包名（采集器写）
@@ -22,6 +24,25 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  VERDICT,
+  classifyRepositoryDirectory,
+  createGitHubCodeSearchFetcher,
+  createGitHubCommitFetcher,
+  createGitHubDirectoryHistoryFetcher,
+  createGitHubPackageJsonFetcher,
+  judgeSubdirCheck,
+  loadGitHubToken,
+  readRepoDirCache,
+  runSubdirVerification,
+  writeRepoDirCache,
+  createNpmProvenanceFetcher,
+  readProvenanceCache,
+  runProvenanceVerification,
+  writeProvenanceCache,
+  repoKeyFromUrl,
+} from "./repo-dir-verify.mjs";
+import { decisionFor, listHit, marketPaths, readMarketOverrides } from "./market-overrides.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const UA = "dsh-plugin-mesh-market-index/0.1 (+https://github.com/WTStarMark/dsh-plugin-mesh)";
@@ -46,6 +67,30 @@ const argOf = (name, fallback) => {
 const LIMIT = Number(argOf("limit", 200)) || 200;
 const REFRESH = argv.includes("--refresh");
 const OUT = resolve(ROOT, argOf("out", "dist/market/index.json"));
+/* 拿远端清单出索引时，注册表缓存也要能指向远端那份：否则远端清单里的包在本地缓存里没有记录，
+ * 会被当成"没有记录"整批跳过（日志里只是一句 skipReasons），索引就少了条目。 */
+const REGISTRY_CACHE = resolve(ROOT, argOf("npm-registry", "data/cache/npm-registry.json"));
+/* 人工裁决/名单（后台写、生成器读）。文件缺失/损坏 = 空表，完全等同旧行为。 */
+const OVERRIDES = resolve(ROOT, argOf("overrides", "data/admin/market-index/overrides.json"));
+
+/* 子目录归属校验（tools/repo-dir-verify.mjs）：npm 自述的 repository.directory 从来没被打开看过。
+ * 线上实测 7 个包把 repository 写成官方仓库、directory 写成发布者本机的 .dsh/plugins/…，
+ * 索引就把官方仓库的标题/头像/作者/25 万星标搬到了它们前面，还因为「自述仓库 == 认领仓库」被判成确证。
+ * 现在生成索引时去仓库里读那个目录的 package.json：只有名字对得上才叫「仓库内子包」。
+ * 没配 GITHUB_TOKEN 时跳过（离线/本地跑不至于因为校验把索引搞坏），显式 --no-subdir-verify 也可跳过。 */
+const SUBDIR_VERIFY = !argv.includes("--no-subdir-verify");
+const SUBDIR_CACHE = resolve(ROOT, argOf("subdir-cache", "data/cache/repo-dirs.json"));
+const SUBDIR_TTL_MS = Math.max(1, Number(argOf("subdir-ttl-hours", 168)) || 168) * 3600 * 1000;
+const SUBDIR_CONCURRENCY = Math.max(1, Math.min(8, Number(argOf("subdir-concurrency", 4)) || 4));
+/* 没有 repository.directory 的子目录候选：只有星标够高的才值得花 code search 配额（10 次/分钟）去查；
+ * 其余一律按「未核实」处理（不确证、不挂「仓库内子包」、打「作者待确认」）。 */
+const SUBDIR_CODESEARCH_MIN_STARS = Math.max(0, Number(argOf("subdir-codesearch-min-stars", 100)) || 100);
+/* npm 发布溯源（SLSA provenance）：只对声称高星仓库的包查（每包 1 次 npm 请求，结论按版本缓存 30 天）。
+ * 这是密码学级别证据：CI 用 OIDC 发布时 npm 会签名记录「哪个仓库的哪个 commit 发布的」。 */
+const PROVENANCE_VERIFY = !argv.includes("--no-provenance");
+const PROVENANCE_CACHE = resolve(ROOT, argOf("provenance-cache", "data/cache/provenance.json"));
+const PROVENANCE_MIN_STARS = Math.max(0, Number(argOf("provenance-min-stars", 100)) || 100);
+const PROVENANCE_CONCURRENCY = Math.max(1, Math.min(6, Number(argOf("provenance-concurrency", 3)) || 3));
 
 const readJson = (path, fallback) => {
   try {
@@ -94,7 +139,9 @@ export function keywordsOf(node, pkg) {
 }
 
 export function toneOf(stars, hasDownloads, downloads) {
-  const dl = hasDownloads ? shortNumber(downloads) : "—";
+  // 下载量前面加「↓」：只写两个光秃秃的数字（★87 · 1.8k）会被读成「87 到 1.8k 星」，
+  // 实测有用户把 1.8k 当成星标数。符号不是汉字，不会像「周下载」那样把 CJK 词切进每个插件的检索字段。
+  const dl = hasDownloads ? "↓" + shortNumber(downloads) : "—";
   const n = Number(stars) || 0;
   // 星标不足 MIN_STARS_FOR_BADGE 就不写 ★：全索引 38% 的条目是 0 星，
   // 以「★0」开头等于在卡片第一行写「没人气」；只留下载量（真实使用量）更中性。
@@ -235,12 +282,16 @@ function readPackument(doc) {
    * "GitHub Actions"，那种情况该信 provenance 而不是账号。
    * 这三行是**追加式**字段：老缓存记录缺它读到 undefined（= 未知），不会造出错误数据，
    * 所以刻意不升 CACHE_VERSION —— 升了会让下一次全量重抓 7500 份 packument。 */
-  const npmUser = typeof doc._npmUser?.name === "string" ? doc._npmUser.name : null;
-  return { versions: picked, dshKeys, repository, repositoryDirectory, author, npmUser, latestTag, isBundle, hasClient, bundlePatch: isBundle ? bundle.patch : null };
+  /* 发布账号在 version 对象里（doc._npmUser 顶层通常没有，之前一直读成 null）；顺手补上 gitHead：
+   * 没有目录声明的包要靠"发布账号 + gitHead 在不在声称仓库里"判断真伪。两者都是追加字段，
+   * 老缓存记录读到 undefined = 未知，不必升 CACHE_VERSION。 */
+  const npmUser = typeof latestFull._npmUser?.name === "string" ? latestFull._npmUser.name : typeof doc._npmUser?.name === "string" ? doc._npmUser.name : null;
+  const gitHead = typeof latestFull.gitHead === "string" ? latestFull.gitHead : null;
+  return { versions: picked, dshKeys, repository, repositoryDirectory, author, npmUser, gitHead, latestTag, isBundle, hasClient, bundlePatch: isBundle ? bundle.patch : null };
 }
 
 async function loadRegistryCache() {
-  const path = join(ROOT, "data", "cache", "npm-registry.json");
+  const path = REGISTRY_CACHE;
   const cached = readJson(path, null);
   if (cached && cached.packages && typeof cached.packages === "object") return { path, cache: cached };
   return { path, cache: { updatedAt: null, packages: {} } };
@@ -336,6 +387,167 @@ export function resolveOwner({ npmRepo, claimants, meshById } = {}) {
 }
 
 /**
+ * 子目录校验结论 -> 这一行怎么署名（纯函数，方便单测；不碰网络、不碰缓存）。
+ *
+ * · confirmed：仓库里确实有这个包（目录里的 package.json 名字对得上）—— 可以外借仓库身份；
+ * · refuted  ：目录不存在或是本地路径。若这一行的归属本来就靠"子目录声明"（chosen.subdir），
+ *              就不许再外借标题/头像/作者/星标：仓库里根本没有它，名字是别人替它挂上去的；
+ * · unverified/没查过：内容照旧，但不算确证（打「作者待确认」）。没写目录的（非 subdir）
+ *              不受目录结论影响，仍按 resolveOwner 的证据走。
+ *
+ * @returns {{identity: object|null, refuted: boolean, dirConfirmed: boolean, attributionVerified: boolean, subdirLabel: boolean}}
+ */
+export function decideEntryAttribution({ node = null, resolved = null, chosen = null, check = null } = {}) {
+  const dirConfirmed = check?.verdict === "confirmed";
+  /* 驳回只在"这一行的归属靠目录声明"时生效：
+   *   · chosen.subdir = 采集器反查来的子目录包，归属完全靠 repository.directory；
+   *   · !resolved.item = npm 声明的仓库并不声明这个包名（只是图里有这个仓库），
+   *     身份（标题/作者/星标）也是从那个仓库借来的 —— 目录又对不上，就该驳回。
+   * 反过来，仓库根 package.json 自己写了包名的（resolved.item 且非 subdir），
+   * 目录字段写错也不影响"这个仓库有它"这条证据，不在这里一票否决。 */
+  const refuted = check?.verdict === "refuted" && Boolean(chosen?.subdir || !resolved?.item);
+  const attributionVerified = !refuted && Boolean(resolved?.verified || dirConfirmed) && (!chosen?.subdir || !check || dirConfirmed);
+  return {
+    identity: refuted ? null : node,
+    refuted,
+    dirConfirmed,
+    attributionVerified,
+    // 「仓库内子包」是事实主张：confirmed 才挂；没查过（没配 token/没写 directory）保持原行为
+    subdirLabel: Boolean(chosen?.subdir) && (!check || dirConfirmed),
+  };
+}
+
+/**
+ * 人工裁决/名单 -> 最终展示策略（纯函数，单测覆盖）。
+ * 优先级：entries（人工裁决） > lists（发布者/仓库名单） > 自动核验结论。
+ * base 来自 decideEntryAttribution；node 是声称仓库的节点（人工确证时要用它恢复身份）。
+ */
+export function applyAttributionOverrides({ pkg, base, node = null, rec = null, repoId = null, overrides = null } = {}) {
+  const out = {
+    identity: base?.identity ?? null,
+    refuted: Boolean(base?.refuted),
+    attributionVerified: Boolean(base?.attributionVerified),
+    subdirLabel: Boolean(base?.subdirLabel),
+    source: "auto",
+    provenance: base?.provenance ?? "none",
+  };
+  if (!overrides) return out;
+  const decision = decisionFor(overrides, pkg);
+  const hit = listHit(overrides, { pkg, publisher: rec?.npmUser ?? null, repoId });
+  if (decision) {
+    out.source = "manual:" + decision.decision;
+    if (decision.decision === "confirmed") {
+      out.refuted = false;
+      out.identity = node ?? out.identity;
+      out.attributionVerified = true;
+    } else if (decision.decision === "refuted") {
+      out.refuted = true;
+      out.identity = null;
+      out.attributionVerified = false;
+      out.subdirLabel = false;
+    } else {
+      out.refuted = false;
+      out.attributionVerified = false;
+      out.subdirLabel = false;
+    }
+    return out;
+  }
+  if (!hit) return out;
+  if (hit.kind === "publisher") {
+    /* 发布者名单：这个账号的包一律不借仓库身份（展示等同驳回），但条目本身仍可安装。 */
+    out.refuted = true;
+    out.identity = null;
+    out.attributionVerified = false;
+    out.subdirLabel = false;
+    out.source = "list:publisher";
+  } else if (hit.kind === "repo") {
+    /* 仓库名单：这个仓库的包只算未核实（仍显示，但打「作者待确认」）。 */
+    out.attributionVerified = false;
+    out.source = "list:repo";
+  } else if (hit.kind === "whitelist-repo") {
+    /* 仓库白名单：人工为这个仓库背书，按确证展示。 */
+    out.attributionVerified = true;
+    out.source = "list:whitelist-repo";
+  }
+  return out;
+}
+
+/**
+ * 第 4 层：npm 发布溯源（provenance）-> 最终展示策略（纯函数，单测覆盖）。
+ * · match    ：溯源仓库 == 声称仓库 → 强制确证（这是最强证据，可以恢复被自动驳回的身份）
+ * · mismatch ：溯源仓库 != 声称仓库 → 强制驳回（签名声明说了别的仓库，比任何自述都硬）
+ * · none/error：没有溯源或拿不到 → 不动原有判定（不能当反证）
+ * 人工裁决在下一层，仍然压过这里。
+ */
+export function applyProvenanceAttribution(base, prov, { node = null, repoKey = null } = {}) {
+  const out = { ...(base ?? {}), provenance: "none" };
+  if (!prov || !prov.state || prov.state === "none") return out;
+  if (prov.state === "error") {
+    out.provenance = "error";
+    return out;
+  }
+  if (prov.state !== "ok") return out;
+  const provRepo = repoKeyFromUrl(prov.repository);
+  const wanted = repoKey ? String(repoKey).toLowerCase() : null;
+  if (!provRepo || !wanted) {
+    out.provenance = "unknown";
+    return out;
+  }
+  if (provRepo === wanted) {
+    out.provenance = "match";
+    out.refuted = false;
+    out.identity = node ?? out.identity ?? null;
+    out.attributionVerified = true;
+  } else {
+    out.provenance = "mismatch";
+    out.refuted = true;
+    out.identity = null;
+    out.attributionVerified = false;
+    out.subdirLabel = false;
+  }
+  return out;
+}
+
+/**
+ * 索引不变量自检（第 5 层，产物级）：索引一旦写坏，DSH 市场页会整页异常。
+ * 这里只查"格式/契约"能证明的硬约束；归属语义由前面几层负责。
+ * @returns {Array<{pkg: string, why: string}>}
+ */
+export function validateIndex(plugins, labelIds = null) {
+  const bad = [];
+  const seen = new Set();
+  const labelsOk = labelIds instanceof Set ? labelIds : null;
+  for (const p of Array.isArray(plugins) ? plugins : []) {
+    const pkg = String(p?.name ?? "");
+    if (!pkg) { bad.push({ pkg: "(空)", why: "缺少包名" }); continue; }
+    if (seen.has(pkg)) bad.push({ pkg, why: "包名重复" });
+    seen.add(pkg);
+    if (p.title !== pkg) bad.push({ pkg, why: "title 必须等于 npm 包名（当前 " + String(p.title) + "）" });
+    const versions = Array.isArray(p.versions) ? p.versions : [];
+    if (!versions.length) bad.push({ pkg, why: "没有版本" });
+    for (const v of versions) {
+      if (!v || typeof v.version !== "string" || !SEMVER.test(v.version)) bad.push({ pkg, why: "版本号不是严格 semver：" + String(v?.version) });
+      if (!Number.isInteger(v?.publishTimestamp) || v.publishTimestamp <= 0) bad.push({ pkg, why: "publishTimestamp 必须是正整数秒" });
+      if (!v?.source || v.source.type !== "npm") bad.push({ pkg, why: "版本 source 必须是 npm" });
+    }
+    const labels = p.metadata?.labels ?? [];
+    if (!Array.isArray(labels)) bad.push({ pkg, why: "labels 必须是数组" });
+    else if (labelsOk) for (const label of labels) if (!labelsOk.has(label)) bad.push({ pkg, why: "未声明的标签：" + String(label) });
+    if (labels.includes("owner-unverified") && p.repository && !p.author) {
+      // 有仓库却没作者：不是脱身份（驳回）该有的样子，也不是确证；只可能是脏数据
+      bad.push({ pkg, why: "有 repository 却没有 author（既非确证也非脱身份）" });
+    }
+    if (p.repository && p.repository.url && !/^https:\/\/github\.com\/[^/]+\/[^/]+$/u.test(p.repository.url)) {
+      bad.push({ pkg, why: "repository.url 不是 GitHub 仓库地址" });
+    }
+    if (p.icon !== undefined && !(typeof p.icon === "string" && p.icon.startsWith("https://"))) bad.push({ pkg, why: "icon 必须是 https URL" });
+    const keywords = p.metadata?.keywords;
+    if (keywords !== undefined && (!Array.isArray(keywords) || keywords.length > 12)) bad.push({ pkg, why: "keywords 必须是 ≤12 项的数组" });
+  }
+  return bad;
+}
+
+/**
  * 构建后的自检：把"不许猜"这条规矩钉进产物，而不是只写在注释里。
  * 只要有一行的作者/仓库与 npm 包自己的声明冲突、却没打 owner-unverified，就算违规。
  * @returns {Array<{pkg: string, why: string, declared: string|null, listed: string|null}>}
@@ -367,6 +579,7 @@ async function main() {
   if (!mesh?.nodes?.length) throw new Error("读不到 " + meshPath + "（先跑采集器或 npm run seed）");
   if (!downloads?.repos) throw new Error("读不到 " + npmCachePath);
 
+  const overrides = readMarketOverrides(OVERRIDES);
   const byId = new Map(mesh.nodes.map((n) => [n.id, n]));
   /* 小写索引：npm 的 repository 字段大小写随意（实测 blank-not-black/dsh-remote 对
    * Blank-not-black/dsh-Remote），而 repoKey() 一律返回小写，所以这条查表必须按小写建。 */
@@ -382,6 +595,33 @@ async function main() {
     const text = typeof rec?.description === "string" ? rec.description.trim() : "";
     if (text) pkgDescriptions.set(name, text);
   }
+  /* 构建统计（给后台「索引源 → 工作流」看）：每个阶段进出多少、被挡在哪、核验与人工介入各多少。
+   * 落盘到 <out 所在目录>/build-stats.json；缺失时后台按实时缓存近似展示，不影响索引本身。 */
+  const tStart = Date.now();
+  const buildStats = {
+    format: 1,
+    startedAt: new Date().toISOString(),
+    inputs: {
+      meshNodes: mesh.nodes.length,
+      downloadsRepos: Object.keys(downloads.repos ?? {}).length,
+      npmSearchPackages: Object.keys(searchCache?.packages ?? {}).length,
+      npmSubdirPackages: Object.keys(extra?.packages ?? {}).length,
+      registryRecords: 0,
+    },
+    candidates: {
+      total: candidates.length,
+      picked: 0,
+      fromDownloads: candidates.filter((c) => !c.subdir).length,
+      fromSubdir: candidates.filter((c) => c.subdir).length,
+    },
+    filters: { notBundle: 0, officialModule: 0, manualBlacklist: 0, noPackument: 0 },
+    verification: null,
+    overrides: {},
+    labels: {},
+    verdicts: {},
+    skipped: { total: 0, top: [] },
+    timings: {},
+  };
   /* 同一个 npm 包常被「原仓库 + 一堆复刻」同时认领（远端实测：9080 个候选里 2142 个重名）。
    * 索引规定包名唯一，所以必须挑一个当门面 —— 挑法：优先非复刻 → 星标多 → 下载量多 → 仓库名。 */
   // rankOf：只在「同名认领者」之间挑门面时用（同一个包 downloads 相同，所以先看星标）。
@@ -401,9 +641,11 @@ async function main() {
    * 认领者共用同一份 packument，多抓它们几乎不额外花钱；等 packument 到手，再用「npm 包自己声明的仓库」
    * 挑出真正的门面 —— 提前按下载量随便留一个，会把复刻/模板仓库当成正主展示。 */
   const picked = candidates.slice(0, LIMIT);
+  buildStats.candidates.picked = picked.length;
   console.log("候选（有下载量的仓库记录）: " + candidates.length + "，本轮处理: " + picked.length + "（--limit " + LIMIT + "）");
 
   const { path: cachePath, cache } = await loadRegistryCache();
+  buildStats.inputs.registryRecords = Object.keys(cache.packages ?? {}).length;
   const now = Date.now();
   let fetched = 0, cacheHits = 0, tooLarge = 0, failed = 0, done = 0;
 
@@ -456,6 +698,7 @@ async function main() {
 
   mkdirSync(dirname(cachePath), { recursive: true });
   writeFileSync(cachePath, JSON.stringify(cache));
+  buildStats.timings.registryMs = Date.now() - tStart;
   console.log("registry: 新抓 " + fetched + " · 命中缓存 " + cacheHits + " · 超大跳过 " + tooLarge + " · 失败 " + failed);
 
   /* ---- 组装索引 ---- */
@@ -477,6 +720,8 @@ async function main() {
   /* 行动号召（CTA）：每个条目都挂，提醒用户去仓库点 Star。
    * 注意两个已知代价：① 这枚胶囊很长（12 个汉字 + Star），会把标题挤窄；② 若标签文案进检索字段，会命中全部条目。 */
   labels.set("star-cta", { title: { en: "Star it to cheer the author on", zh: "点个Star鼓励对应作者吧" } });
+  /* npm provenance（SLSA）核验通过：这个版本确实由声称仓库的 CI 用 OIDC 发布，密码学级别证据。 */
+  labels.set("provenance-verified", { title: { en: "Publish provenance verified", zh: "发布溯源已核验" } });
 
   const plugins = [];
   const skipReasons = new Map();
@@ -484,19 +729,22 @@ async function main() {
   for (const item of picked) {
     const rec = cache.packages[item.pkg];
     const why = !rec ? "没有记录" : rec.error ?? (rec.tooLarge ? "packument 超大" : rec.skip);
-    if (why) { skipReasons.set(item.pkg, why); continue; }
+    if (why) { skipReasons.set(item.pkg, why); buildStats.filters.noPackument += 1; continue; }
     /* 判据：作者声明了 dsh.bundle.patch（确证）→ 收；没有 dsh 字段但依赖里有 @deepseek-ai/*（老包兜底）→ 也收，
      * 只是标成「疑似」。两条都没有才挡。 */
     const confirmed = rec.isBundle === true;
     const hinted = Array.isArray(rec.dshKeys) && rec.dshKeys.length > 0;
     if (!confirmed && !hinted) {
       skipReasons.set(item.pkg, "不是 DSH 组合包（既没声明 dsh.bundle，依赖里也没有 @deepseek-ai/*）");
+      buildStats.filters.notBundle += 1;
       continue;
     }
     /* 官方内部模块不进第三方市场：@deepseek-ai/* 是 DSH 自身拆出来的包（@deepseek-ai/dsh 就是主程序本身），
      * 装进 profile 属于自残；而且它们真正的家在 deepseek-harness 单仓里，本图只能拿到"谁复制了这份 package.json"
      * —— 实测门面会落到 AlexKaiqi/dsh-client-locale 这种顶名仓库上。官方组合包走 DSH 自己的实验性插件入口。 */
-    if (item.pkg.startsWith("@deepseek-ai/")) { skipReasons.set(item.pkg, "DSH 官方内部模块（走 DSH 自带入口，不进第三方市场）"); continue; }
+    if (item.pkg.startsWith("@deepseek-ai/")) { skipReasons.set(item.pkg, "DSH 官方内部模块（走 DSH 自带入口，不进第三方市场）"); buildStats.filters.officialModule += 1; continue; }
+    /* 人工拉黑包：直接不收录（后台写进 overrides.lists.blacklistPackages）。 */
+    if (overrides.lists.blacklistPackages.includes(item.pkg)) { skipReasons.set(item.pkg, "人工拉黑（包名名单）"); buildStats.filters.manualBlacklist += 1; continue; }
     if (!byPkg.has(item.pkg)) byPkg.set(item.pkg, []);
     byPkg.get(item.pkg).push(item);
   }
@@ -509,7 +757,116 @@ async function main() {
     }
     return 0;
   };
+
+  /* ---- 子目录归属校验（先查，后组装）----
+   * 只对「npm 包自己声明了 repository.directory」的条目查：去那个仓库里读目录下的 package.json，
+   * name 对得上 -> confirmed；目录不存在/本地路径 -> refuted；网络/限流 -> unverified（不改写结论）。
+   * 这一步是"repo 里确实有它"的唯一直接证据；之前索引在这里完全信 npm 自述，线上被 6 个
+   * dsh-ab-* 包（发布账号 aiscope，directory 写 .dsh/plugins/…）+ 1 个 @szx-a 包冒用官方仓库。 */
+  const subdirVerdicts = new Map(); // pkg -> { verdict, reason }
+  if (SUBDIR_VERIFY) {
+    const token = loadGitHubToken({ env: process.env, envFile: join(ROOT, ".env") });
+    if (!token) {
+      console.log("子目录校验：未配置 GITHUB_TOKEN，跳过（索引仍按 npm 自述归属；要校验请 export GITHUB_TOKEN=…）");
+    } else {
+      const targets = [];
+      const codeTargets = [];
+      for (const [pkg, claimants] of byPkg) {
+        const rec = cache.packages[pkg];
+        const directory = String(rec?.repositoryDirectory ?? "").trim();
+        const resolved = resolveOwner({ npmRepo: rec.repository, claimants, meshById });
+        const repoKeyForCheck = resolved.repoId ?? claimants.slice().sort(compareRank)[0]?.repoId ?? null;
+        if (directory && classifyRepositoryDirectory(directory).kind !== "absent") {
+          if (repoKeyForCheck) targets.push({ pkg, repoKey: repoKeyForCheck, directory });
+          continue;
+        }
+        /* 没有 repository.directory 的条目：高星的都用 code search 兜底（见 repo-dir-verify.mjs）。
+         * 两类来源都要查：
+         *  · 子目录候选（chosen.subdir）：认领关系来自 npm 自述反查，属于循环论证，低星直接判未核实；
+         *  · 非子目录但归属未确证（DECLARED_IN_MESH）：典型是 monorepo 子包（dsh-web 的 @linxin666/*），
+         *    npm 声明的仓库在图里、但仓库没在根 package.json 里声明包名 —— 仓库里搜 package.json 就能确证。 */
+        const fallback = claimants.slice().sort(compareRank)[0] ?? null;
+        const chosen = resolved.item ?? fallback;
+        const subdirCandidate = Boolean(chosen?.subdir);
+        if (!subdirCandidate && resolved.verified) continue; // 已确证的非子目录条目不用再查
+        const stars = Number(resolved.node?.stars ?? chosen?.node?.stars ?? 0) || 0;
+        if (repoKeyForCheck && stars >= SUBDIR_CODESEARCH_MIN_STARS) {
+          codeTargets.push({ pkg, repoKey: repoKeyForCheck, directory: "", gitHead: typeof rec.gitHead === "string" ? rec.gitHead : null, publisher: typeof rec.npmUser === "string" ? rec.npmUser : null });
+        } else if (subdirCandidate) {
+          subdirVerdicts.set(pkg, { verdict: VERDICT.UNVERIFIED, reason: "no-directory" });
+        }
+      }
+      const tVerify0 = Date.now();
+      const verdictRun = await runSubdirVerification({
+        targets: [...targets, ...codeTargets],
+        cache: readRepoDirCache(SUBDIR_CACHE),
+        fetchPackageJson: createGitHubPackageJsonFetcher({ token }),
+        // 目录现在不存在时再查一次历史提交：历史里出现过 = 后来搬走了，不当冒充驳回
+        fetchDirectoryHistory: createGitHubDirectoryHistoryFetcher({ token }),
+        // 没有目录的包改用 code search + gitHead 证据链（code search 自带 7 秒限速）
+        fetchCodeSearch: createGitHubCodeSearchFetcher({ token }),
+        fetchCommitExists: createGitHubCommitFetcher({ token }),
+        ttlMs: SUBDIR_TTL_MS,
+        concurrency: SUBDIR_CONCURRENCY,
+        log: (line) => console.log("   " + line),
+      });
+      writeRepoDirCache(SUBDIR_CACHE, verdictRun.cache);
+      buildStats.verification = {
+        ...verdictRun.stats,
+        // 本轮真正发起的 code search 数（缓存命中时是 0）；缓存里已有的结论单独给一个数，工作流页要能看出来
+        codeSearchCached: Object.keys(verdictRun.cache.entries ?? {}).filter((key) => String(key).includes("#::")).length,
+      };
+      buildStats.timings.verifyMs = Date.now() - tVerify0;
+      for (const [pkg, entry] of verdictRun.results) subdirVerdicts.set(pkg, judgeSubdirCheck(entry, pkg, entry.repoKey ?? null));
+      const counts = { confirmed: 0, unverified: 0, refuted: 0 };
+      for (const v of subdirVerdicts.values()) counts[v.verdict] = (counts[v.verdict] ?? 0) + 1;
+      const movedCount = verdictRun.stats.moved;
+      console.log(
+        "   判定：" + counts.confirmed + " 确证 · " + counts.unverified + " 未核实（其中目录搬走 " + movedCount + "）· " +
+          counts.refuted + " 驳回（本地路径/从未存在过的目录）",
+      );
+      const refuted = [...subdirVerdicts].filter(([, v]) => v.verdict === VERDICT.REFUTED);
+      for (const [pkg, v] of refuted.slice(0, 8)) console.log("   · 驳回 " + pkg + "：" + v.reason);
+      if (refuted.length > 8) console.log("   · 另有 " + (refuted.length - 8) + " 条驳回");
+    }
+  }
+  /* ---- 第 4 层：npm 发布溯源（provenance）----
+   * 只查"声称仓库星标 ≥ 阈值"的包（默认 100）：高星仓库的身份最值得保护，请求量也可控。
+   * 结论按 pkg@version 缓存 30 天（版本不可变），后续轮次基本零成本。 */
+  const provenanceResults = new Map();
+  if (PROVENANCE_VERIFY) {
+    const targets = [];
+    for (const [pkg, claimants] of byPkg) {
+      const rec = cache.packages[pkg];
+      const version = typeof rec?.latestTag === "string" && rec.latestTag ? rec.latestTag : null;
+      if (!version) continue;
+      const resolved = resolveOwner({ npmRepo: rec.repository, claimants, meshById });
+      const fallback = claimants.slice().sort(compareRank)[0] ?? null;
+      const node = resolved.node ?? fallback?.node ?? null;
+      if ((Number(node?.stars) || 0) < PROVENANCE_MIN_STARS) continue;
+      if (!resolved.repoId && !fallback?.repoId) continue;
+      targets.push({ pkg, version });
+    }
+    const provRun = await runProvenanceVerification({
+      targets,
+      cache: readProvenanceCache(PROVENANCE_CACHE),
+      fetchProvenance: createNpmProvenanceFetcher(),
+      concurrency: PROVENANCE_CONCURRENCY,
+      log: (line) => console.log("   " + line),
+    });
+    writeProvenanceCache(PROVENANCE_CACHE, provRun.cache);
+    for (const [pkg, entry] of provRun.results) provenanceResults.set(pkg, entry);
+    buildStats.provenance = provRun.stats;
+    const matched = [...provenanceResults.values()].filter((x) => x.state === "ok").length;
+    console.log("   溯源判定：有 SLSA 溯源 " + matched + " 条（仓库一致/不一致在组装阶段生效）");
+  }
+
   let mergedClaimants = 0;
+  /** 人工裁决/名单命中统计（只进日志，不进索引）。 */
+  const overrideCounts = new Map();
+  /** 展示层判定计数（给工作流页看最终去向）。 */
+  const verdictCounts = { confirmed: 0, unverified: 0, refuted: 0, unattributed: 0 };
+  const tAssemble0 = Date.now();
   /** 归属证据分布：运维要能一眼看出"多少条是确证的、多少条是待确认的"。 */
   const evidenceCounts = new Map();
   /* 生态图「索引仓库」光环名单：只有"索引把插件归给了它"的仓库才配叫索引仓库。
@@ -526,15 +883,47 @@ async function main() {
     const fallback = claimants.slice().sort(compareRank)[0] ?? null;
     const chosen = resolved.item ?? fallback;
     const node = resolved.node;
-    const repoUrl = node && typeof node.htmlUrl === "string" && /^https:\/\/github\.com\/[^/?#]+\/[^/?#]+$/u.test(node.htmlUrl)
-      ? node.htmlUrl
-      : resolved.repoId
+    /* 子目录校验的结论（没查过的包没有结论，保持原有行为）：
+     * · confirmed  -> 仓库里确实有这个包，可以外借仓库身份，也配叫「仓库内子包」；
+     * · refuted    -> 目录不存在/是本地路径：不许再外借标题、头像、作者、星标（identity = null），
+     *                 否则官方仓库的名字还会挂在一个并不住在里面的包前面；
+     * · unverified -> 查不了（网络/限流/名字对不上），照旧显示但打「作者待确认」，不静默改写。 */
+    const check = subdirVerdicts.get(pkg) ?? null;
+    const baseDecision = decideEntryAttribution({ node, resolved, chosen, check });
+    /* 第 4 层：npm 发布溯源（有签名就压过自动核验；人工裁决仍压过它）。 */
+    const withProvenance = applyProvenanceAttribution(baseDecision, provenanceResults.get(pkg) ?? null, {
+      node,
+      repoKey: resolved.repoId ?? chosen?.repoId ?? null,
+    });
+    const applied = applyAttributionOverrides({
+      pkg,
+      base: withProvenance,
+      node,
+      rec,
+      repoId: resolved.repoId ?? chosen?.repoId ?? null,
+      overrides,
+    });
+    const { identity, refuted, attributionVerified, subdirLabel } = applied;
+    if (applied.source !== "auto") overrideCounts.set(applied.source, (overrideCounts.get(applied.source) ?? 0) + 1);
+    if (refuted) verdictCounts.refuted += 1;
+    else if (attributionVerified) verdictCounts.confirmed += 1;
+    else if (!identity && !resolved.owner) verdictCounts.unattributed += 1;
+    else verdictCounts.unverified += 1;
+    // 第 4 层溯源判定分布（match/mismatch/none/error/unknown）
+    buildStats.provenanceVerdicts = buildStats.provenanceVerdicts || { match: 0, mismatch: 0, none: 0, error: 0, unknown: 0 };
+    const pv = applied.provenance || "none";
+    buildStats.provenanceVerdicts[pv] = (buildStats.provenanceVerdicts[pv] ?? 0) + 1;
+    const repoUrl = !refuted && identity && typeof identity.htmlUrl === "string" && /^https:\/\/github\.com\/[^/?#]+\/[^/?#]+$/u.test(identity.htmlUrl)
+      ? identity.htmlUrl
+      : !refuted && resolved.repoId
         ? "https://github.com/" + resolved.repoId
         : null;
     const freshRelease = isFreshRelease(rec.versions);
     const entry = {
       name: pkg,
-      title: node && node.name && node.name !== pkg ? node.name : undefined,
+      /* 插件名 = npm 包名：仓库名（dsh-web / dsh-market / deepseek-harness）只说明"它住在哪"，
+       * 拿仓库名当插件名会让同一仓库的多个包看起来是同一个插件，也给了冒名者借名字的机会。 */
+      title: pkg,
       /* 人气数字：索引格式里**没有"显示数字"的字段**（sortKeys 只进排序菜单，值不显示），
        * 而前端渲染的字段只有 标题 / 标签胶囊 / 描述 / 版本·作者·日期。描述是唯一能放自由文本的位，
        * 且列表里两行截断 —— 所以把数字放**开头**，放结尾会被截掉。
@@ -547,30 +936,33 @@ async function main() {
        * 数字本身几乎无害（实测「8k」命中 23 个、「6」命中 199 个），而数字是这套格式里唯一能让用户
        * 看到"人气"的办法，所以保留数字、去掉中文词。数字的含义写在索引级 description 里（那段不进检索）。 */
       description: (() => {
-        const tone = toneOf(node?.stars ?? 0, chosen?.hasDownloads ?? false, chosen?.downloads ?? 0);
-        /* 归属没定下来时（evidence=ambiguous）没有仓库描述可用，退回 npm 自己的描述：
+        const tone = toneOf(identity?.stars ?? 0, chosen?.hasDownloads ?? false, chosen?.downloads ?? 0);
+        /* 归属没定下来时（evidence=ambiguous / 子目录被驳回）没有仓库描述可用，退回 npm 自己的描述：
          * 宁可描述朴素，也不能拿别人的仓库描述冒充。 */
-        const own = chosen?.subdir || !node ? pkgDescriptions.get(pkg) ?? "" : "";
-        const body = own || (typeof node?.description === "string" ? node.description.trim() : "");
+        const own = chosen?.subdir || !identity ? pkgDescriptions.get(pkg) ?? "" : "";
+        const body = own || (typeof identity?.description === "string" ? identity.description.trim() : "");
         return body ? tone + " —— " + body : tone;
       })(),
-      icon: node && typeof node.avatar === "string" && node.avatar.startsWith("https://") ? node.avatar : undefined,
-      // 作者名只来自证据：resolveOwner 认不出就留空，不再按人气挑一个顶上
-      author: resolved.owner ?? undefined,
+      icon: identity && typeof identity.avatar === "string" && identity.avatar.startsWith("https://") ? identity.avatar : undefined,
+      // 作者名只来自证据：resolveOwner 认不出、或者目录被驳回，就留空，不静默把一个错的名字当事实
+      author: refuted ? undefined : resolved.owner ?? undefined,
       repository: repoUrl ? { url: repoUrl } : undefined,
       metadata: {
-        category: node && categories.has(node.category) ? node.category : undefined,
-        keywords: keywordsOf(node ?? { topics: [] }, pkg),
+        category: identity && categories.has(identity.category) ? identity.category : undefined,
+        keywords: keywordsOf(identity ?? { topics: [] }, pkg),
         labels: [
           rec.isBundle ? "dsh-bundle" : "dsh-bundle-unconfirmed",
           ...(rec.hasClient ? ["has-client"] : []),
           ...(freshRelease ? ["recent-release"] : []),
-          ...(chosen?.subdir ? ["subdir-package"] : []),
+          // 「仓库内子包」是事实主张：只有目录里的 package.json 真的写了这个名字才配挂
+          ...(subdirLabel ? ["subdir-package"] : []),
+          // 第 4 层证据：npm provenance 与声称仓库一致（密码学级别）
+          ...(applied.provenance === "match" && attributionVerified && !refuted ? ["provenance-verified"] : []),
           // 作者名不是"两边一致"证实的，就明说待确认 —— 不静默把一个可能错的名字当事实
-          ...(resolved.verified ? [] : ["owner-unverified"]),
+          ...(attributionVerified ? [] : ["owner-unverified"]),
           "star-cta", // 行动号召：所有条目都挂（用户要求）
         ],
-        sortKeys: { stars: Number(node?.stars) || 0, downloads: chosen?.downloads ?? 0 },
+        sortKeys: { stars: Number(identity?.stars) || 0, downloads: chosen?.downloads ?? 0 },
       },
       /* 不写 engines：DSH 的校验器（@deepseek-ai/dsh-plugin-market-index 的 marketVersion）对这一项是
        * optional(...) ?? {}，缺失就补一个空对象 —— 写与不写完全等价，21852 个版本各带一个 "engines":{}
@@ -582,8 +974,22 @@ async function main() {
     plugins.push(entry);
     /* 光环按【索引的归属】收，不按"仓库里写了个包名"收 —— 后者会把抢名的路人一起点亮。
      * 图里有的用原始 id（大小写必须与节点一致），图外的用 repoKey 的小写（那种本来也没球可点）。 */
-    if (node?.id) haloIds.add(node.id);
-    else if (resolved.repoId) haloIds.add(resolved.repoId);
+    // 驳回的条目不把仓库点亮成「索引仓库」：索引并没有把它归给那个仓库
+    if (identity?.id) haloIds.add(identity.id);
+    else if (!refuted && resolved.repoId) haloIds.add(resolved.repoId);
+  }
+
+  /* ---- 第 5 层：索引不变量自检（产物级）----
+   * 前面几层管"归给谁"，这一层管"产物本身有没有写坏"：包名唯一、title=包名、版本/时间戳/标签/仓库格式合法。
+   * 与 auditOwnership 一样：写盘之后喊出来，不假装成功。 */
+  const selfCheck = validateIndex(plugins, new Set(labels.keys()));
+  buildStats.selfCheck = { violations: selfCheck.length, sample: selfCheck.slice(0, 10) };
+  if (selfCheck.length) {
+    console.error("✗ 索引不变量自检未通过：" + selfCheck.length + " 条");
+    for (const v of selfCheck.slice(0, 8)) console.error("   - " + v.pkg + "：" + v.why);
+    process.exitCode = 1;
+  } else {
+    console.log("✓ 索引不变量自检通过（包名唯一 / title=包名 / 版本与标签合法 / 仓库地址格式正确）");
   }
 
   /* 分类计数：索引格式里 category 声明**只有 title、没有计数字段**（前端 displayDeclarations 也只渲染 title），
@@ -636,6 +1042,28 @@ async function main() {
   writeFileSync(haloPath, JSON.stringify({ generatedAt: new Date().toISOString(), count: haloIds.size, ids: [...haloIds].sort() }));
   console.log("写入 " + haloPath + "：" + haloIds.size + " 个仓库（生态图「索引仓库」光环名单，与索引归属同源）");
   console.log("写入 " + OUT + "：" + plugins.length + " 个插件 · " + (JSON.stringify(index).length / 1024).toFixed(0) + " KB");
+
+  /* 构建统计落盘：后台「索引源 → 工作流」直接读它画流水线（每个阶段进出多少、挡在哪）。
+   * 与索引同目录；失败不影响索引本身。 */
+  try {
+    const labelCounts = {};
+    for (const plugin of plugins) for (const label of plugin.metadata.labels ?? []) labelCounts[label] = (labelCounts[label] ?? 0) + 1;
+    buildStats.finishedAt = new Date().toISOString();
+    buildStats.timings.assembleMs = Date.now() - tAssemble0;
+    buildStats.timings.totalMs = Date.now() - tStart;
+    buildStats.verdicts = verdictCounts;
+    buildStats.labels = labelCounts;
+    buildStats.overrides = Object.fromEntries(overrideCounts);
+    buildStats.skipped = {
+      total: skipReasons.size,
+      top: [...skipReasons.entries()].slice(0, 30).map(([pkg, why]) => ({ pkg, why })),
+    };
+    buildStats.index = { plugins: plugins.length, categories: Object.keys(declaredCategories).length, haloRepos: haloIds.size };
+    buildStats.seed = seed;
+    writeFileSync(join(dirname(OUT), "build-stats.json"), JSON.stringify(buildStats, null, 1));
+  } catch (err) {
+    console.log("构建统计写入失败（不影响索引）：" + String(err && err.message ? err.message : err));
+  }
   if (mergedClaimants) {
     console.log("同名认领合并: " + mergedClaimants + " 条仓库记录归到同一个包名下");
   }
@@ -657,6 +1085,9 @@ async function main() {
   const unverified = plugins.filter((p) => (p.metadata.labels ?? []).includes("owner-unverified")).length;
   const nameless = plugins.filter((p) => !p.author).length;
   console.log("待确认 " + unverified + " 条（其中 " + nameless + " 条没写作者名）· 确证 " + (plugins.length - unverified) + " 条");
+  if (overrideCounts.size) {
+    console.log("人工介入：" + [...overrideCounts.entries()].map(([k, v]) => k + " " + v + " 条").join(" · "));
+  }
   /* 自检：产物已经写盘，这里只做"喊出来"。退出码非 0 不会毁掉这一轮 —— 采集器的
    * _market_index_fresh 只看产物是否完整写出，所以日志里能看到失败、索引仍然可用。 */
   const violations = auditOwnership(plugins, cache.packages);

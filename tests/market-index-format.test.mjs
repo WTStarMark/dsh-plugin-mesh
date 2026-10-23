@@ -8,17 +8,17 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { toneOf, versionEntries, collectCandidates, keywordsOf, isFreshRelease, seededRandom, shuffled, MIN_STARS_FOR_BADGE, FRESH_RELEASE_DAYS, resolveOwner, auditOwnership, OWNER_EVIDENCE } from "../tools/market-index.mjs";
 
-test("人气前缀只放两个数字，不放中文词", () => {
-  assert.equal(toneOf(6786, true, 160042), "★6.8k · 160k");
-  assert.equal(toneOf(196, true, 70473), "★196 · 70k");
-  assert.equal(toneOf(9999999, true, 1200000), "★10M · 1.2M");
+test("人气前缀只放数字 + ↓ 符号，别让人把下载量当星标", () => {
+  assert.equal(toneOf(6786, true, 160042), "★6.8k · ↓160k");
+  assert.equal(toneOf(196, true, 70473), "★196 · ↓70k");
+  assert.equal(toneOf(9999999, true, 1200000), "★10M · ↓1.2M");
 });
 
 test("星标不足阈值就不写 ★：别在卡片第一行写「没人气」", () => {
-  assert.equal(toneOf(MIN_STARS_FOR_BADGE - 1, true, 31000), "31k", "9 星只写下载量");
-  assert.equal(toneOf(0, true, 2000), "2k", "0 星不写 ★0");
+  assert.equal(toneOf(MIN_STARS_FOR_BADGE - 1, true, 31000), "↓31k", "9 星只写下载量");
+  assert.equal(toneOf(0, true, 2000), "↓2k", "0 星不写 ★0");
   assert.equal(toneOf(0, false, 0), "—");
-  assert.equal(toneOf(MIN_STARS_FOR_BADGE, true, 2000), "★10 · 2k", "到阈值就写 ★");
+  assert.equal(toneOf(MIN_STARS_FOR_BADGE, true, 2000), "★10 · ↓2k", "到阈值就写 ★");
 });
 
 test("关键词兜底：没打 topic 的条目也要能被搜到（核心词 + 包名分词）", () => {
