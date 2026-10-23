@@ -9,16 +9,20 @@ on:
 jobs:
   test:
     name: Node ${{ matrix.node }} · Python ${{ matrix.python }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          # 线上就是这套：远端 Node 22.23.3 / Python 3.9.25
+          # 线上就是这套：远端 Node 22.23.3 / Python 3.9.25。
+          # 注意：ubuntu-latest 已滚到 26.04，setup-python 没有 3.9 的预编译包
+          # （"The version '3.9' ... was not found for Ubuntu 26.04"），所以 3.9 固定 22.04。
           - node: "22"
             python: "3.9"
+            os: ubuntu-22.04
           - node: "22"
             python: "3.12"
+            os: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
