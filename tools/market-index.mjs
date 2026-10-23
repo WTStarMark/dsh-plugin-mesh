@@ -42,7 +42,8 @@ import {
   writeProvenanceCache,
   repoKeyFromUrl,
 } from "./repo-dir-verify.mjs";
-import { decisionFor, listHit, marketPaths, readMarketOverrides } from "./market-overrides.mjs";
+import { decisionFor, hiddenLabelIds, listHit, marketPaths, readMarketOverrides } from "./market-overrides.mjs";
+import { MARKET_LABELS } from "./market-labels.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const UA = "dsh-plugin-mesh-market-index/0.1 (+https://github.com/WTStarMark/dsh-plugin-mesh)";
@@ -473,6 +474,15 @@ export function applyAttributionOverrides({ pkg, base, node = null, rec = null, 
 }
 
 /**
+ * 去掉后台「索引源 → 标签」里被隐藏的标签（纯函数，单测覆盖）。
+ * 只影响展示：条目本身的判定/身份不变，DSH 市场里就是不显示这枚胶囊。
+ */
+export function filterHiddenLabels(labels, hidden) {
+  const hide = hidden instanceof Set ? hidden : new Set(Array.isArray(hidden) ? hidden : []);
+  return (Array.isArray(labels) ? labels : []).filter((id) => !hide.has(id));
+}
+
+/**
  * 第 4 层：npm 发布溯源（provenance）-> 最终展示策略（纯函数，单测覆盖）。
  * · match    ：溯源仓库 == 声称仓库 → 强制确证（这是最强证据，可以恢复被自动驳回的身份）
  * · mismatch ：溯源仓库 != 声称仓库 → 强制驳回（签名声明说了别的仓库，比任何自述都硬）
@@ -552,8 +562,12 @@ export function validateIndex(plugins, labelIds = null) {
  * 只要有一行的作者/仓库与 npm 包自己的声明冲突、却没打 owner-unverified，就算违规。
  * @returns {Array<{pkg: string, why: string, declared: string|null, listed: string|null}>}
  */
-export function auditOwnership(plugins, packages) {
+export function auditOwnership(plugins, packages, options = {}) {
   const bad = [];
+  /* 后台把 owner-unverified 标签隐藏时，"没作者名就必须挂这枚标签"这条自检自动失效
+   * （标签被隐藏是运营者的显式选择，不是生成器把猜测当事实）。仓库冲突那条照查。 */
+  const hidden = options.hiddenLabels instanceof Set ? options.hiddenLabels : new Set(Array.isArray(options.hiddenLabels) ? options.hiddenLabels : []);
+  const labelHidden = hidden.has("owner-unverified");
   for (const p of plugins ?? []) {
     const declared = repoKey(packages?.[p.name]?.repository);
     const listed = repoKey(p.repository?.url);
@@ -562,7 +576,7 @@ export function auditOwnership(plugins, packages) {
       bad.push({ pkg: p.name, why: "仓库与 npm 声明不一致，却当成确证", declared, listed });
       continue;
     }
-    if (!flagged && !p.author) {
+    if (!flagged && !p.author && !labelHidden) {
       bad.push({ pkg: p.name, why: "既没写作者名，也没标 owner-unverified", declared, listed });
     }
   }
@@ -580,6 +594,8 @@ async function main() {
   if (!downloads?.repos) throw new Error("读不到 " + npmCachePath);
 
   const overrides = readMarketOverrides(OVERRIDES);
+  /* 后台「索引源 → 标签」里被隐藏的标签：条目与 metadata.labels 都不再输出（DSH 市场就不显示这枚胶囊）。 */
+  const hiddenLabels = hiddenLabelIds(overrides);
   const byId = new Map(mesh.nodes.map((n) => [n.id, n]));
   /* 小写索引：npm 的 repository 字段大小写随意（实测 blank-not-black/dsh-remote 对
    * Blank-not-black/dsh-Remote），而 repoKey() 一律返回小写，所以这条查表必须按小写建。 */
@@ -709,19 +725,10 @@ async function main() {
       categories.set(n.category, { title: { en: n.category, zh: n.categoryLabel ?? n.category } });
     }
   }
-  labels.set("dsh-bundle", { title: { en: "DSH bundle", zh: "DSH 组合包" } });
-  labels.set("dsh-bundle-unconfirmed", { title: { en: "Likely bundle", zh: "疑似组合包" } });
-  labels.set("has-client", { title: { en: "Has UI", zh: "带界面" } });
-  labels.set("recent-release", { title: { en: "Updated this week", zh: "近 7 天有新版" } });
-  labels.set("subdir-package", { title: { en: "Bundle in subdir", zh: "仓库内子包" } });
-  /* 归属没被两边对上的条目：作者名来自 npm 包自己的声明或唯一声明者，没做过双向核对。
-   * 打这枚标签是为了"不把猜测当事实"——用户能看到这一条的作者是待确认的。 */
-  labels.set("owner-unverified", { title: { en: "Owner unverified", zh: "作者待确认" } });
-  /* 行动号召（CTA）：每个条目都挂，提醒用户去仓库点 Star。
-   * 注意两个已知代价：① 这枚胶囊很长（12 个汉字 + Star），会把标题挤窄；② 若标签文案进检索字段，会命中全部条目。 */
-  labels.set("star-cta", { title: { en: "Star it to cheer the author on", zh: "点个Star鼓励对应作者吧" } });
-  /* npm provenance（SLSA）核验通过：这个版本确实由声称仓库的 CI 用 OIDC 发布，密码学级别证据。 */
-  labels.set("provenance-verified", { title: { en: "Publish provenance verified", zh: "发布溯源已核验" } });
+  /* 标签清单统一放在 tools/market-labels.mjs：后台「索引源 → 标签」要能列出中文名，包括已被隐藏、
+   * 不会出现在产物 metadata.labels 里的那些。 */
+  for (const def of MARKET_LABELS) labels.set(def.id, { title: { en: def.en, zh: def.zh } });
+  if (hiddenLabels.size) console.log("隐藏标签：" + [...hiddenLabels].join("、") + "（后台设置，产物里不输出）");
 
   const plugins = [];
   const skipReasons = new Map();
@@ -950,18 +957,21 @@ async function main() {
       metadata: {
         category: identity && categories.has(identity.category) ? identity.category : undefined,
         keywords: keywordsOf(identity ?? { topics: [] }, pkg),
-        labels: [
-          rec.isBundle ? "dsh-bundle" : "dsh-bundle-unconfirmed",
-          ...(rec.hasClient ? ["has-client"] : []),
-          ...(freshRelease ? ["recent-release"] : []),
-          // 「仓库内子包」是事实主张：只有目录里的 package.json 真的写了这个名字才配挂
-          ...(subdirLabel ? ["subdir-package"] : []),
-          // 第 4 层证据：npm provenance 与声称仓库一致（密码学级别）
-          ...(applied.provenance === "match" && attributionVerified && !refuted ? ["provenance-verified"] : []),
-          // 作者名不是"两边一致"证实的，就明说待确认 —— 不静默把一个可能错的名字当事实
-          ...(attributionVerified ? [] : ["owner-unverified"]),
-          "star-cta", // 行动号召：所有条目都挂（用户要求）
-        ],
+        labels: filterHiddenLabels(
+          [
+            rec.isBundle ? "dsh-bundle" : "dsh-bundle-unconfirmed",
+            ...(rec.hasClient ? ["has-client"] : []),
+            ...(freshRelease ? ["recent-release"] : []),
+            // 「仓库内子包」是事实主张：只有目录里的 package.json 真的写了这个名字才配挂
+            ...(subdirLabel ? ["subdir-package"] : []),
+            // 第 4 层证据：npm provenance 与声称仓库一致（密码学级别）
+            ...(applied.provenance === "match" && attributionVerified && !refuted ? ["provenance-verified"] : []),
+            // 作者名不是"两边一致"证实的，就明说待确认 —— 不静默把一个可能错的名字当事实
+            ...(attributionVerified ? [] : ["owner-unverified"]),
+            "star-cta", // 行动号召：所有条目都挂（用户要求）
+          ],
+          hiddenLabels,
+        ),
         sortKeys: { stars: Number(identity?.stars) || 0, downloads: chosen?.downloads ?? 0 },
       },
       /* 不写 engines：DSH 的校验器（@deepseek-ai/dsh-plugin-market-index 的 marketVersion）对这一项是
@@ -982,7 +992,9 @@ async function main() {
   /* ---- 第 5 层：索引不变量自检（产物级）----
    * 前面几层管"归给谁"，这一层管"产物本身有没有写坏"：包名唯一、title=包名、版本/时间戳/标签/仓库格式合法。
    * 与 auditOwnership 一样：写盘之后喊出来，不假装成功。 */
-  const selfCheck = validateIndex(plugins, new Set(labels.keys()));
+  const visibleLabelIds = new Set([...labels.keys()].filter((id) => !hiddenLabels.has(id)));
+  buildStats.hiddenLabels = [...hiddenLabels];
+  const selfCheck = validateIndex(plugins, visibleLabelIds);
   buildStats.selfCheck = { violations: selfCheck.length, sample: selfCheck.slice(0, 10) };
   if (selfCheck.length) {
     console.error("✗ 索引不变量自检未通过：" + selfCheck.length + " 条");
@@ -1023,7 +1035,7 @@ async function main() {
     },
     metadata: {
       categories: declaredCategories,
-      labels: Object.fromEntries(labels),
+      labels: Object.fromEntries([...labels].filter(([id]) => !hiddenLabels.has(id))),
       sortKeys: {
         stars: { title: { en: "Stars", zh: "星标" }, order: "desc" },
         downloads: { title: { en: "Weekly downloads", zh: "周下载量" }, order: "desc" },
@@ -1082,15 +1094,16 @@ async function main() {
     const n = evidenceCounts.get(key) ?? 0;
     console.log("   " + String(n).padStart(5) + "  " + (100 * n / evidenceTotal).toFixed(1).padStart(5) + "%  " + label);
   }
-  const unverified = plugins.filter((p) => (p.metadata.labels ?? []).includes("owner-unverified")).length;
+  /* 统计用内部判定计数（verdictCounts），不用标签数 —— 标签可能被后台隐藏，数字不能跟着消失。 */
+  const unverified = verdictCounts.unverified + verdictCounts.refuted + verdictCounts.unattributed;
   const nameless = plugins.filter((p) => !p.author).length;
-  console.log("待确认 " + unverified + " 条（其中 " + nameless + " 条没写作者名）· 确证 " + (plugins.length - unverified) + " 条");
+  console.log("待确认 " + unverified + " 条（其中 " + nameless + " 条没写作者名）· 确证 " + verdictCounts.confirmed + " 条");
   if (overrideCounts.size) {
     console.log("人工介入：" + [...overrideCounts.entries()].map(([k, v]) => k + " " + v + " 条").join(" · "));
   }
   /* 自检：产物已经写盘，这里只做"喊出来"。退出码非 0 不会毁掉这一轮 —— 采集器的
    * _market_index_fresh 只看产物是否完整写出，所以日志里能看到失败、索引仍然可用。 */
-  const violations = auditOwnership(plugins, cache.packages);
+  const violations = auditOwnership(plugins, cache.packages, { hiddenLabels });
   if (violations.length) {
     console.error("✗ 归属自检未通过：" + violations.length + " 条把猜测当事实");
     for (const v of violations.slice(0, 8)) {

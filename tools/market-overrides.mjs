@@ -47,7 +47,12 @@ export function marketPaths(root = DEFAULT_ROOT) {
 }
 
 export function emptyOverrides() {
-  return { version: 1, entries: {}, lists: { blacklistPackages: [], blacklistPublishers: [], blacklistRepos: [], whitelistRepos: [] } };
+  return {
+    version: 1,
+    entries: {},
+    lists: { blacklistPackages: [], blacklistPublishers: [], blacklistRepos: [], whitelistRepos: [] },
+    labels: { hidden: [] },
+  };
 }
 
 const cleanStrings = (value, max) => [...new Set((Array.isArray(value) ? value : []).map((x) => String(x ?? "").trim()).filter(Boolean))].slice(0, max);
@@ -72,7 +77,17 @@ export function normalizeOverrides(raw) {
   out.lists.blacklistPublishers = cleanStrings(lists.blacklistPublishers, 500).filter((x) => PUBLISHER_RE.test(x) && x.length <= 214);
   out.lists.blacklistRepos = cleanStrings(lists.blacklistRepos, 500).filter((x) => REPO_ID_RE.test(x));
   out.lists.whitelistRepos = cleanStrings(lists.whitelistRepos, 500).filter((x) => REPO_ID_RE.test(x));
+  /* 要隐藏的标签（分类胶囊）：后台「索引源 → 标签」写这里；生成器据此从条目与 metadata.labels 里去掉。
+   * 只收合法 id 形状，具体 id 是否已知由后台接口校验（生成器只负责过滤，不因未知 id 报错）。 */
+  const labels = raw.labels && typeof raw.labels === "object" && !Array.isArray(raw.labels) ? raw.labels : {};
+  out.labels.hidden = cleanStrings(labels.hidden, 50).filter((x) => /^[a-z0-9][a-z0-9-]{0,63}$/u.test(x));
   return out;
+}
+
+/** 被隐藏的标签 id 集合（生成器用）。 */
+export function hiddenLabelIds(overrides) {
+  const list = overrides && overrides.labels && Array.isArray(overrides.labels.hidden) ? overrides.labels.hidden : [];
+  return new Set(list);
 }
 
 /** 读：文件缺失/损坏一律当空表（与现有名单同口径，绝不因为一个坏文件把索引生成搞崩）。 */

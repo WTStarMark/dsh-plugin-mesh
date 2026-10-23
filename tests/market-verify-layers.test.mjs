@@ -13,7 +13,7 @@ import {
   runProvenanceVerification,
   provenanceCacheKey,
 } from "../tools/repo-dir-verify.mjs";
-import { applyProvenanceAttribution, applyAttributionOverrides, validateIndex } from "../tools/market-index.mjs";
+import { applyProvenanceAttribution, applyAttributionOverrides, filterHiddenLabels, validateIndex } from "../tools/market-index.mjs";
 import { normalizeOverrides } from "../tools/market-overrides.mjs";
 
 const b64 = (obj) => Buffer.from(JSON.stringify(obj)).toString("base64");
@@ -127,6 +127,13 @@ test("provenance 判定：一致强制确证、不一致强制驳回、无溯源
   const final = applyAttributionOverrides({ pkg: "pkg", base: killed, node, rec: {}, repoId: "a/b", overrides });
   assert.equal(final.refuted, false);
   assert.equal(final.source, "manual:confirmed");
+});
+
+
+test("隐藏标签：条目与 metadata 都不输出（纯函数层）", () => {
+  assert.deepEqual(filterHiddenLabels(["dsh-bundle", "owner-unverified", "star-cta"], new Set(["owner-unverified"])), ["dsh-bundle", "star-cta"]);
+  assert.deepEqual(filterHiddenLabels(["a", "b"], ["b"]), ["a"]);
+  assert.deepEqual(filterHiddenLabels(null, new Set(["x"])), []);
 });
 
 test("索引不变量自检：合法条目通过，坏条目逐条报出来", () => {

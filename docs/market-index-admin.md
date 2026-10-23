@@ -429,3 +429,15 @@ flowchart LR
 | L9 | **索引不变量自检** | 包名唯一、title=包名、版本严格 semver、publishTimestamp 正整数、source=npm、标签已声明、repository/icon/keywords 格式；违规写入 build-stats.selfCheck 并让构建退出码非 0 |
 
 生成器参数：--no-provenance / --provenance-min-stars（默认 100）/ --provenance-cache（默认 data/cache/provenance.json）/ --provenance-concurrency（默认 3）。
+
+### 标签开关（2026-10-23 追加，已实现）
+
+后台「索引源 → 标签」页可以逐个开关分类胶囊（如隐藏「作者待确认」）：
+
+- 清单来自共享的 tools/market-labels.mjs（含中文名），接口 GET/POST /api/market/labels；
+- 开关只写 data/admin/market-index/overrides.json 的 labels.hidden；
+- 生成器据此从条目 metadata.labels 与索引级 metadata.labels 声明里同时移除该标签
+  （DSH 市场里就不再显示这枚胶囊/筛选项），归属判定本身不变；
+- 隐藏 owner-unverified 时，归属自检不再要求"无作者名必须挂该标签"（显式隐藏不是把猜测当事实），
+  统计日志改用内部判定计数，数字不会因为标签被隐藏而消失；
+- 保存后需要「构建与发布 → 重建 → 发布」才进入线上索引。

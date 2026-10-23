@@ -23,6 +23,7 @@ const {
   readMarketOverrides,
   saveMarketOverrides,
   decisionFor,
+  hiddenLabelIds,
   listHit,
   marketPaths,
 } = await import("../tools/market-overrides.mjs");
@@ -222,6 +223,50 @@ test("发布/回滚：草稿原子替换、history 备份、回滚恢复", async
   }
 });
 
+
+
+test("overrides 支持隐藏标签：去重、非法 id 丢弃", () => {
+  const doc = normalizeOverrides({ labels: { hidden: ["owner-unverified", "owner-unverified", "Bad Label", "star-cta", "x".repeat(80)] } });
+  assert.deepEqual(doc.labels.hidden, ["owner-unverified", "star-cta"]);
+  assert.deepEqual([...hiddenLabelIds(doc)], ["owner-unverified", "star-cta"]);
+  assert.deepEqual(normalizeOverrides({}).labels.hidden, [], "老文件没有 labels 段也要能读");
+});
+
+test("后台标签开关：列出计数、隐藏写盘、未知标签拒绝", async () => {
+  const root = makeRoot();
+  try {
+    const distFile = join(root, "dist", "market", "index.json");
+    const doc = JSON.parse(readFileSync(distFile, "utf8"));
+    doc.metadata = {
+      labels: {
+        "dsh-bundle": { title: { en: "DSH bundle", zh: "DSH 组合包" } },
+        "owner-unverified": { title: { en: "Owner unverified", zh: "作者待确认" } },
+      },
+    };
+    doc.plugins[1].metadata.labels = ["dsh-bundle", "owner-unverified"];
+    writeFileSync(distFile, JSON.stringify(doc));
+
+    const admin = createMarketAdmin({ root });
+    const before = admin.labelsPayload();
+    const byId = Object.fromEntries(before.labels.map((l) => [l.id, l]));
+    assert.equal(byId["owner-unverified"].count, 1);
+    assert.equal(byId["owner-unverified"].hidden, false);
+    assert.equal(byId["owner-unverified"].title.zh, "作者待确认");
+
+    const saved = admin.saveLabels({ action: "set", hidden: ["owner-unverified"] });
+    assert.equal(saved.ok, true);
+    assert.deepEqual(saved.hidden, ["owner-unverified"]);
+    assert.equal(saved.impacted, 1);
+    assert.equal(readMarketOverrides(marketPaths(root).overrides).labels.hidden[0], "owner-unverified");
+
+    assert.ok(admin.saveLabels({ action: "set", hidden: ["nope"] }).error.length > 0);
+    assert.ok(admin.saveLabels({ action: "hide", id: "not-a-label" }).error.length > 0);
+    assert.ok(admin.saveLabels({ action: "hide", id: "star-cta" }).hidden.includes("star-cta"));
+    assert.equal(admin.saveLabels({ action: "show", id: "star-cta" }).hidden.includes("star-cta"), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("工作流：八阶段 + 实时快照 + 构建统计", async () => {
   const root = makeRoot();

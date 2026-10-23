@@ -220,13 +220,15 @@ python3 backend/collect.py --from-store
 ## 索引源页（插件市场索引的后台）
 
 在「状态 / 数据 / 工作流 / 名单 / 设置 / 共鸣 / 审计」之外新增 **「索引源」** 标签页（P0 已实现），
-管的是 `/market/index.json` 这条线：**总览 / 复核台 / 构建与发布** 三个子页。
+管的是 `/market/index.json` 这条线：**总览 / 工作流 / 复核台 / 标签 / 构建与发布** 五个子页。
 
 - **总览**：条目数、确证/待确认/驳回/未归属/人工介入分布、dist 与 mesh 的时间差、采集器状态、
   最近构建、校验缓存统计、最近发布历史。数字与「插件市场」里看到的一致（判定回落索引标签）。
 - **复核台**：按队列（驳回 / 无目录未核实 / 未归属 / 人工已裁决 / 缓存异常）列条目；
   点一条看证据面板（npm 发布者、声称仓库与目录、缓存结论、人工裁决），可 **确认归属 / 驳回 / 标记未核实 / 恢复自动**。
   裁决写 `data/admin/market-index/overrides.json`（写前留 `.bak`，全审计），**增量生效于下一次构建**。
+- **标签**：控制哪些分类胶囊会出现在索引源里（如隐藏「作者待确认」）。开关只写 `overrides.json` 的 `labels.hidden`，
+  产物里对应标签从条目与 `metadata.labels` 一起移除；保存后需重建 + 发布才生效。
 - **构建与发布**：点「重建索引（草稿）」→ 异步跑 `tools/market-index.mjs` 到 `data/admin/market-index/drafts/<jobId>/`，
   页面轮询进度与日志尾；完成后出 **差异预览**（新增 / 移除 / 身份变化 / 标签变化 / 标题变化），
   确认后「发布」→ 原子替换 `dist/market/index.json`（先备份到 `history/`，保留最近 10 版），可回滚。
@@ -243,6 +245,8 @@ python3 backend/collect.py --from-store
 | GET | `queue?type=refuted\|nodir\|unattributed\|manual\|error` | 复核队列 |
 | GET | `cache?state=&q=&page=` | 校验缓存分页 + 统计 |
 | GET | `lists` | 人工裁决 + 名单 |
+| GET | `labels` | 标签（分类胶囊）清单：中文名 / 条目数 / 是否隐藏 |
+| POST | `labels` | {action:"set", hidden:[id…]} 或 {action:"hide"/"show", id}；隐藏后重建 + 发布才生效 |
 | POST | `decision` | `{name, decision:"confirmed"\|"refuted"\|"unverified", reason?}`；`{name, remove:true}` 撤销 |
 | DELETE | `decision?name=` | 撤销裁决（等价写法） |
 | GET/POST | `build` | 查构建作业 / 触发构建（采集器在跑时 409） |

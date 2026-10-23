@@ -18,6 +18,7 @@ import { dirname, join, resolve } from "node:path";
 import { atomicWriteJson, ensureDir, fileMtimeMs, relFromRoot } from "./admin-config.mjs";
 import { DECISIONS, PACKAGE_NAME_RE, decisionFor, listHit, marketPaths, readMarketOverrides, saveMarketOverrides } from "./market-overrides.mjs";
 import { VERDICT, judgeSubdirCheck, readRepoDirCache, repoDirCacheKey } from "./repo-dir-verify.mjs";
+import { MARKET_LABELS, marketLabel } from "./market-labels.mjs";
 
 const HISTORY_KEEP = 10;
 const BUILD_TIMEOUT_MS = 30 * 60 * 1000;
@@ -737,6 +738,52 @@ export function createMarketAdmin({ root, sendJson, readJsonBody } = {}) {
     return { total: rows.length, page, size, states: stats, entries: rows.slice((page - 1) * size, page * size), file: { bytes: fileMtimeMs(repoDirsFile) ? statSync(repoDirsFile).size : 0, updatedAt: fileMtimeMs(repoDirsFile) ? new Date(fileMtimeMs(repoDirsFile)).toISOString() : null } };
   }
 
+  /** 标签（市场里的「分类」胶囊）：清单 + 当前是否隐藏 + 产物里的条目数。 */
+  function labelsPayload() {
+    const dist = loadIndex(distIndex);
+    const plugins = dist ? dist.plugins : [];
+    const declared = (dist && dist.metadata && dist.metadata.labels) || {};
+    const overrides = loadOverrides();
+    const hidden = new Set((overrides.labels && overrides.labels.hidden) || []);
+    const counts = new Map();
+    for (const p of plugins) for (const id of (p.metadata && p.metadata.labels) || []) counts.set(id, (counts.get(id) ?? 0) + 1);
+    const ids = [...new Set([...MARKET_LABELS.map((item) => item.id), ...Object.keys(declared), ...counts.keys(), ...hidden])];
+    const labels = ids
+      .map((id) => {
+        const def = marketLabel(id);
+        const title = (declared[id] && declared[id].title) || (def ? { en: def.en, zh: def.zh } : { en: id, zh: id });
+        return { id, title, hidden: hidden.has(id), count: counts.get(id) ?? 0 };
+      })
+      .sort((a, b) => (a.hidden === b.hidden ? b.count - a.count : a.hidden ? 1 : -1));
+    return { labels, hidden: [...hidden] };
+  }
+
+  /** 保存隐藏标签：写 overrides.labels.hidden（重建 + 发布后生效）。 */
+  function saveLabels(body) {
+    const action = String(body?.action ?? "set");
+    const overrides = loadOverrides();
+    const current = new Set((overrides.labels && overrides.labels.hidden) || []);
+    if (action === "set") {
+      if (!Array.isArray(body.hidden)) return { error: "hidden 必须是数组" };
+      const unknown = body.hidden.map(String).filter((id) => !marketLabel(id));
+      if (unknown.length) return { error: "未知标签：" + unknown.slice(0, 5).join("、") };
+      overrides.labels.hidden = [...new Set(body.hidden.map(String))];
+    } else if (action === "hide" || action === "show") {
+      const id = String(body.id ?? "");
+      if (!marketLabel(id)) return { error: "未知标签：" + id };
+      if (action === "hide") current.add(id);
+      else current.delete(id);
+      overrides.labels.hidden = [...current];
+    } else {
+      return { error: "action 只能是 set / hide / show" };
+    }
+    const written = saveMarketOverrides(paths.overrides, overrides);
+    const payload = labelsPayload();
+    const hidden = new Set(payload.hidden);
+    const impacted = payload.labels.filter((label) => hidden.has(label.id)).reduce((sum, label) => sum + label.count, 0);
+    return { ok: true, ...payload, impacted, backedUp: written.backedUp };
+  }
+
   function listsPayload() {
     const overrides = loadOverrides();
     return { entries: Object.entries(overrides.entries).map(([name, row]) => ({ name, ...row })), lists: overrides.lists };
@@ -798,6 +845,16 @@ export function createMarketAdmin({ root, sendJson, readJsonBody } = {}) {
       const bad = requireGet();
       if (bad !== null) return bad;
       return send(ctx.res, 200, listsPayload());
+    }
+    if (route === "labels") {
+      if (isGet) return send(ctx.res, 200, labelsPayload());
+      if (method !== "POST") return send(ctx.res, 405, { error: "只允许 GET / POST" });
+      const parsed = await readBody(ctx.req);
+      if (parsed.error) return send(ctx.res, 400, { error: parsed.error });
+      const result = saveLabels(parsed.value);
+      if (result.error) return send(ctx.res, 400, { error: result.error });
+      write("market-labels-set", "hidden=" + (result.hidden.join(",") || "(none)") + " impacted=" + result.impacted);
+      return send(ctx.res, 200, result);
     }
     if (route === "history") {
       const bad = requireGet();
@@ -876,5 +933,5 @@ export function createMarketAdmin({ root, sendJson, readJsonBody } = {}) {
     return send(ctx.res, 404, { error: "未知索引源接口：" + route });
   }
 
-  return { handle, paths, overviewPayload, workflowPayload, listPlugins, pluginDetail, queuePayload, cachePayload, listsPayload, saveDecision, removeDecision, startBuild, jobState, diffPayload, diffIndexes, publish, rollback, historyList, evidenceOf };
+  return { handle, paths, overviewPayload, workflowPayload, listPlugins, pluginDetail, queuePayload, cachePayload, listsPayload, labelsPayload, saveLabels, saveDecision, removeDecision, startBuild, jobState, diffPayload, diffIndexes, publish, rollback, historyList, evidenceOf };
 }

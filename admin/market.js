@@ -16,6 +16,7 @@ const PAGES = [
   { id: "overview", label: "总览" },
   { id: "workflow", label: "工作流" },
   { id: "review", label: "复核台" },
+  { id: "labels", label: "标签" },
   { id: "build", label: "构建与发布" },
 ];
 const QUEUE_TYPES = [
@@ -195,6 +196,7 @@ export function mountMarketView(root, { request, post, toast } = {}) {
     if (state.page === "overview") await renderOverview();
     else if (state.page === "workflow") await renderWorkflow();
     else if (state.page === "review") await renderReview();
+    else if (state.page === "labels") await renderLabels();
     else await renderBuild();
   }
 
@@ -550,6 +552,81 @@ export function mountMarketView(root, { request, post, toast } = {}) {
     );
     box.append(actions);
     box.append(el("p", "hint", "裁决只写 overrides.json；去「构建与发布」重建 → 看差异 → 发布后才进入线上索引。"));
+  }
+
+
+  // ---------------- 标签（分类胶囊） ----------------
+
+  /** 复用后台既有的开关样式：label.switch > input + span.track */
+  function makeSwitch(checked, onChange) {
+    const wrap = el("label", "switch");
+    const input = el("input");
+    input.type = "checkbox";
+    input.checked = Boolean(checked);
+    const track = el("span", "track");
+    wrap.append(input, track);
+    input.addEventListener("change", () => onChange(input.checked));
+    return { wrap, input };
+  }
+
+  async function renderLabels() {
+    const page = pages.get("labels");
+    const data = await request("api/market/labels");
+    clear(page);
+
+    const sec = section("索引标签（分类胶囊）", [
+      btn("全部显示", "small", async () => {
+        try {
+          await post("api/market/labels", { action: "set", hidden: [] });
+          toast("已恢复显示全部标签（重建 + 发布后生效）", "ok");
+          await renderLabels();
+        } catch (e) {
+          toast(e && e.message ? e.message : "保存失败", "err");
+        }
+      }),
+    ]);
+    sec.append(
+      el(
+        "p",
+        "sec-sub",
+        "这里控制哪些标签会出现在索引源里（DSH 插件市场按标签筛选）。隐藏只影响展示，不改变归属判定；保存后需要「构建与发布 → 重建 → 发布」才生效。",
+      ),
+    );
+
+    const rows = data.labels || [];
+    const toggles = new Map();
+    const t = tableWrap([{ text: "标签" }, { text: "id" }, { text: "当前条目", cls: "num" }, { text: "在索引源显示" }], { fixed: true });
+    for (const row of rows) {
+      const tr = el("tr", row.hidden ? "mark warn" : null);
+      const titleTd = el("td");
+      titleTd.append(el("b", null, row.title && (row.title.zh || row.title.en) ? row.title.zh || row.title.en : row.id));
+      if (row.hidden) titleTd.append(el("span", "sub", "已隐藏"));
+      const sw = makeSwitch(!row.hidden, () => {});
+      toggles.set(row.id, sw);
+      const swTd = el("td");
+      swTd.append(sw.wrap);
+      tr.append(titleTd, el("td", "mono", row.id), el("td", "num", fmtNum(row.count)), swTd);
+      t.tbody.append(tr);
+    }
+    if (!rows.length) emptyRow(t.tbody, 4, "没有可控制的标签");
+    sec.append(t.wrap);
+
+    const bar = el("div", "form-row");
+    const save = btn("保存隐藏设置", "primary small", async () => {
+      const hidden = [...toggles.entries()].filter(([, sw]) => !sw.input.checked).map(([id]) => id);
+      try {
+        const res = await post("api/market/labels", { action: "set", hidden });
+        toast("已保存：" + (hidden.length ? "隐藏 " + hidden.join("、") : "全部显示") + "。重建 + 发布后生效。", "ok");
+        await renderLabels();
+      } catch (e) {
+        toast(e && e.message ? e.message : "保存失败", "err");
+      }
+    });
+    bar.append(save);
+    const hiddenCount = rows.filter((row) => row.hidden).length;
+    bar.append(el("span", "hint", "当前隐藏 " + hiddenCount + " 个标签 · 产物里共 " + fmtNum(rows.reduce((sum, row) => sum + row.count, 0)) + " 条标签引用"));
+    sec.append(bar);
+    page.append(sec);
   }
 
   // ---------------- 构建与发布 ----------------
