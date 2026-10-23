@@ -175,6 +175,26 @@ python3 backend/collect.py --from-store
 - [ ] 有条件的再加一层：Cloudflare Access / 反代 Basic Auth / IP 白名单 —— 后台只有口令这一道锁。
 - [ ] SSH 改用密钥：`.env` 里现在放着 `DSH_SSH_PASS`（部署机的 root 口令）。它一旦泄露，等于生产机失守。
 
+
+### 索引源的多重校验层（工作流页）
+
+「索引源 → 工作流」把每层校验的覆盖与拦截摊开，同时写进每次构建的 \`build-stats.json\`：
+
+| 层 | 校验 | 说明 |
+|---|---|---|
+| L1 | 组合包声明 | 声明了 \`dsh.bundle\` 或依赖 \`@deepseek-ai/*\` 才算 DSH 包；官方内部模块、人工拉黑包不进市场 |
+| L2 | 归属认领 | npm 自述仓库 vs 认领仓库：两边一致才算「确证」，弱证据只打「作者待确认」 |
+| L3 | 目录实名 | 目录里的 \`package.json\` 必须真的声明这个包名 |
+| L4 | 目录字段一致 | 目录 \`package.json\` 自己的 \`repository\` 必须指向同一仓库（monorepo 相对路径忽略） |
+| L5 | 目录历史 | 目录 404 时查提交历史：后来搬走（不驳回）vs 从未存在（驳回） |
+| L6 | code search 兜底 | 没有 \`repository.directory\` 的高星候选：仓库内搜 \`filename:package.json\` 并核 name |
+| L7 | **npm 发布溯源** | SLSA provenance（GitHub Actions OIDC 签名）：溯源仓库 == 声称仓库 → 强制确证并挂「发布溯源已核验」；不一致 → 强制驳回；没有溯源 = 中性 |
+| L8 | 人工裁决 / 名单 | 人工裁决 > 名单 > 以上自动结论 |
+| L9 | **索引不变量自检** | 包名唯一 / title=包名 / 版本与 semver·时间戳·来源合法 / 标签已声明 / 仓库地址格式正确；违规写入 build-stats，构建退出码非 0 |
+
+- provenance 只对声称 ★≥100 的仓库查（默认一轮 221 条），结论按 \`pkg@version\` 缓存 30 天（版本不可变），之后基本零成本；npm 公开接口，不需要凭据。
+- 溯源命中会额外输出标签 \`provenance-verified\`（「发布溯源已核验」），在市场列表里可当"这条不是借名字"的强信号。
+
 ## 常见问题
 
 访问与登录：
@@ -196,3 +216,41 @@ python3 backend/collect.py --from-store
 | 改了共鸣清单但图上没变 | 回状态页点「应用变更」；页面顶部的 `pending.resonance` 提示就是干这个的 |
 | 点「应用变更」报 409 | 采集器正在跑（同一份 mesh.json 不能被两边同时写）；状态页会显示它跑到哪一步，等这轮结束再点 |
 | 改了锚定条件但没反应 | 预期行为：它只在重新策展时用来发现子节点，跑 `node tools/curate-ecosystem.mjs` 才生效 |
+
+## 索引源页（插件市场索引的后台）
+
+在「状态 / 数据 / 工作流 / 名单 / 设置 / 共鸣 / 审计」之外新增 **「索引源」** 标签页（P0 已实现），
+管的是 `/market/index.json` 这条线：**总览 / 复核台 / 构建与发布** 三个子页。
+
+- **总览**：条目数、确证/待确认/驳回/未归属/人工介入分布、dist 与 mesh 的时间差、采集器状态、
+  最近构建、校验缓存统计、最近发布历史。数字与「插件市场」里看到的一致（判定回落索引标签）。
+- **复核台**：按队列（驳回 / 无目录未核实 / 未归属 / 人工已裁决 / 缓存异常）列条目；
+  点一条看证据面板（npm 发布者、声称仓库与目录、缓存结论、人工裁决），可 **确认归属 / 驳回 / 标记未核实 / 恢复自动**。
+  裁决写 `data/admin/market-index/overrides.json`（写前留 `.bak`，全审计），**增量生效于下一次构建**。
+- **构建与发布**：点「重建索引（草稿）」→ 异步跑 `tools/market-index.mjs` 到 `data/admin/market-index/drafts/<jobId>/`，
+  页面轮询进度与日志尾；完成后出 **差异预览**（新增 / 移除 / 身份变化 / 标签变化 / 标题变化），
+  确认后「发布」→ 原子替换 `dist/market/index.json`（先备份到 `history/`，保留最近 10 版），可回滚。
+
+人工裁决优先级：**entries（人工）> 名单 > 自动核验结论**；名单支持包名 / 发布者 / 仓库三张一维名单 + 仓库白名单。
+
+接口（前缀同后台：`/<ADMIN_PATH>/api/market/`，写操作同样要 CSRF + 同源）：
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `overview` | 总览数据 |
+| GET | `plugins?q=&state=&label=&page=&size=` | 条目库分页（state=confirmed/unverified/refuted/unattributed） |
+| GET | `plugin?name=` | 单条详情（证据 + 当前判定 + 安装目标） |
+| GET | `queue?type=refuted\|nodir\|unattributed\|manual\|error` | 复核队列 |
+| GET | `cache?state=&q=&page=` | 校验缓存分页 + 统计 |
+| GET | `lists` | 人工裁决 + 名单 |
+| POST | `decision` | `{name, decision:"confirmed"\|"refuted"\|"unverified", reason?}`；`{name, remove:true}` 撤销 |
+| DELETE | `decision?name=` | 撤销裁决（等价写法） |
+| GET/POST | `build` | 查构建作业 / 触发构建（采集器在跑时 409） |
+| GET | `diff?jobId=` | 草稿 vs 线上五组差异 |
+| POST | `publish` | `{jobId, confirm:true}` 发布（原子替换 + history 备份） |
+| GET | `history` | 已发布版本（最近 10 版） |
+| POST | `rollback` | `{ts, confirm:true}` 回滚 |
+| GET | `logs` / `logs?name=` | 构建日志（白名单：`market-index-*.log`） |
+
+实现位置：`tools/market-admin.mjs`（路由/任务/差异/发布）、`tools/market-overrides.mjs`（裁决与名单的唯一读写）、
+生成器 `tools/market-index.mjs` 消费 overrides（`--overrides` 可覆盖路径）、前端 `admin/market.js` + `admin/admin.css` 的 `.mk-*` 段。
