@@ -15,6 +15,7 @@ import {
   phaseText,
   stateText,
 } from "./status.js";
+import { mountMarketView } from "./market.js";
 
 /* ---------------- 常量 ---------------- */
 
@@ -891,7 +892,23 @@ async function switchTab(name) {
   else if (name === "lists") await loadListsView();
   else if (name === "settings") await loadSettingsView();
   else if (name === "resonance") await loadResonanceView();
+  else if (name === "market") await loadMarketView();
   else if (name === "audit") await loadAuditView();
+}
+
+/* 索引源页：独立模块（admin/market.js）自己管 DOM 与轮询，这里只负责挂载与刷新入口 */
+let marketView = null;
+async function loadMarketView() {
+  const root = $("view-market");
+  if (!root) return;
+  if (!marketView) {
+    marketView = mountMarketView(root, {
+      request: apiGet,
+      post: apiPost,
+      toast,
+    });
+  }
+  await marketView.refresh();
 }
 
 

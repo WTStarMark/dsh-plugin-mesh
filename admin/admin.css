@@ -1034,3 +1034,22 @@ body.modal-open { overflow: hidden; }
 .cluster-probe { margin-top: 6px; }
 .cluster-probe summary { cursor: pointer; font-size: 12px; color: var(--label-2, #5f6b80); }
 select.input { height: 30px; padding: 0 8px; }
+
+/* ---------------- 索引源（market index）后台页 ----------------
+   只补两处布局：二级标签条（复用 .tab 缩小一档）、复核台两栏（列表 + 详情面板）。
+   其余全部沿用后台既有组件：.sec / .sec.panel / .cards / .stat / .kv / .table / .btn /
+   .badge / .notice / .log / .res-facts / .confirm-inline。 */
+.mk-subtabs { display: flex; align-items: center; gap: var(--sp-1); flex-wrap: wrap; }
+.mk-subtabs .tab { height: 28px; padding: 0 12px; font-size: 12px; }
+.mk-page { display: flex; flex-direction: column; gap: var(--sp-5); counter-reset: sec; }
+.mk-page[hidden] { display: none; }
+.mk-review { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: var(--sp-4); align-items: start; }
+@media (max-width: 1100px) { .mk-review { grid-template-columns: 1fr; } }
+.mk-review .res-detail { position: sticky; top: var(--sp-4); }
+.mk-diff-rows { display: flex; flex-direction: column; gap: var(--sp-2); }
+.mk-diff-rows .table-wrap { max-height: 240px; }
+/* 工作流页：阶段卡片里的进出数字（复用 .pipeline/.phase 的骨架，只补一行小字） */
+.mk-phase-nums { display: flex; flex-wrap: wrap; gap: 2px 10px; margin-top: var(--sp-1); }
+.mk-phase-nums span { display: inline-flex; align-items: baseline; gap: 4px; font-size: 11px; color: var(--label-3); }
+.mk-phase-nums i { font-style: normal; color: var(--label-3); }
+.mk-phase-nums b { font-weight: 600; color: var(--label-1); font-variant-numeric: tabular-nums; }

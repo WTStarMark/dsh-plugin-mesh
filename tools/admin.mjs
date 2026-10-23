@@ -62,6 +62,7 @@ import {
   writeEcosystem,
 } from "./admin-config.mjs";
 import { CONTEXT_IDS, CONTEXT_RULES, DEFAULT_CONTEXT, builtinBase } from "./ecosystem-bases.mjs";
+import { createMarketAdmin } from "./market-admin.mjs";
 
 const BODY_LIMIT = 256 * 1024;
 // 采集参数的合法键集合：POST 时用来分辨"这个键我们不认识"
@@ -70,6 +71,7 @@ const ASSETS = {
   "admin.css": "text/css; charset=utf-8",
   "app.js": "text/javascript; charset=utf-8",
   "status.js": "text/javascript; charset=utf-8",
+  "market.js": "text/javascript; charset=utf-8",
 };
 const PHASES = [
   { id: "segments", label: "抓分段", desc: "按星标区间分片抓 GitHub 搜索接口，逐段入累积索引" },
@@ -245,6 +247,9 @@ export function createAdmin({ version, api, securityHeaders }) {
     res.writeHead(code, headers({ "content-type": type ?? "text/plain; charset=utf-8", "content-length": body.length }));
     res.end(body);
   }
+
+  /* 索引源后台：同进程挂载，复用本文件的会话/CSRF/审计；路由前缀 api/market/*。 */
+  const marketAdmin = createMarketAdmin({ root: ROOT, sendJson, readJsonBody });
 
   async function readJsonBody(req) {
     return new Promise((resolvePromise) => {
@@ -952,6 +957,10 @@ export function createAdmin({ version, api, securityHeaders }) {
     if (name === "audit") {
       const limit = clamp(url.searchParams.get("limit"), 1, 1000, 100);
       return sendJson(res, 200, { entries: readAudit(limit) });
+    }
+    /* 索引源管理（tools/market-admin.mjs）：总览/复核/构建/差异/发布/回滚。 */
+    if (name === "market" || name.startsWith("market/")) {
+      return await marketAdmin.handle(name, { req, res, method, url, isWrite, write, sendJson, readJsonBody });
     }
     return sendJson(res, 404, { error: "未知后台接口：" + name });
   }
