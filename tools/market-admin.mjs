@@ -95,6 +95,10 @@ export function createMarketAdmin({ root, sendJson, readJsonBody } = {}) {
         verdict = VERDICT.REFUTED;
         reason = "list:publisher:" + hit.value;
         source = "list";
+      } else if (hit && hit.kind === "scope") {
+        verdict = VERDICT.REFUTED;
+        reason = "list:scope:" + hit.value;
+        source = "list";
       } else if (hit && hit.kind === "repo") {
         verdict = VERDICT.UNVERIFIED;
         reason = "list:repo:" + hit.value;
@@ -260,6 +264,7 @@ export function createMarketAdmin({ root, sendJson, readJsonBody } = {}) {
         nums: [
           ["人工裁决", live.overrides.entries],
           ["包名黑名单", (live.overrides.lists.blacklistPackages || []).length],
+          ["作者作用域黑名单", (live.overrides.lists.blacklistScopes || []).length],
           ["发布者名单", (live.overrides.lists.blacklistPublishers || []).length],
           ["仓库名单", (live.overrides.lists.blacklistRepos || []).length],
           ["命中条目", Object.values(s.overrides || {}).reduce((a, b) => a + b, 0)],

@@ -9,7 +9,8 @@
  *   version: 1,
  *   entries: { "<npm 包名>": { decision: "confirmed"|"refuted"|"unverified", reason?, at?, source? } },
  *   lists: {
- *     blacklistPackages: [],   // 直接不收录
+ *     blacklistPackages: [],   // 直接不收录（精确包名）
+ *     blacklistScopes: [],     // 直接不收录（整个 npm 作用域，如 "@chatcode" → @chatcode/* 全不收录）
  *     blacklistPublishers: [], // 该 npm 发布账号的包：不借仓库身份（展示=驳回）
  *     blacklistRepos: [],      // 该仓库的包：只算未核实（仍显示，但打「作者待确认」）
  *     whitelistRepos: []       // 例外：允许该仓库的包按确证展示（人工背书）
@@ -50,7 +51,7 @@ export function emptyOverrides() {
   return {
     version: 1,
     entries: {},
-    lists: { blacklistPackages: [], blacklistPublishers: [], blacklistRepos: [], whitelistRepos: [] },
+    lists: { blacklistPackages: [], blacklistScopes: [], blacklistPublishers: [], blacklistRepos: [], whitelistRepos: [] },
     labels: { hidden: [] },
   };
 }
@@ -74,6 +75,15 @@ export function normalizeOverrides(raw) {
   }
   const lists = raw.lists && typeof raw.lists === "object" && !Array.isArray(raw.lists) ? raw.lists : {};
   out.lists.blacklistPackages = cleanStrings(lists.blacklistPackages, 500).filter((x) => PACKAGE_NAME_RE.test(x) && x.length <= 214);
+  /* 作用域黑名单：@chatcode 或 chatcode 都接受，统一存成 "@chatcode"；生成器按前缀直接不收录。 */
+  out.lists.blacklistScopes = [
+    ...new Set(
+      cleanStrings(lists.blacklistScopes, 200)
+        .map((x) => x.trim().toLowerCase())
+        .map((x) => (x.startsWith("@") ? x : "@" + x))
+        .filter((x) => /^@[a-z0-9][a-z0-9-]{0,63}$/u.test(x)),
+    ),
+  ];
   out.lists.blacklistPublishers = cleanStrings(lists.blacklistPublishers, 500).filter((x) => PUBLISHER_RE.test(x) && x.length <= 214);
   out.lists.blacklistRepos = cleanStrings(lists.blacklistRepos, 500).filter((x) => REPO_ID_RE.test(x));
   out.lists.whitelistRepos = cleanStrings(lists.whitelistRepos, 500).filter((x) => REPO_ID_RE.test(x));
@@ -129,9 +139,29 @@ export function decisionFor(overrides, pkg) {
 }
 
 /** 名单命中：返回 { kind, value } 或 null（用于日志/审计说明原因）。 */
+/** 包名所属的 npm 作用域（小写，含 @）；无作用域返回 null。 */
+export function scopeOfPackage(pkg) {
+  const hit = /^(@[^/]+)\//u.exec(String(pkg ?? ""));
+  return hit ? hit[1].toLowerCase() : null;
+}
+
+/**
+ * 人工拉黑判定（生成器与后台共用）：精确包名 → 作用域 → 都没命中返回 null。
+ * 返回的是"挡掉原因"文案，直接进构建日志与 skipReasons。
+ */
+export function packageBlacklistReason(lists, pkg) {
+  const name = String(pkg ?? "");
+  if ((lists?.blacklistPackages ?? []).includes(name)) return "人工拉黑（包名名单）";
+  const scope = scopeOfPackage(name);
+  if (scope && (lists?.blacklistScopes ?? []).includes(scope)) return "人工拉黑（作者 " + scope + "）";
+  return null;
+}
+
 export function listHit(overrides, { pkg, publisher, repoId } = {}) {
   const lists = overrides && overrides.lists ? overrides.lists : {};
   if (pkg && (lists.blacklistPackages ?? []).includes(pkg)) return { kind: "package", value: pkg };
+  const scope = pkg ? scopeOfPackage(pkg) : null;
+  if (scope && (lists.blacklistScopes ?? []).includes(scope)) return { kind: "scope", value: scope };
   if (publisher && (lists.blacklistPublishers ?? []).includes(publisher)) return { kind: "publisher", value: publisher };
   if (repoId && (lists.blacklistRepos ?? []).includes(repoId)) return { kind: "repo", value: repoId };
   if (repoId && (lists.whitelistRepos ?? []).includes(repoId)) return { kind: "whitelist-repo", value: repoId };

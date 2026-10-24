@@ -26,6 +26,8 @@ const {
   hiddenLabelIds,
   listHit,
   marketPaths,
+  packageBlacklistReason,
+  scopeOfPackage,
 } = await import("../tools/market-overrides.mjs");
 const { applyAttributionOverrides } = await import("../tools/market-index.mjs");
 const { createMarketAdmin } = await import("../tools/market-admin.mjs");
@@ -230,6 +232,29 @@ test("overrides 支持隐藏标签：去重、非法 id 丢弃", () => {
   assert.deepEqual(doc.labels.hidden, ["owner-unverified", "star-cta"]);
   assert.deepEqual([...hiddenLabelIds(doc)], ["owner-unverified", "star-cta"]);
   assert.deepEqual(normalizeOverrides({}).labels.hidden, [], "老文件没有 labels 段也要能读");
+});
+
+
+test("作者作用域黑名单：@chatcode/* 整片不收录", async () => {
+  const doc = normalizeOverrides({ lists: { blacklistScopes: ["@chatcode", "chatcode", "@chatcode", "@Bad Scope"] } });
+  assert.deepEqual(doc.lists.blacklistScopes, ["@chatcode"]);
+  assert.equal(packageBlacklistReason(doc.lists, "@chatcode/cco-tui"), "人工拉黑（作者 @chatcode）");
+  assert.equal(packageBlacklistReason(doc.lists, "@chatcode/cco-market"), "人工拉黑（作者 @chatcode）");
+  assert.equal(packageBlacklistReason(doc.lists, "@other/pkg"), null);
+  assert.deepEqual(listHit(doc, { pkg: "@ChatCode/cco-market" }), { kind: "scope", value: "@chatcode" });
+  assert.equal(scopeOfPackage("@ChatCode/x"), "@chatcode");
+  assert.equal(scopeOfPackage("plain-pkg"), null);
+
+  // 后台名单接口要把作用域黑名单带出去（运营能看到当前挡了哪些作者）
+  const root = makeRoot();
+  try {
+    const overrides = normalizeOverrides({ lists: { blacklistScopes: ["@chatcode"] } });
+    saveMarketOverrides(marketPaths(root).overrides, overrides);
+    const admin = createMarketAdmin({ root });
+    assert.deepEqual(admin.listsPayload().lists.blacklistScopes, ["@chatcode"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("后台标签开关：列出计数、隐藏写盘、未知标签拒绝", async () => {

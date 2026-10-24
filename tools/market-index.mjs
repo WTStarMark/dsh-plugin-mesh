@@ -42,7 +42,7 @@ import {
   writeProvenanceCache,
   repoKeyFromUrl,
 } from "./repo-dir-verify.mjs";
-import { decisionFor, hiddenLabelIds, listHit, marketPaths, readMarketOverrides } from "./market-overrides.mjs";
+import { decisionFor, hiddenLabelIds, listHit, marketPaths, packageBlacklistReason, readMarketOverrides } from "./market-overrides.mjs";
 import { MARKET_LABELS } from "./market-labels.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -630,7 +630,7 @@ async function main() {
       fromDownloads: candidates.filter((c) => !c.subdir).length,
       fromSubdir: candidates.filter((c) => c.subdir).length,
     },
-    filters: { notBundle: 0, officialModule: 0, manualBlacklist: 0, noPackument: 0 },
+    filters: { notBundle: 0, officialModule: 0, manualBlacklist: 0, manualBlacklistScope: 0, noPackument: 0 },
     verification: null,
     overrides: {},
     labels: {},
@@ -750,8 +750,14 @@ async function main() {
      * 装进 profile 属于自残；而且它们真正的家在 deepseek-harness 单仓里，本图只能拿到"谁复制了这份 package.json"
      * —— 实测门面会落到 AlexKaiqi/dsh-client-locale 这种顶名仓库上。官方组合包走 DSH 自己的实验性插件入口。 */
     if (item.pkg.startsWith("@deepseek-ai/")) { skipReasons.set(item.pkg, "DSH 官方内部模块（走 DSH 自带入口，不进第三方市场）"); buildStats.filters.officialModule += 1; continue; }
-    /* 人工拉黑包：直接不收录（后台写进 overrides.lists.blacklistPackages）。 */
-    if (overrides.lists.blacklistPackages.includes(item.pkg)) { skipReasons.set(item.pkg, "人工拉黑（包名名单）"); buildStats.filters.manualBlacklist += 1; continue; }
+    /* 人工拉黑：精确包名，或整个作用域（如 "@chatcode" → @chatcode/* 全不收录）。 */
+    const blacklistReason = packageBlacklistReason(overrides.lists, item.pkg);
+    if (blacklistReason) {
+      skipReasons.set(item.pkg, blacklistReason);
+      buildStats.filters.manualBlacklist += 1;
+      if (blacklistReason.includes("作者")) buildStats.filters.manualBlacklistScope += 1;
+      continue;
+    }
     if (!byPkg.has(item.pkg)) byPkg.set(item.pkg, []);
     byPkg.get(item.pkg).push(item);
   }

@@ -244,7 +244,7 @@ python3 backend/collect.py --from-store
 | GET | `plugin?name=` | 单条详情（证据 + 当前判定 + 安装目标） |
 | GET | `queue?type=refuted\|nodir\|unattributed\|manual\|error` | 复核队列 |
 | GET | `cache?state=&q=&page=` | 校验缓存分页 + 统计 |
-| GET | `lists` | 人工裁决 + 名单 |
+| GET | `lists` | 人工裁决 + 名单（含作者作用域黑名单 `blacklistScopes`，如 `@chatcode`） |
 | GET | `labels` | 标签（分类胶囊）清单：中文名 / 条目数 / 是否隐藏 |
 | POST | `labels` | {action:"set", hidden:[id…]} 或 {action:"hide"/"show", id}；隐藏后重建 + 发布才生效 |
 | POST | `decision` | `{name, decision:"confirmed"\|"refuted"\|"unverified", reason?}`；`{name, remove:true}` 撤销 |
