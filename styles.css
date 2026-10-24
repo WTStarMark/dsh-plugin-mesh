@@ -183,9 +183,14 @@ body::after {
   padding: 0 10px; transition: border-color var(--t), box-shadow var(--t);
 }
 .prompt:focus-within { border-color: var(--accent-line); box-shadow: 0 0 0 3px var(--accent-soft); }
-.prompt .caret { color: var(--label-3); }
-.prompt input { flex: 1; background: none; border: 0; outline: 0; height: 100%; }
+.prompt .caret { color: var(--label-3); flex: none; }
+.prompt input { flex: 1; min-width: 0; background: none; border: 0; outline: 0; height: 100%; }
 .prompt input::placeholder { color: var(--label-3); }
+/* 搜索框内的辅助按钮（清除 / 成图）：不参与压缩、文字绝不逐字换行 */
+.prompt .key { flex: 0 0 auto; white-space: nowrap; height: 26px; padding: 0 9px; }
+/* 原生搜索框自带的 × 与「清除」重复，统一收掉原生按钮 */
+.prompt input[type="search"]::-webkit-search-cancel-button,
+.prompt input[type="search"]::-webkit-search-decoration { -webkit-appearance: none; display: none; }
 
 .readouts { margin-left: auto; display: flex; gap: 8px; }
 .ro {
@@ -233,7 +238,7 @@ body::after {
 a.key { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
 #palette { color: var(--accent-ink); border-color: var(--accent-line); }
 .author {
-  display: flex; align-items: center; gap: 7px; height: 30px; padding: 0 11px 0 4px;
+  display: flex; align-items: center; gap: 7px; height: 30px; padding: 0 11px 0 4px; white-space: nowrap;
   border: 1px solid var(--hairline); border-radius: 999px; background: var(--bg-layer-1);
   text-decoration: none; color: var(--label-2); font-size: 12px;
   transition: background var(--t), color var(--t), border-color var(--t), transform var(--t);
@@ -374,12 +379,14 @@ input[type="range"]::-moz-range-thumb {
 /* HUD 压在 canvas 上：用接近不透明的实色 + hairline，故意不做 backdrop-filter
    （画布每帧重绘时，backdrop-filter 会让合成器每帧重新采样一次背景） */
 .hud {
-  position: absolute; display: flex; gap: 2px; z-index: 5; padding: 3px;
+  position: absolute; display: flex; flex-wrap: wrap; gap: 2px; z-index: 5; padding: 3px;
+  max-width: calc(100% - 28px);
   background: color-mix(in srgb, var(--bg-layer-1) 96%, transparent);
   border: 1px solid var(--hairline); border-radius: var(--r-md); box-shadow: var(--shadow);
 }
 .hud button {
   min-width: 34px; height: 28px; padding: 0 9px; border-radius: var(--r-sm); color: var(--label-2); font-size: 12px;
+  white-space: nowrap;
   transition: background var(--t), color var(--t), transform var(--t);
 }
 .hud button:hover { background: var(--hover); color: var(--label-1); transform: translateY(-1px); }
@@ -437,10 +444,11 @@ input[type="range"]::-moz-range-thumb {
 .badge.warn { color: var(--warn-ink); border-color: var(--warn-line); background: var(--warn-soft); }
 .badge.ok { color: var(--accent-ink); border-color: var(--accent-line); background: var(--accent-soft); }
 
-.links { display: flex; gap: 8px; margin: 10px 0 4px; }
+.links { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 4px; }
 .links a {
-  flex: 1; text-align: center; text-decoration: none; padding: 8px; color: var(--label-2);
-  font-size: 12px; border: 1px solid var(--hairline); border-radius: var(--r-sm); background: var(--bg-layer-2);
+  flex: 1 1 auto; min-width: 0; text-align: center; text-decoration: none; padding: 8px 10px; color: var(--label-2);
+  font-size: 12px; white-space: nowrap;
+  border: 1px solid var(--hairline); border-radius: var(--r-sm); background: var(--bg-layer-2);
   transition: background var(--t), color var(--t), border-color var(--t), transform var(--t);
 }
 .links a:hover { background: var(--hover); color: var(--label-1); border-color: var(--glass-line); transform: translateY(-1px); }
@@ -894,6 +902,8 @@ input[type="range"]::-moz-range-thumb {
 .ro-node:hover { background: var(--hover); border-color: var(--glass-line); }
 .ro-node.on { border-color: var(--accent-line); background: var(--accent-soft); }
 .ro-node[hidden] { display: none; }
+/* 角色字样跟着当前节点走：主节点用强调色，镜像节点保持中性 */
+.ro-node[data-role="primary"] i { color: var(--accent-ink); }
 .ro-node .idx-caret { color: var(--label-3); font-size: 10px; line-height: 1; transition: transform var(--t); }
 .ro-node.on .idx-caret { transform: rotate(180deg); color: var(--accent-ink); }
 .node-panel { right: auto; left: 16px; width: min(380px, calc(100vw - 32px)); }
