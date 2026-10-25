@@ -112,6 +112,8 @@ test("安全响应头齐备", async () => {
   assert.match(csp, /default-src 'self'/);
   assert.match(csp, /frame-ancestors 'none'/);
   assert.match(csp, /object-src 'none'/);
+  // 卡片把作者头像内联成 data URI；img-src 不放行 data: 的话浏览器会画裂图
+  assert.match(csp, /img-src[^;]*data:/, "img-src 必须放行 data:（卡片头像）");
   assert.equal(res.headers.get("x-content-type-options"), "nosniff");
   assert.equal(res.headers.get("referrer-policy"), "no-referrer");
   assert.equal(res.headers.get("cross-origin-resource-policy"), "same-origin");
