@@ -288,9 +288,9 @@ curl -s "$BASE/api/ranking?limit=10" | jq '.boards.updated.items[] | {id, update
 
 ## SVG 卡片
 
-任何被收录的仓库都有一张自包含 SVG 卡片：无脚本、无外部字体、无外部依赖，420×168，风格接近 GitHub 仓库卡片。默认浅色（与站点一致），加 `?theme=dark` 出深色版。
+任何被收录的仓库都有一张自包含 SVG 卡片：无脚本、无外部字体、无外部依赖，420×168，白玻璃卡风格（大圆角、柔和投影、作者头像）。默认浅色（与站点一致），加 `?theme=dark` 出深色玻璃版。
 
-卡面含仓库图标、`owner / name`、两行简介、语言色点、星标、复刻数、更新时间与所属扇区。点卡片背景去站点，点仓库名去 GitHub。
+卡面含作者头像、`owner / name`、两行简介、语言色点、星标、复刻数、更新时间、所属扇区与站点入口。头像会内联成 data URI（抓不到时退回首字母圆标），所以卡片在 README 的 `<img>` 里也能完整显示。点卡片背景去站点，点仓库名去 GitHub。
 
 [![dsh-plugin-mesh 卡片示例（浅色）](docs/card-example.svg)](https://www.moc-chen.cn/)
 

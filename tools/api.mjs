@@ -134,7 +134,6 @@ export function validNamePart(part) {
   return typeof part === "string" && /^[A-Za-z0-9._-]{1,100}$/.test(part);
 }
 
-const ICON_REPO = "M2 2.5A2.5 2.5 0 0 1 4.5 0h8.75a.75.75 0 0 1 .75.75v12.5a.75.75 0 0 1-.75.75h-2.5a.75.75 0 0 1 0-1.5h1.75v-2h-8a1 1 0 0 0-.714 1.7.75.75 0 1 1-1.072 1.05A2.495 2.495 0 0 1 2 11.5Zm10.5-1h-8a1 1 0 0 0-1 1v6.708A2.486 2.486 0 0 1 4.5 9h8ZM5 12.25a.25.25 0 0 1 .25-.25h3.5a.25.25 0 0 1 .25.25v3.25a.25.25 0 0 1-.4.2l-1.45-1.087a.249.249 0 0 0-.3 0L5.4 15.7a.25.25 0 0 1-.4-.2Z";
 const ICON_STAR = "M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.751.751 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25Z";
 const ICON_FORK = "M5 5.372v.878c0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75v-.878a2.25 2.25 0 1 1 1.5 0v.878a2.25 2.25 0 0 1-2.25 2.25h-1.5v2.128a2.251 2.251 0 1 1-1.5 0V8.5h-1.5A2.25 2.25 0 0 1 3.5 6.25v-.878a2.25 2.25 0 1 1 1.5 0ZM5 3.25a.75.75 0 1 0-1.5 0 .75.75 0 0 0 1.5 0Zm6.75.75a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Zm-3 8.75a.75.75 0 1 0-1.5 0 .75.75 0 0 0 1.5 0Z";
 
@@ -165,6 +164,41 @@ export function relativeTime(iso, now = Date.now()) {
 }
 
 const FONT = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Microsoft YaHei',sans-serif";
+
+
+/** 卡片作者头像：抓 64px PNG 内联成 data URI —— README 里卡片是 <img> 嵌的，外链图片不会加载，
+ *  所以必须自包含。成功缓存 24h，失败缓存 10min（避免每次请求都等超时）。DSH_CARD_AVATAR=0 可整体关闭（测试用）。 */
+const AVATAR_TTL_MS = 24 * 3600 * 1000;
+const AVATAR_FAIL_TTL_MS = 10 * 60 * 1000;
+const avatarCache = new Map();
+async function fetchAvatarDataUri(owner, fetchImpl = globalThis.fetch) {
+  const key = String(owner ?? "").trim().toLowerCase();
+  if (!key) return null;
+  if (process.env.DSH_CARD_AVATAR === "0") return null;
+  const now = Date.now();
+  const hit = avatarCache.get(key);
+  if (hit && now - hit.at < (hit.uri ? AVATAR_TTL_MS : AVATAR_FAIL_TTL_MS)) return hit.uri;
+  try {
+    if (typeof fetchImpl !== "function") throw new Error("no-fetch");
+    const signal = typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function" ? AbortSignal.timeout(2500) : undefined;
+    const res = await fetchImpl("https://github.com/" + encodeURIComponent(key) + ".png?size=64", {
+      signal,
+      redirect: "follow",
+      headers: { "User-Agent": "dsh-plugin-mesh-card" },
+    });
+    if (!res || !res.ok) throw new Error("http-" + (res && res.status));
+    const type = String((res.headers && res.headers.get && res.headers.get("content-type")) || "");
+    if (!/^image\//u.test(type)) throw new Error("not-image");
+    const bytes = Buffer.from(await res.arrayBuffer());
+    if (!bytes.length || bytes.length > 300 * 1024) throw new Error("bad-size");
+    const uri = "data:" + type.split(";")[0] + ";base64," + bytes.toString("base64");
+    avatarCache.set(key, { at: now, uri });
+    return uri;
+  } catch {
+    avatarCache.set(key, { at: now, uri: null });
+    return null;
+  }
+}
 
 export function createApi({ root }) {
   let cache = { at: 0, mesh: null };
@@ -1300,25 +1334,43 @@ export function createApi({ root }) {
    * 可分享卡片：自包含 SVG，420×168，GitHub 仓库卡片风格（仓库图标 + owner / name、灰阶描述、● 语言色点 / ★ 星标 / ⑂ 复刻 / 更新于）。
    * 交互：整张卡片背景指向站点（options.site），仓库名单独指向 GitHub —— 两个链接是兄弟节点而不是嵌套（SVG 里嵌套 <a> 非法），所以两种点击都能生效。
    */
+  /**
+   * 可分享卡片：自包含 SVG，420×168，白玻璃卡（作者头像 + owner / repo、灰阶描述、
+   * ● 语言色点 / ★ 星标 / ⑂ 复刻 / 更新于、底部分类标签 + 站点入口）。
+   * 作者头像抓 64px PNG 内联成 data URI（README 里是 <img> 嵌入，外链不会加载）；失败退回首字母圆标。
+   * 交互：整张卡片背景指向站点（options.site），仓库名单独指向 GitHub —— 两个链接是兄弟节点而不是嵌套
+   * （SVG 里嵌套 <a> 非法），所以两种点击都能生效。
+   */
   async function cardSvg(owner, name, options = {}) {
     const found = await one(owner, name);
     if (!found) return null;
     const n = found.repo;
-    const dark = options.theme !== "light";
+    const dark = options.theme === "dark";
     const site = options.site || DEFAULT_SITE;
-    const host = site.replace(/^https?:\/\//, "").replace(/\/+$/, "");
+    const host = site.replace(/^https?:\/\//u, "").replace(/\/+$/u, "");
     const accent = categoryColor(n.category);
+    const fetchAvatar = options.fetchAvatar === undefined ? fetchAvatarDataUri : options.fetchAvatar;
+    const avatar = fetchAvatar ? await fetchAvatar(n.owner) : null;
 
     const c = dark
-      ? { bg: "#0d1117", border: "#30363d", fg: "#e6edf3", muted: "#8b949e", link: "#58a6ff", pill: "#21262d", pillBorder: "#30363d" }
-      : { bg: "#ffffff", border: "#d0d7de", fg: "#1f2328", muted: "#656d76", link: "#0969da", pill: "#eff2f5", pillBorder: "#d0d7de" };
+      ? {
+          bgTop: "#161b22", bgBottom: "#0d1117", border: "rgba(255,255,255,0.12)", highlight: "rgba(255,255,255,0.06)",
+          owner: "#e6edf3", slash: "#6e7681", repo: "#c9d1d9", desc: "#8b949e", muted: "#8b949e",
+          link: "#8b9cff", pill: "rgba(255,255,255,0.08)", pillText: "#c9d1d9", metaLine: "rgba(255,255,255,0.08)", ring: "rgba(255,255,255,0.16)",
+        }
+      : {
+          bgTop: "#ffffff", bgBottom: "#fbfdff", border: "rgba(0,0,0,0.08)", highlight: "rgba(255,255,255,0.9)",
+          owner: "#111827", slash: "#9ca3af", repo: "#4b5563", desc: "#4b5563", muted: "#6b7280",
+          link: "#4f46e5", pill: "rgba(0,0,0,0.04)", pillText: "#374151", metaLine: "rgba(0,0,0,0.06)", ring: "rgba(0,0,0,0.08)",
+        };
 
     const sector = n.subcategoryLabel ? n.categoryLabel + " · " + n.subcategoryLabel : n.categoryLabel || "未分类";
-    const descLines = wrapText(n.description || "（暂无描述）", 13, 380, 2);
+    const descLines = wrapText(n.description || "（暂无描述）", 13.5, 380, 2);
     const stars = n.stars >= 1000 ? (n.stars / 1000).toFixed(1) + "k" : String(n.stars);
     const forks = n.forks >= 1000 ? (n.forks / 1000).toFixed(1) + "k" : String(n.forks ?? 0);
     const langColor = LANG_COLORS[n.language] || c.muted;
     const updated = relativeTime(n.pushedAt, options.now);
+    const initial = String(n.owner || "?").trim().charAt(0).toUpperCase() || "?";
 
     const t = (x, y, size, fill, weight, text, extra) =>
       '<text x="' + x + '" y="' + y + '" font-family="' + FONT + '" font-size="' + size + '"' +
@@ -1327,54 +1379,57 @@ export function createApi({ root }) {
     const icon = (path, x, y, size, fill) =>
       '<g transform="translate(' + x + " " + y + ') scale(' + size / 16 + ')" fill="' + fill + '"><path d="' + path + '"/></g>';
 
+    // 元信息行：● 语言 · ★ 星标 · ⑂ 复刻 · 更新于（逐项按实测宽度推进，绝不重叠）
+    const meta = ['<circle cx="25" cy="120" r="5" fill="' + langColor + '"/>'];
+    let mx = 36;
+    meta.push(t(mx, 125, 12.5, c.muted, 0, n.language || "未知语言"));
+    mx += textWidth(n.language || "未知语言", 12.5) + 14;
+    meta.push(icon(ICON_STAR, mx, 114, 13, c.muted));
+    mx += 13 + 4;
+    meta.push(t(mx, 125, 12.5, c.muted, 0, stars));
+    mx += textWidth(stars, 12.5) + 14;
+    if (n.forks > 0) {
+      meta.push(icon(ICON_FORK, mx, 114, 13, c.muted));
+      mx += 13 + 4;
+      meta.push(t(mx, 125, 12.5, c.muted, 0, forks));
+      mx += textWidth(forks, 12.5) + 14;
+    }
+    meta.push(t(mx, 125, 12.5, c.muted, 0, "更新于 " + updated));
+
+    const pillW = Math.round(Math.min(280, textWidth(sector, 12) + 24));
+
     const rows = [
       '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="420" height="168" viewBox="0 0 420 168" role="img" aria-label="' + xmlEscape(n.id + " · " + sector) + '">',
       "  <title>" + xmlEscape(n.id) + " · " + xmlEscape(sector) + "</title>",
       "  <desc>" + xmlEscape("点击卡片前往 " + site) + "</desc>",
+      "  <defs>",
+      '    <linearGradient id="cardBg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="' + c.bgTop + '"/><stop offset="1" stop-color="' + c.bgBottom + '"/></linearGradient>',
+      '    <filter id="cardShadow" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="' + (dark ? "0.45" : "0.10") + '"/></filter>',
+      '    <clipPath id="avatarClip"><circle cx="38" cy="38" r="17"/></clipPath>',
+      "  </defs>",
       "  <style>.bg{transition:stroke .2s ease}.card:hover .bg{stroke:" + (dark ? "#8b949e" : "#8c959f") + "}.nm:hover{text-decoration:underline}</style>",
-      // 整张卡片背景 = 站点链接（透明矩形承载点击）
       '  <a xlink:href="' + xmlEscape(site) + '" href="' + xmlEscape(site) + '" target="_blank" rel="noopener noreferrer">',
-      '    <rect class="bg" x="0.5" y="0.5" width="419" height="167" rx="12" fill="' + c.bg + '" stroke="' + c.border + '"/>',
-      '    <rect x="0.5" y="0.5" width="6" height="167" rx="3" fill="' + accent + '"/>',
+      '    <rect class="bg" x="2" y="2" width="416" height="164" rx="16" fill="url(#cardBg)" stroke="' + c.border + '" filter="url(#cardShadow)"/>',
+      '    <rect x="3" y="3" width="414" height="162" rx="15" fill="none" stroke="' + c.highlight + '" stroke-width="1"/>',
       "  </a>",
-      "  " + icon(ICON_REPO, 20, 22, 16, c.muted),
-      '  <a xlink:href="' + xmlEscape(n.url) + '" href="' + xmlEscape(n.url) + '" target="_blank" rel="noopener noreferrer">' +
-        '<text x="42" y="37" font-family="' + FONT + '" font-size="16" font-weight="600">' +
-        '<tspan fill="' + c.muted + '">' + xmlEscape(fitText(n.owner + " / ", 16, 150)) + "</tspan>" +
-        '<tspan fill="' + c.link + '" class="nm">' + xmlEscape(fitText(n.name, 16, 230)) + "</tspan></text></a>",
-      "  " + t(20, 66, 13, c.muted, 0, descLines[0] ?? ""),
-      ...(descLines[1] ? ["  " + t(20, 85, 13, c.muted, 0, descLines[1])] : []),
-      // 元信息行：● 语言 · ★ 星标 · ⑂ 复刻 · 更新于（逐项按实测宽度推进，绝不重叠）
-      '  <circle cx="25" cy="104" r="5.5" fill="' + langColor + '"/>',
-      ...metaRow(
-        [
-          { text: n.language || "未知语言" },
-          { icon: ICON_STAR, text: stars },
-          ...(n.forks > 0 ? [{ icon: ICON_FORK, text: forks }] : []),
-          { text: "更新于 " + updated },
-        ],
-        c.muted,
-      ),
-      '  <rect x="20" y="129" width="' + Math.round(Math.min(280, textWidth(sector, 11.5) + 24)) + '" height="22" rx="11" fill="' + c.pill + '" stroke="' + c.pillBorder + '"/>',
-      "  " + t(32, 144, 11.5, accent, 500, fitText(sector, 11.5, 264)),
+      avatar
+        ? '  <image x="21" y="21" width="34" height="34" preserveAspectRatio="xMidYMid slice" clip-path="url(#avatarClip)" xlink:href="' + avatar + '" href="' + avatar + '"/>'
+        : '  <circle cx="38" cy="38" r="17" fill="' + accent + '" fill-opacity="0.18"/>' + t(38, 43, 14, accent, 700, initial, ' text-anchor="middle"'),
+      '  <circle cx="38" cy="38" r="17.5" fill="none" stroke="' + c.ring + '" stroke-width="1"/>',
+      '  <a xlink:href="' + xmlEscape(n.url) + '" href="' + xmlEscape(n.url) + '" target="_blank" rel="noopener noreferrer"><text x="66" y="44" font-family="' + FONT + '" font-size="15" font-weight="700">' +
+        '<tspan fill="' + c.owner + '">' + xmlEscape(fitText(n.owner, 15, 140)) + "</tspan>" +
+        '<tspan fill="' + c.slash + '" font-weight="400"> / </tspan>' +
+        '<tspan fill="' + c.repo + '" font-weight="400" class="nm">' + xmlEscape(fitText(n.name, 15, 180)) + "</tspan></text></a>",
+      "  " + t(20, 75, 13.5, c.desc, 0, descLines[0] ?? ""),
+      ...(descLines[1] ? ["  " + t(20, 94, 13.5, c.desc, 0, descLines[1])] : []),
+      '  <line x1="20" y1="108" x2="400" y2="108" stroke="' + c.metaLine + '" stroke-width="1"/>',
+      ...meta.map((row) => "  " + row),
+      '  <rect x="20" y="138" width="' + pillW + '" height="22" rx="11" fill="' + c.pill + '" stroke="' + c.border + '"/>',
+      "  " + t(32, 153, 12, c.pillText, 500, fitText(sector, 12, 264)),
       '  <a xlink:href="' + xmlEscape(site) + '" href="' + xmlEscape(site) + '" target="_blank" rel="noopener noreferrer">' +
-        t(400, 144, 11.5, c.link, 0, "插件生态图 · " + host + " ↗", ' text-anchor="end" class="nm"') + "</a>",
+        t(400, 153, 12.5, c.link, 600, "插件生态图 · " + host + " ↗", ' text-anchor="end" class="nm"') + "</a>",
       "</svg>",
     ];
-
-    function metaRow(items, fill) {
-      const out = [];
-      let x = 36;
-      for (const item of items) {
-        if (item.icon) {
-          out.push("  " + icon(item.icon, x, 97, 14, fill));
-          x += 14 + 5;
-        }
-        out.push("  " + t(x, 108, 12.5, fill, 0, item.text));
-        x += textWidth(item.text, 12.5) + 16;
-      }
-      return out;
-    }
 
     return rows.join("\n") + "\n";
   }
@@ -1416,7 +1471,7 @@ export function createApi({ root }) {
       "<h2>说明</h2>",
       '<p class="note">卡片是自包含 SVG（无外部依赖、无脚本），贴进 README、博客或文档即可。<br>' +
         "上面两张分别是浅色版与深色版：默认浅色，加 <code>?theme=dark</code> 出深色；换去处加 <code>?link=https://你的站点/</code>（默认 " + xmlEscape(DEFAULT_SITE) + "）。<br>" +
-        "数据每小时更新，卡片随之变化。<br>仓库信息：<a href=\"/api/repos/" + xmlEscape(n.id) + "\">/api/repos/" + xmlEscape(n.id) + "</a> · 生态总览：<a href=\"/api/categories\">/api/categories</a></p>",
+        "作者头像会内联成 data URI（不依赖外链），卡片仍是自包含 SVG；抓不到头像时退回首字母圆标。<br>数据每小时更新，卡片随之变化。<br>仓库信息：<a href=\"/api/repos/" + xmlEscape(n.id) + "\">/api/repos/" + xmlEscape(n.id) + "</a> · 生态总览：<a href=\"/api/categories\">/api/categories</a></p>",
       "</main></body></html>",
     ];
     return body.join("\n");

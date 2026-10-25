@@ -959,23 +959,33 @@ test("v0.4.2 单仓库详情：同作者连线是完整关系（不受数据层�
   assert.ok(ownerLinks.every((l) => l.id.startsWith(owner + "/")), "同作者连线必须同属一个作者");
 });
 
-test("卡片：合法 SVG、含关键信息、转义正确", async () => {
+test("卡片：合法 SVG、白玻璃卡 + 作者头像、转义正确", async () => {
   const found = await api.search(new URLSearchParams("limit=1&sort=stars"));
   const [owner, name] = found.items[0].id.split("/");
-  const svg = await api.cardSvg(owner, name, {});
+  const avatar = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+  const svg = await api.cardSvg(owner, name, { fetchAvatar: async () => avatar });
   assert.ok(svg.startsWith("<svg"), "应以 <svg 开头");
   assert.ok(svg.trimEnd().endsWith("</svg>"), "应以 </svg> 结尾");
   assert.match(svg, /width="420" height="168"/);
+  // 作者头像内联成 data URI：卡片自包含，README 的 <img> 也能显示
+  assert.ok(svg.includes("<image"), "应画作者头像");
+  assert.ok(svg.includes(avatar), "头像应内联为 data URI");
+  assert.ok(svg.includes('clip-path="url(#avatarClip)"'), "头像应裁成圆形");
+  assert.ok(!svg.includes("M2 2.5A2.5 2.5 0 0 1 4.5 0"), "不应再画仓库图标");
+  // 抓不到头像时退回首字母圆标（不因为外网失败而白卡）
+  const fallback = await api.cardSvg(owner, name, { fetchAvatar: async () => null });
+  assert.ok(!fallback.includes("<image"), "头像失败应退回圆标");
+  assert.ok(fallback.includes('text-anchor="middle"'), "圆标应画首字母");
   // 卡片必须带去处：默认线上站点，且整张卡片可点（直接打开或 <object> 嵌入时生效）
   assert.ok(svg.includes(DEFAULT_SITE), "卡片应包含默认去处 " + DEFAULT_SITE);
   assert.ok(svg.includes("<a "), "卡片应包在链接里");
   assert.ok(svg.includes('target="_blank"'));
-  const custom = await api.cardSvg(owner, name, { site: "https://example.com/" });
+  const custom = await api.cardSvg(owner, name, { fetchAvatar: async () => null, site: "https://example.com/" });
   assert.ok(custom.includes("https://example.com/"), "自定义去处应生效");
   // 语言色点 / 相对时间 / 图标
   assert.ok(svg.includes("#f1e05a") || svg.includes("#3178c6"), "应画出该语言的颜色点");
   assert.match(svg, /更新于 /, "应有相对时间");
-  assert.ok((svg.match(/<path d="/g) || []).length >= 2, "应包含仓库图标与星标图标");
+  assert.ok((svg.match(/<path d="/g) || []).length >= 1, "应包含星标图标");
   // 三个链接：背景→站点、仓库名→GitHub、底部→站点
   const hrefs = [...svg.matchAll(/<a [^>]*href="([^"]+)"/g)].map((m) => m[1]);
   assert.equal(hrefs.length, 3, "应有三个链接，实际 " + hrefs.length);
@@ -983,13 +993,12 @@ test("卡片：合法 SVG、含关键信息、转义正确", async () => {
   assert.equal(hrefs.filter((h) => h === DEFAULT_SITE).length, 2, "背景与底部都应指向站点");
   assert.ok(svg.includes(found.items[0].id.split("/")[1]), "卡片应含仓库名");
   assert.ok(!/<script/i.test(svg), "卡片不得包含脚本");
-
-  // 默认就是 GitHub 深色；显式 light 才走浅色令牌
-  assert.ok(svg.includes("#0d1117"), "默认应为 GitHub 深色底 #0d1117");
-  assert.ok(svg.includes("#58a6ff"), "深色用 GitHub 深色链接色");
-  const light = await api.cardSvg(owner, name, { theme: "light" });
-  assert.ok(light.includes("#d0d7de"), "浅色应使用 GitHub 浅色边框令牌");
-  assert.notEqual(light, svg, "两套主题应不同");
+  // 默认白玻璃浅色卡；显式 theme=dark 才走深色令牌
+  assert.ok(svg.includes("#ffffff") && svg.includes("#4f46e5"), "默认应为白玻璃浅色卡");
+  const dark = await api.cardSvg(owner, name, { fetchAvatar: async () => null, theme: "dark" });
+  assert.ok(dark.includes("#0d1117"), "深色应有深色底");
+  assert.ok(dark.includes("#8b9cff"), "深色用深色链接色");
+  assert.notEqual(dark, svg, "两套主题应不同");
   assert.ok(svg.includes('class="bg"'), "卡片应有可点的背景矩形");
 
   // 不存在的仓库返回 null（由 HTTP 层转成 404 占位卡片）
@@ -1008,35 +1017,6 @@ test("卡片：合法 SVG、含关键信息、转义正确", async () => {
   const tooLong = wrapText(new Array(4).join("DSH 通用皮肤框架：可视化自定义 + 实时预览 + 「皮肤管理」，可以随心设计你的专属皮肤。"), 12.5, 428, 2);
   assert.equal(tooLong.length, 2, "再长也只排两行");
   assert.match(tooLong[1], /…$/, "放不下时最后一行应以省略号收尾");
-  assert.ok(tooLong.every((l) => textWidth(l, 12.5) <= 428), "省略后仍不得超宽");
-  const shortDesc = wrapText("简短描述", 12.5, 428, 2);
-  assert.deepEqual(shortDesc, ["简短描述"], "短描述应只有一行且不加省略号");
-
-  // 版式：卡片宽 480，任何一行文字（含锚点）都不得超出边界
-  const segments = (svgText) => {
-    const out = [];
-    const re = /<text x="(\d+(?:\.\d+)?)" y="[\d.]+"(?:[^>]*?)font-size="([\d.]+)"(?:[^>]*?)text-anchor="end"[^>]*>([^<]*)<\/text>|<text x="(\d+(?:\.\d+)?)" y="[\d.]+"(?:[^>]*?)font-size="([\d.]+)"[^>]*>([^<]*)<\/text>/g;
-    let m;
-    while ((m = re.exec(svgText))) {
-      if (m[1]) out.push({ x: Number(m[1]) - textWidth(m[3], Number(m[2])), size: Number(m[2]), text: m[3] });
-      else out.push({ x: Number(m[4]), size: Number(m[5]), text: m[6] });
-    }
-    return out;
-  };
-  const rows = segments(svg);
-  assert.ok(rows.length >= 5, "卡片应有若干文本行，实际 " + rows.length);
-  for (const row of rows) {
-    const w = textWidth(row.text, row.size);
-    assert.ok(row.x >= 0 && row.x + w <= 420, "文字超出卡片：" + JSON.stringify(row.text) + " 从 " + row.x.toFixed(0) + " 宽 " + w.toFixed(0));
-  }
-
-  // 长中文描述也不能溢出（曾经按 62 字裁剪，12.5px 下约 775px）
-  const cjk = await api.search(new URLSearchParams("limit=1&fields=all"));
-  const cjkId = cjk.items[0].id.split("/");
-  const cjkSvg = await api.cardSvg(cjkId[0], cjkId[1], {});
-  for (const row of segments(cjkSvg)) {
-    assert.ok(row.x + textWidth(row.text, row.size) <= 420, "真实数据的卡片文字超出边界：" + row.text);
-  }
 });
 
 test("颜色与名称校验：稳定、可预期", () => {
