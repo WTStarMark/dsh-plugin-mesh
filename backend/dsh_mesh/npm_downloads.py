@@ -178,6 +178,33 @@ def parse_npm_range(data: dict) -> dict | None:
     }
 
 
+REGISTRY_URL = "https://registry.npmjs.org/"
+
+
+def registry_package_exists(package: str, *, opener=None, timeout: float = NPM_TIMEOUT) -> bool | None:
+    """registry 上有没有这个包。只用来区分「下载接口 404」是包真没了，还是新包还没统计下载量：
+    True = 包存在（下载量未知，不能记终态）；False = 确认不存在；None = 网络/服务失败（调用方按暂时失败处理）。
+    用 abbreviated packument（Accept: application/vnd.npm.install-v1+json）减少响应体积。"""
+    url = REGISTRY_URL + urllib.parse.quote(package, safe="@")
+    open_fn = opener or urllib.request.urlopen
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": USER_AGENT, "Accept": "application/vnd.npm.install-v1+json"},
+    )
+    try:
+        with open_fn(req, timeout=timeout) as resp:
+            status = int(getattr(resp, "status", 200) or 200)
+            try:
+                resp.read(64)  # 不读完：只要状态码
+            except (OSError, ValueError):
+                pass
+            return 200 <= status < 300
+    except urllib.error.HTTPError as err:
+        return False if err.code == 404 else None
+    except (OSError, ValueError):
+        return None
+
+
 def fetch_npm_downloads(package: str, *, sleep=time.sleep, opener=None) -> dict:
     """查 npm 的 last-week（range 口径，带逐日）。
     成功 → status=ok（含 downloads / window / days）；404 → status=unknown（确认无包，终态）；

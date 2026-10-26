@@ -1692,6 +1692,30 @@ class NpmDownloadsTest(unittest.TestCase):
         self.assertIsNone(npm.parse_package_json('{"name":"x","version":"   "}')["version"], "空白版本号当没有")
         self.assertIsNone(npm.parse_package_json("{}")["repository"])
 
+    def test_registry_package_exists_distinguishes_new_package_from_missing(self):
+        """新包刚发布时下载接口还没统计（range 404），但 registry 已有 —— 不能当成「包不存在」落终态。"""
+        import urllib.error
+
+        class FakeResp:
+            status = 200
+
+            def read(self, n=-1):
+                return b'{"name":"dsh-region-edit"}'
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        self.assertTrue(npm.registry_package_exists("dsh-region-edit", opener=lambda req, timeout=0: FakeResp()))
+        def missing(req, timeout=0):
+            raise urllib.error.HTTPError(req.full_url, 404, "Not Found", None, None)
+        self.assertFalse(npm.registry_package_exists("dsh-region-edit", opener=missing))
+        def boom(req, timeout=0):
+            raise OSError("network down")
+        self.assertIsNone(npm.registry_package_exists("dsh-region-edit", opener=boom))
+
     def test_core_floor_adapts_to_the_real_limit(self):
         """写死 300 的收手线是线上"每轮只抓 1 个仓库"的根因，必须按实际上限打折。"""
 

@@ -654,14 +654,26 @@ def fetch_npm_downloads(args, mesh: dict, log) -> dict:
                 entry["downloadsAt"] = prev.get("downloadsAt")
                 failed += 1
             elif hit["status"] == "unknown":
-                # npm 404：确认无包，终态（不再进下载候选）
-                entry["status"] = "unknown"
+                # 下载接口 404：可能包真没了，也可能是新包还没统计下载量 —— 以 registry 为准。
+                exists = npm.registry_package_exists(parsed["package"])
                 entry["downloads"] = None
                 entry["window"] = None
                 entry["days"] = None
                 entry["downloadsAt"] = now
-                entry["terminal"] = True
-                failed += 1
+                if exists:
+                    # 包存在、下载量暂无：记 ok（市场索引照收，下载量显示为未知），24h 后再刷
+                    entry["status"] = "ok"
+                    entry.pop("terminal", None)
+                elif exists is False:
+                    # registry 也 404：确认无包，终态（不再进下载候选）
+                    entry["status"] = "unknown"
+                    entry["terminal"] = True
+                    failed += 1
+                else:
+                    # registry 探测失败：按暂时失败处理，过 ERROR_RETRY_HOURS 再试
+                    entry["status"] = "error"
+                    entry.pop("terminal", None)
+                    failed += 1
             else:
                 # 暂时失败：记 error，保留包名，过 ERROR_RETRY_HOURS 再进候选（绝不写 0）
                 entry["status"] = "error"
@@ -694,16 +706,25 @@ def fetch_npm_downloads(args, mesh: dict, log) -> dict:
             time.sleep(NPM_INTERVAL)
             continue
         if hit["status"] == "unknown":
-            # 刷新时发现 404：落终态（包已从 registry 消失）
+            # 下载接口 404：同样以 registry 为准（包还在但新到没统计 vs 包真没了）
+            exists = npm.registry_package_exists(str(package))
             entry = dict(prev)
-            entry["status"] = "unknown"
             entry["downloads"] = None
             entry["window"] = None
             entry["days"] = None
             entry["downloadsAt"] = now
-            entry["terminal"] = True
+            if exists:
+                entry["status"] = "ok"
+                entry.pop("terminal", None)
+            elif exists is False:
+                entry["status"] = "unknown"
+                entry["terminal"] = True
+                failed += 1
+            else:
+                entry["status"] = "error"
+                entry.pop("terminal", None)
+                failed += 1
             npm.put(payload, repo_id, entry, now=now)
-            failed += 1
             time.sleep(NPM_INTERVAL)
             continue
         # 暂时失败：若已有 ok 旧值则保留；否则标 error 以便日后重试
