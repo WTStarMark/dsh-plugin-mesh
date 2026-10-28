@@ -571,6 +571,92 @@ test("npm 榜并进子目录包：仓库根没有 package.json 也能上榜，�
   }
 });
 
+test("npm 榜：每行用自己的窗口对齐逐日柱（缓存窗口不一致时不许整排画成「没观测」）", async () => {
+  // 线上实测（2026-10-28）：缓存里各行刷新进度不同，榜级横轴被榜外长尾的众数窗口劫持，
+  // 前 50 行里 49 行日期对不上 → series 全 null → 界面整排只画虚线底座（看起来"没有柱状图"）。
+  // 口径：每行必须带自己的 seriesAxis，series 与该行缓存里的逐日数组逐日对齐、加总 == downloads。
+  const hoursAgo = (h) => new Date(Date.now() - h * 3600000).toISOString();
+  const tmp = await mkdtemp(join(tmpdir(), "mesh-npmaxis-"));
+  const node = (id) => ({
+    id, name: id.split("/")[1], owner: id.split("/")[0], stars: 1,
+    htmlUrl: "https://github.com/" + id, pushedAt: hoursAgo(2),
+    archived: false, fork: false, matchedTags: ["dsh"], topics: [],
+  });
+  const week = (start) => {
+    const day = (i) => new Date(Date.parse(start + "T00:00:00Z") + i * 86400000).toISOString().slice(0, 10);
+    return [0, 1, 2, 3, 4, 5, 6].map((i) => ({ day: day(i), downloads: 10 + i }));
+  };
+  const entry = (pkg, days) => ({
+    status: "ok", package: pkg,
+    downloads: days.reduce((s, d) => s + d.downloads, 0),
+    window: { start: days[0].day, end: days[days.length - 1].day },
+    days, multiPackage: false,
+  });
+  const nowDays = week("2026-10-20");
+  const oldDays = week("2026-10-12");
+  const juneDays = week("2026-06-25");
+  try {
+    await mkdir(join(tmp, "data", "cache"), { recursive: true });
+    await writeFile(
+      join(tmp, "data", "mesh.json"),
+      JSON.stringify({
+        meta: { generatedAt: hoursAgo(1) },
+        tags: [], clusters: [], hubs: [], edges: [],
+        nodes: [node("a/now"), node("b/old"), node("c/june")],
+      }),
+    );
+    await writeFile(
+      join(tmp, "data", "cache", "npm-downloads.json"),
+      JSON.stringify({
+        updatedAt: hoursAgo(1),
+        repos: {
+          "a/now": entry("pkg-now", nowDays),
+          "b/old": entry("pkg-old", oldDays),
+          "c/june": entry("pkg-june", juneDays),
+        },
+      }),
+    );
+    await writeFile(
+      join(tmp, "data", "cache", "npm-registry.json"),
+      JSON.stringify({
+        updatedAt: hoursAgo(1),
+        packages: {
+          "pkg-now": { isBundle: true, dshKeys: ["@deepseek-ai/cordis"], repository: "https://github.com/a/now" },
+          "pkg-old": { isBundle: true, dshKeys: ["@deepseek-ai/cordis"], repository: "https://github.com/b/old" },
+          "pkg-june": { isBundle: true, dshKeys: ["@deepseek-ai/cordis"], repository: "https://github.com/c/june" },
+        },
+      }),
+    );
+    const local = createApi({ root: tmp });
+    const board = (await local.ranking(new URLSearchParams("limit=10"))).boards.npm;
+    assert.equal(board.total, 3);
+    // 榜级代表窗口只取「榜面行」的众数，不再被榜外长尾劫持
+    assert.deepEqual(board.seriesAxis, nowDays.map((d) => d.day), "榜级代表横轴 = 榜面行窗口：" + JSON.stringify(board.seriesAxis));
+    const byId = new Map(board.items.map((r) => [r.id, r]));
+    for (const id of ["a/now", "b/old", "c/june"]) {
+      const row = byId.get(id);
+      assert.ok(row, "三行都应上榜：" + id);
+      assert.ok(Array.isArray(row.seriesAxis), "每行都要带自己的横轴：" + id);
+      assert.equal(row.seriesAxis.length, 7, "行轴 7 天：" + id);
+      assert.equal(row.seriesAxis[0], row.npmWindow.start, "行轴起点 = 该行窗口起点：" + id);
+      assert.equal(row.seriesAxis[6], row.npmWindow.end, "行轴终点 = 该行窗口终点：" + id);
+      assert.equal(
+        row.series.reduce((s, v) => s + v, 0),
+        row.downloads,
+        "逐日柱加总必须等于行内下载量：" + id,
+      );
+      assert.ok(row.series.every((v) => typeof v === "number"), "有逐日缓存的行不许整排 null：" + id);
+    }
+    // 关键回归：6 月窗口那行不能因为榜级轴是别的月就变空，日期必须是自己那 7 天
+    const june = byId.get("c/june");
+    assert.equal(june.seriesAxis[0], "2026-06-25");
+    assert.equal(june.series[0], 10);
+    assert.equal(june.series[6], 16);
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("周更新热榜：窗口与横轴对齐（最左那天的版本必须被画出来）", async () => {
   // 复现过的线上 bug：窗口按"现在往前 7x24 小时"（起点比横轴早一天），
   // 于是最早那天的版本被算进总数却不画柱子（实测第 5 行 12 个版本 vs 柱子和 6）。

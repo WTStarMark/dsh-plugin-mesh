@@ -98,7 +98,9 @@ function mount({ data = payload, fail = false } = {}) {
   t1.className = "on";
   const t2 = new FakeNode("button");
   t2.dataset.tab = "stars";
-  nodes.tabs.append(t1, t2);
+  const t3 = new FakeNode("button");
+  t3.dataset.tab = "npm";
+  nodes.tabs.append(t1, t2, t3);
   const picked = [];
   const board = createRankingBoard({
     ...nodes,
@@ -108,7 +110,7 @@ function mount({ data = payload, fail = false } = {}) {
     },
     onPick: (id) => picked.push(id),
   });
-  return { ...nodes, board, picked, t1, t2, mask };
+  return { ...nodes, board, picked, t1, t2, t3, mask };
 }
 
 const rows = (node) => node.all.filter((n) => n.className?.startsWith("rank-row"));
@@ -417,4 +419,38 @@ test("没有接口（静态预览）：按钮照旧能开，正文如实说明",
   const text = nodes.body.all.map((n) => n.textContent ?? "").join(" ");
   assert.match(text, /拿不到榜单/, "应说明接口不可用：" + text);
   assert.equal(board.isOpen(), true);
+});
+
+test("npm 榜：每行按自己的横轴画柱子（窗口不同也不许整排虚化）", async () => {
+  // 线上实测：榜级横轴被榜外长尾劫持到别的月份，49/50 行日期对不上 → 整排虚线底座（截图里像"没有柱状图"）。
+  // 口径：行级 seriesAxis 优先于榜级 seriesAxis；日期与数值都取该行自己的 7 天。
+  const boardAxis = ["2026-10-20", "2026-10-21", "2026-10-22", "2026-10-23", "2026-10-24", "2026-10-25", "2026-10-26"];
+  const juneAxis = ["2026-06-25", "2026-06-26", "2026-06-27", "2026-06-28", "2026-06-29", "2026-06-30", "2026-07-01"];
+  const data = JSON.parse(JSON.stringify(payload));
+  const base = { name: "x", owner: "acme", avatar: null, stars: 10, categoryLabel: "其他", pushedAt: "2026-10-27T00:00:00Z" };
+  data.boards.npm = {
+    label: "周 npm 下载热榜", metric: "npm-downloads", seriesKind: "npm-downloads",
+    available: true, windowDays: 7, total: 2, count: 2, maxDownloads: 3152,
+    window: { from: "2026-10-20", to: "2026-10-26" }, seriesAxis: boardAxis, seriesRows: 2, note: "",
+    items: [
+      { ...base, id: "acme/now", downloads: 91, npmWindow: { start: "2026-10-20", end: "2026-10-26" }, seriesAxis: boardAxis, series: [1, 2, 3, 4, 5, 6, 7], spans: [] },
+      { ...base, id: "acme/june", downloads: 3152, npmWindow: { start: "2026-06-25", end: "2026-07-01" }, seriesAxis: juneAxis, series: [0, 0, 0, 0, 0, 3060, 92], spans: [] },
+    ],
+  };
+  const ui = mount({ data });
+  ui.button.fire("click");
+  await settle();
+  ui.t3.fire("click");
+  const list = rows(ui.body);
+  assert.equal(list.length, 2, "npm 榜两行都应渲染");
+  const nowSpark = list[0].find((n) => n.className === "spark");
+  const juneSpark = list[1].find((n) => n.className === "spark");
+  assert.equal(nowSpark.children.length, 7, "行级轴也是 7 个槽位");
+  assert.ok(nowSpark.children.every((b) => !b.className.includes("none")), "有逐日数据的行不许出现虚线底座");
+  assert.match(nowSpark.children[0].title, /2026-10-20：1 次下载$/, "日期取行自己的轴：" + nowSpark.children[0].title);
+  // 关键回归：窗口与榜级轴完全不同的那行，仍要按自己的 June 轴画柱子
+  assert.equal(juneSpark.children.length, 7);
+  assert.ok(juneSpark.children.every((b) => !b.className.includes("none")), "行级横轴优先：不许整排虚化");
+  assert.match(juneSpark.children[0].title, /2026-06-25：0 次下载$/, "0 次也按该行日期如实标注：" + juneSpark.children[0].title);
+  assert.match(juneSpark.children[5].title, /2026-06-30：3060 次下载$/, "峰值柱日期与数值都取行自己的：" + juneSpark.children[5].title);
 });

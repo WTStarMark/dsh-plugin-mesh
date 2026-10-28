@@ -1041,7 +1041,6 @@ export function createApi({ root }) {
       return hit ? (hit[1] + "/" + hit[2]).toLowerCase() : null;
     };
     const npmByPkg = new Map();
-    const npmWindowTally = new Map();
     let npmSkippedOfficial = 0;
     let npmSkippedNotBundle = 0;
     for (const n of nodes) {
@@ -1107,10 +1106,6 @@ export function createApi({ root }) {
         chosen.entry.window && chosen.entry.window.start && chosen.entry.window.end
           ? { start: chosen.entry.window.start, end: chosen.entry.window.end }
           : null;
-      if (win) {
-        const key = win.start + "~" + win.end;
-        npmWindowTally.set(key, (npmWindowTally.get(key) ?? 0) + 1);
-      }
       npmRows.push({
         node: chosen.node,
         entry: chosen.entry,
@@ -1122,14 +1117,31 @@ export function createApi({ root }) {
       });
     }
     npmRows.sort((a, b) => b.downloads - a.downloads || (b.node.stars ?? 0) - (a.node.stars ?? 0));
-    const npmTopWindow = [...npmWindowTally.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
-    // 逐日横轴：npm 的 7 天与另两榜的 7 个自然日不是同一组日期（npm 按天数据滞后约 5 天），
-    // 所以本榜自带一根横轴 seriesAxis，绝不与全局 seriesDays 混用 —— 混了柱子就会整排错位。
-    const npmAxis = [];
-    if (npmTopWindow) {
-      const [from, to] = npmTopWindow.split("~");
-      for (let d = from; d <= to && npmAxis.length < 31; d = dayShift(d, 1)) npmAxis.push(d);
-    }
+    const shownRows = npmRows.slice(0, limit);
+    // 榜面代表窗口 = 「真的会显示出来的那批行」的众数。
+    // 不能拿全量 npmRows 算：缓存刷新预算不够时行与行根本不是同一周（线上实测横轴被榜外长尾劫持到 6-25~7-01，
+    // 而前 50 行是 10-20~10-26，唯一共享轴让 49/50 行整排变成「没观测」）。行级真横轴见 item.seriesAxis。
+    const windowMode = (rows) => {
+      const tally = new Map();
+      for (const r of rows) {
+        if (!r.window) continue;
+        const key = r.window.start + "~" + r.window.end;
+        tally.set(key, (tally.get(key) ?? 0) + 1);
+      }
+      return [...tally.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+    };
+    const npmTopWindow = windowMode(shownRows) ?? windowMode(npmRows);
+    // 把 "2026-10-20~2026-10-26" 展开成日期数组（纯日期串运算，跨月/跨年都对）
+    const axisOfWindow = (win) => {
+      const days = [];
+      if (!win) return days;
+      const [from, to] = win.split("~");
+      for (let d = from; d <= to && days.length < 31; d = dayShift(d, 1)) days.push(d);
+      return days;
+    };
+    // npm 的 7 天与另两榜的 7 个自然日不是同一组日期（npm 按天数据滞后约 5 天），
+    // 所以本榜自带一根横轴，绝不与全局 seriesDays 混用。榜级 npmAxis 只是「代表窗口」，行级真横轴见 item.seriesAxis。
+    const npmAxis = axisOfWindow(npmTopWindow);
     const npmBoard = {
       label: "周 npm 下载热榜",
       metric: "npm-downloads",
@@ -1139,7 +1151,9 @@ export function createApi({ root }) {
       total: npmRows.length,
       count: Math.min(limit, npmRows.length),
       maxDownloads: npmRows.length ? npmRows[0].downloads : 0,
+      // 代表窗口（榜面行的众数）；每行真正的那一周见 item.npmWindow / item.seriesAxis
       window: npmTopWindow ? { from: npmTopWindow.split("~")[0], to: npmTopWindow.split("~")[1] } : null,
+      // 兼容字段：榜级代表横轴；画柱子必须以行级 item.seriesAxis 为准
       seriesAxis: npmAxis,
       seriesRows: npmRows.filter((r) => Array.isArray(r.days)).length,
       coverage: {
@@ -1160,12 +1174,15 @@ export function createApi({ root }) {
         "只收确实是 DSH 组合包的包：已挡掉 " + npmSkippedOfficial + " 个官方内部模块、" + npmSkippedNotBundle + " 个非组合包；" +
         "同一个包被多个仓库认领时只留一行（合并 " + npmMergedClaimants + " 条）；其中 " + npmSubdirPackages +
         " 个是子目录包（仓库根没有 package.json，包住在仓库内某个目录）。" +
-        (npmTopWindow ? " 本榜窗口 " + npmTopWindow.split("~")[0] + " ~ " + npmTopWindow.split("~")[1] + "。" : "") +
+        (npmTopWindow ? " 榜面代表窗口 " + npmTopWindow.split("~")[0] + " ~ " + npmTopWindow.split("~")[1] + "。" : "") +
         " 窗口由采集时写入缓存的 npm 区间决定，可能与另两榜的 " + windowDays + " 个自然日不重合；" +
-        "趋势柱画在本榜自己的那根横轴上（seriesAxis），不与另两榜混用。",
-      items: npmRows.slice(0, limit).map((r) => {
-        // 柱子直接来自缓存里的逐日数组：加总 == 行内 downloads（采集时就是按逐日求和定的总量）
-        const byDay = Array.isArray(r.days) ? new Map(r.days.map((d) => [d.day, d.downloads])) : null;
+        "趋势柱用每行自己的横轴（item.seriesAxis，取自该行缓存里的逐日区间）—— 行与行的刷新进度不同，" +
+        "窗口可能不是同一周，boards.npm.seriesAxis 只是榜面代表窗口，不再作全榜唯一横轴。",
+      items: shownRows.map((r) => {
+        // 逐日柱 + 行级横轴都直接来自该行缓存里的逐日数组：加总 == 行内 downloads（采集时就是按逐日求和定的总量）。
+        // 不能拿榜级 npmAxis 去查表：行与行的缓存刷新进度不同，共享一根轴时日期对不上的行会整排变 null，
+        // 部分重叠的行还会被静默截掉几天（线上实测榜级轴落在 6 月，前 50 行里 49 行一根柱子都没有）。
+        const days = Array.isArray(r.days) ? r.days : null;
         return {
           ...row(r.node),
           downloads: r.downloads,
@@ -1174,7 +1191,8 @@ export function createApi({ root }) {
           // 子目录包：前端据此标注，并可指到仓库里那个目录（packument 的 repository.directory）
           npmSubdir: r.subdir || undefined,
           npmDir: r.subdir ? (registry.packages[r.package]?.repositoryDirectory ?? null) : null,
-          series: byDay ? npmAxis.map((d) => (byDay.has(d) ? byDay.get(d) : null)) : null,
+          seriesAxis: days ? days.map((d) => d.day) : null,
+          series: days ? days.map((d) => d.downloads) : null,
           spans: [],
         };
       }),

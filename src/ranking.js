@@ -131,8 +131,15 @@ export function createRankingBoard({ button, modal, tabs, body, close, fetcher, 
   /** 近 7 日趋势柱：null = 那天没观测（不是 0）——有数据画实心、0 画浅底座、没观测画虚线底座 */
   function sparkline(item, board) {
     const values = Array.isArray(item.series) ? item.series : null;
-    // 横轴：本榜自带 seriesAxis 时优先用它（npm 榜的 7 天与另两榜不是同一组日期，混用会整排错位）
-    const axis = Array.isArray(board?.seriesAxis) && board.seriesAxis.length ? board.seriesAxis : data?.seriesDays;
+    // 横轴优先级：行级 seriesAxis > 榜级 seriesAxis > 全局 seriesDays。
+    // npm 榜每行都带自己的 7 天（缓存刷新进度不同，行与行的窗口可能不是同一周）；
+    // 只认榜级轴会把日期对不上的行整排画成「没观测」，部分重叠的行还会静默少画几天。
+    // 本榜自带横轴则优先于全局 seriesDays（npm 的 7 天与另两榜不是同一组日期，混用会整排错位）。
+    const axis = Array.isArray(item.seriesAxis) && item.seriesAxis.length
+      ? item.seriesAxis
+      : Array.isArray(board?.seriesAxis) && board.seriesAxis.length
+        ? board.seriesAxis
+        : data?.seriesDays;
     const days = Array.isArray(axis) ? axis : [];
     const rawKind = board?.seriesKind ?? board?.metric;
     const kind =
