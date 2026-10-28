@@ -454,3 +454,32 @@ test("npm 榜：每行按自己的横轴画柱子（窗口不同也不许整排�
   assert.match(juneSpark.children[0].title, /2026-06-25：0 次下载$/, "0 次也按该行日期如实标注：" + juneSpark.children[0].title);
   assert.match(juneSpark.children[5].title, /2026-06-30：3060 次下载$/, "峰值柱日期与数值都取行自己的：" + juneSpark.children[5].title);
 });
+
+test("npm 榜归属未核验：行上要有明确标注，不许冒充真主人", async () => {
+  const axis = ["2026-10-20", "2026-10-21", "2026-10-22", "2026-10-23", "2026-10-24", "2026-10-25", "2026-10-26"];
+  const data = JSON.parse(JSON.stringify(payload));
+  const base = { name: "x", owner: "acme", avatar: null, stars: 0, categoryLabel: "其他", pushedAt: "2026-10-27T00:00:00Z", downloads: 100, npmWindow: { start: "2026-10-20", end: "2026-10-26" }, seriesAxis: axis, series: [1, 2, 3, 4, 5, 6, 7], spans: [] };
+  data.boards.npm = {
+    label: "周 npm 下载热榜", metric: "npm-downloads", seriesKind: "npm-downloads",
+    available: true, windowDays: 7, total: 2, count: 2, maxDownloads: 100,
+    window: { from: "2026-10-20", to: "2026-10-26" }, seriesAxis: axis, seriesRows: 2, note: "",
+    items: [
+      { ...base, id: "acme/real", npmPackage: "pkg-real", npmAttribution: "registry-repo", npmDeclaredRepo: "acme/real" },
+      { ...base, id: "acme/copy", npmPackage: "pkg-copy", npmAttribution: "unverified", npmDeclaredRepo: "nowhere/other" },
+    ],
+  };
+  const ui = mount({ data });
+  ui.button.fire("click");
+  await settle();
+  ui.t3.fire("click");
+  const list = rows(ui.body);
+  assert.equal(list.length, 2, "两行都照常渲染（保留数字）");
+  assert.ok(!list[0].find((n) => n.className === "attr-unk"), "归属可信的行不挂未核验标注");
+  const chip = list[1].find((n) => n.className === "attr-unk");
+  assert.ok(chip, "归属判不了的行必须有标注：" + list[1].all.map((n) => n.className).join(","));
+  assert.equal(chip.textContent, "归属未核验");
+  assert.match(chip.title, /nowhere\/other/, "悬停要写明 npm 自报的仓库：" + chip.title);
+  assert.match(chip.title, /不代表真实归属/, "悬停要说明这不代表真实归属：" + chip.title);
+});
+
+

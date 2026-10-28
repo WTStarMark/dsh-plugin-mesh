@@ -657,6 +657,97 @@ test("npm 榜：每行用自己的窗口对齐逐日柱（缓存窗口不一致�
   }
 });
 
+test("npm 榜归属：以 npm 声明的 repository 为准，复制 package.json 的仓库不再顶名", async () => {
+  // 线上实据（2026-10-28）：task-board 真实仓库 zhu1090093659/dsh-web（★9.7k，根包 private）不在 claimant 里，
+  // 榜面就把三份 ★0 的复制件之一（cococomeon/damxin）顶成行主；BrowserSkill / dsh-orb 同理。
+  // 口径：① 声明仓库在图里 → 直接归它（哪怕不是 claimant）；② 声明仓库不在图里但 npm 维护者与 claimant 的 owner 同名 → 弱校验；
+  //       ③ 都判不了 → 保留一行但标 unverified，绝不静默当成真主人。
+  const hoursAgo = (h) => new Date(Date.now() - h * 3600000).toISOString();
+  const tmp = await mkdtemp(join(tmpdir(), "mesh-npmattr-"));
+  const node = (id, stars) => ({
+    id, name: id.split("/")[1], owner: id.split("/")[0], stars,
+    htmlUrl: "https://github.com/" + id, pushedAt: hoursAgo(2),
+    archived: false, fork: false, matchedTags: ["dsh"], topics: [],
+  });
+  const okEntry = (pkg, downloads) => ({
+    status: "ok", package: pkg, downloads,
+    window: { start: "2026-10-06", end: "2026-10-12" },
+    days: [{ day: "2026-10-06", downloads }], multiPackage: false,
+  });
+  try {
+    await mkdir(join(tmp, "data", "cache"), { recursive: true });
+    await writeFile(
+      join(tmp, "data", "mesh.json"),
+      JSON.stringify({
+        meta: { generatedAt: hoursAgo(1) },
+        tags: [], clusters: [], hubs: [], edges: [],
+        nodes: [
+          node("z/mono", 5000),        // 真仓库：根包 private，本身不是 claimant
+          node("a/copy1", 1),          // 复制件 1（claimant）
+          node("b/copy2", 0),          // 复制件 2（claimant）
+          node("uowner/thing", 2),     // 无 repository 字段，靠 npmUser 弱校验
+          node("x/unknown", 0),        // 声明仓库不在图里 → unverified
+        ],
+      }),
+    );
+    await writeFile(
+      join(tmp, "data", "cache", "npm-downloads.json"),
+      JSON.stringify({
+        updatedAt: hoursAgo(1),
+        repos: {
+          "a/copy1": okEntry("pkg-real", 1000),
+          "b/copy2": okEntry("pkg-real", 1000),
+          "z/mono": { status: "private", package: null, downloads: null },
+          "uowner/thing": okEntry("pkg-norepo", 500),
+          "x/unknown": okEntry("pkg-lost", 300),
+        },
+      }),
+    );
+    await writeFile(
+      join(tmp, "data", "cache", "npm-registry.json"),
+      JSON.stringify({
+        updatedAt: hoursAgo(1),
+        packages: {
+          "pkg-real": { isBundle: true, dshKeys: ["@deepseek-ai/cordis"], repository: "git+https://github.com/z/mono.git", npmUser: "someone-else" },
+          "pkg-norepo": { isBundle: true, dshKeys: ["@deepseek-ai/cordis"], npmUser: "uowner" },
+          "pkg-lost": { isBundle: true, dshKeys: ["@deepseek-ai/cordis"], repository: "https://github.com/nowhere/other.git", npmUser: "someone-else" },
+        },
+      }),
+    );
+    const local = createApi({ root: tmp });
+    const board = (await local.ranking(new URLSearchParams("limit=10"))).boards.npm;
+    const byPkg = new Map(board.items.map((r) => [r.npmPackage, r]));
+
+    const real = byPkg.get("pkg-real");
+    assert.ok(real, "pkg-real 应上榜");
+    assert.equal(real.id, "z/mono", "归属要落到 npm 声明的仓库，而不是 claimant 里的复制件：实际 " + real.id);
+    assert.equal(real.stars, 5000, "行主是图里那个真仓库（★5000）");
+    assert.equal(real.npmAttribution, "registry-repo");
+    assert.equal(real.npmDeclaredRepo, "z/mono");
+    assert.equal(real.downloads, 1000, "数字仍是这个 npm 包的真实下载量");
+    assert.ok(Array.isArray(real.seriesAxis) && real.seriesAxis.length === 1, "逐日柱照常带行级横轴");
+
+    const weak = byPkg.get("pkg-norepo");
+    assert.equal(weak.id, "uowner/thing", "没有 repository 字段时，用 npm 维护者同名做弱校验");
+    assert.equal(weak.npmAttribution, "npm-user");
+    assert.equal(weak.npmDeclaredRepo, null);
+
+    const lost = byPkg.get("pkg-lost");
+    assert.ok(lost, "归属判不了也要保留一行数字，不能凭空清榜");
+    assert.equal(lost.id, "x/unknown", "兜底仍是唯一 claimant，但必须标未核验");
+    assert.equal(lost.npmAttribution, "unverified");
+    assert.equal(lost.npmDeclaredRepo, "nowhere/other");
+    assert.ok(board.items.some((r) => r.id !== "a/copy1" && r.id !== "b/copy2"), "复制件不再被静默顶名");
+
+    assert.deepEqual(board.coverage.attribution, { registryRepo: 1, npmUser: 1, unverified: 1 }, "归属来源要如实统计");
+    assert.equal(board.coverage.mergedClaimants, 1, "pkg-real 的两份复制认领仍要如实计数");
+    assert.match(board.note, /registry|repository|归属/, "口径要写进 note：" + board.note);
+    assert.match(board.note, /unverified/, "note 要写明兜底标记：" + board.note);
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("周更新热榜：窗口与横轴对齐（最左那天的版本必须被画出来）", async () => {
   // 复现过的线上 bug：窗口按"现在往前 7x24 小时"（起点比横轴早一天），
   // 于是最早那天的版本被算进总数却不画柱子（实测第 5 行 12 个版本 vs 柱子和 6）。

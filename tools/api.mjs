@@ -1040,6 +1040,14 @@ export function createApi({ root }) {
       const hit = /github\.com\/([^/?#]+)\/([^/?#]+)/iu.exec(url);
       return hit ? (hit[1] + "/" + hit[2]).toLowerCase() : null;
     };
+    // npm 包自己声明的「家」（registry 的 repository 字段）→ 图节点。
+    // 归属时以它为准：根包 private 的 monorepo、官方大仓库、没走 npm 采集的仓库都不会出现在 claimant 里，
+    // 只看 claimant 会把复制 package.json 的仓库顶成行主（线上实测 task-board / BrowserSkill / dsh-orb 都是这么错的）。
+    const nodeByRepoKey = new Map();
+    for (const n of nodes) {
+      const key = repoKeyOf(n.htmlUrl) ?? String(n.id ?? "").toLowerCase();
+      if (key && !nodeByRepoKey.has(key)) nodeByRepoKey.set(key, n);
+    }
     const npmByPkg = new Map();
     let npmSkippedOfficial = 0;
     let npmSkippedNotBundle = 0;
@@ -1086,21 +1094,39 @@ export function createApi({ root }) {
       npmSubdirPackages += 1;
     }
     let npmMergedClaimants = 0;
+    // claimant 兜底排序：非 fork 优先 → 星标高 → 下载量高 → id 稳定序（只在归属无法核验时才用）
+    const claimantRank = (a, b) =>
+      (a.node.fork ? 1 : 0) - (b.node.fork ? 1 : 0) ||
+      (Number(b.node.stars) || 0) - (Number(a.node.stars) || 0) ||
+      b.downloads - a.downloads ||
+      String(a.node.id).localeCompare(String(b.node.id));
+    const npmAttributionCount = { registryRepo: 0, npmUser: 0, unverified: 0 };
     const npmRows = [];
     for (const [pkg, claimants] of npmByPkg) {
-      const wanted = repoKeyOf(registry.packages[pkg]?.repository);
+      const registryRec = registry.packages[pkg] ?? null;
+      const wanted = repoKeyOf(registryRec?.repository);
       const matched = wanted ? claimants.find((c) => repoKeyOf(c.node.htmlUrl) === wanted) : null;
-      const chosen =
-        matched ??
-        claimants
-          .slice()
-          .sort(
-            (a, b) =>
-              (a.node.fork ? 1 : 0) - (b.node.fork ? 1 : 0) ||
-              (Number(b.node.stars) || 0) - (Number(a.node.stars) || 0) ||
-              b.downloads - a.downloads ||
-              String(a.node.id).localeCompare(String(b.node.id)),
-          )[0];
+      const wantedNode = wanted ? nodeByRepoKey.get(wanted) ?? null : null;
+      const npmUser = typeof registryRec?.npmUser === "string" ? registryRec.npmUser.toLowerCase() : null;
+      const weak = npmUser ? claimants.find((c) => String(c.node.owner ?? "").toLowerCase() === npmUser) ?? null : null;
+      const fallback = claimants.slice().sort(claimantRank)[0];
+      /* 归属优先级（避免复制作件顶名）：
+         ① npm 声明仓库已在图里 → 直接归给它（哪怕它不是 claimant —— 根包 private 的 monorepo / 官方仓库 / 没走 npm 采集都会这样）；
+         ② npm 声明仓库不在图里但 npm 维护者与某个 claimant 的 owner 同名 → 弱校验放行（npm-user）；
+         ③ 都判不了 → 保留一行数字，但标 unverified，绝不静默把复制件当成真主人。 */
+      let chosen = fallback;
+      let attribution = "unverified";
+      if (wantedNode) {
+        // 数字/窗口/逐日都来自同一个 npm 包（按包名查的），拿任一同包 claimant 的 entry 作数据源即可；
+        // 优先用 matched / 维护者同名的那个 — 它们就是真仓库自己的缓存条目。
+        const dataFrom = matched ?? weak ?? fallback;
+        chosen = { node: wantedNode, entry: dataFrom.entry, downloads: dataFrom.downloads, subdir: dataFrom.subdir === true };
+        attribution = "registry-repo";
+      } else if (weak) {
+        chosen = weak;
+        attribution = "npm-user";
+      }
+      npmAttributionCount[attribution === "registry-repo" ? "registryRepo" : attribution === "npm-user" ? "npmUser" : "unverified"] += 1;
       if (claimants.length > 1) npmMergedClaimants += claimants.length - 1;
       const win =
         chosen.entry.window && chosen.entry.window.start && chosen.entry.window.end
@@ -1114,6 +1140,8 @@ export function createApi({ root }) {
         window: win,
         days: Array.isArray(chosen.entry.days) ? chosen.entry.days : null,
         subdir: chosen.subdir === true,
+        attribution,
+        declaredRepo: wanted,
       });
     }
     npmRows.sort((a, b) => b.downloads - a.downloads || (b.node.stars ?? 0) - (a.node.stars ?? 0));
@@ -1167,6 +1195,8 @@ export function createApi({ root }) {
         mergedClaimants: npmMergedClaimants,
         subdirPackages: npmSubdirPackages,
         registryKnown,
+        // 归属来源分布：registry-repo = npm 声明仓库可对上；npm-user = 只靠维护者同名弱校验；unverified = 判不了
+        attribution: npmAttributionCount,
       },
       note:
         "下载量 = npm 官方接口的真实区间计数（不估算、不平摊）。只有确认拿到数字的包能上榜（当前 " +
@@ -1177,7 +1207,10 @@ export function createApi({ root }) {
         (npmTopWindow ? " 榜面代表窗口 " + npmTopWindow.split("~")[0] + " ~ " + npmTopWindow.split("~")[1] + "。" : "") +
         " 窗口由采集时写入缓存的 npm 区间决定，可能与另两榜的 " + windowDays + " 个自然日不重合；" +
         "趋势柱用每行自己的横轴（item.seriesAxis，取自该行缓存里的逐日区间）—— 行与行的刷新进度不同，" +
-        "窗口可能不是同一周，boards.npm.seriesAxis 只是榜面代表窗口，不再作全榜唯一横轴。",
+        "窗口可能不是同一周，boards.npm.seriesAxis 只是榜面代表窗口，不再作全榜唯一横轴。" +
+        " 归属以 npm 包自报的 repository 为准（对得上图里的仓库就直接归它，哪怕它不是 package.json 的 claimant —— " +
+        "根包 private 的 monorepo、官方大仓库、没走 npm 采集的仓库都不会出现在 claimant 里）；对不上时才用 npm 维护者同名做弱校验，" +
+        "再判不了就标 npmAttribution=unverified —— 复制 package.json 的仓库不再被静默顶名。",
       items: shownRows.map((r) => {
         // 逐日柱 + 行级横轴都直接来自该行缓存里的逐日数组：加总 == 行内 downloads（采集时就是按逐日求和定的总量）。
         // 不能拿榜级 npmAxis 去查表：行与行的缓存刷新进度不同，共享一根轴时日期对不上的行会整排变 null，
@@ -1188,6 +1221,9 @@ export function createApi({ root }) {
           downloads: r.downloads,
           npmPackage: r.package,
           npmWindow: r.window,
+          // 归属来源：registry-repo（npm 声明仓库，可信）/ npm-user（维护者同名弱校验）/ unverified（判不了，别当真主人）
+          npmAttribution: r.attribution,
+          npmDeclaredRepo: r.declaredRepo,
           // 子目录包：前端据此标注，并可指到仓库里那个目录（packument 的 repository.directory）
           npmSubdir: r.subdir || undefined,
           npmDir: r.subdir ? (registry.packages[r.package]?.repositoryDirectory ?? null) : null,
@@ -1648,7 +1684,7 @@ export function apiIndex(version) {
     endpoints: [
       { method: "GET", path: "/api", desc: "本清单" },
       { method: "GET", path: "/api/health", desc: "健康检查与数据概况（含 README 索引规模）" },
-      { method: "GET", path: "/api/ranking?days=7&limit=50&fields=all&noise=all|hide|only", desc: "榜单：周更新热榜（本周发过 release 的项目，最多 50 行，含 updates / updatesSource / releases）+ 周 star 热榜（星标历史增量，最多 50 行；历史不足时如实返回实际窗口）+ 周 npm 下载热榜（npm 官方下载量真实计数，只收确认拿到数字的包；窗口取自采集时的 npm 区间，可能与另两榜不重合，见 boards.npm.window）。每行带 verdict（related/noise/manual）与 npm（周下载量可选列：status/package/downloads/window；缺省或失败为 unknown，不进排序）；noise=hide 排除已判定噪声，only 只看噪声，默认 all（只标注不过滤）" },
+      { method: "GET", path: "/api/ranking?days=7&limit=50&fields=all&noise=all|hide|only", desc: "榜单：周更新热榜（本周发过 release 的项目，最多 50 行，含 updates / updatesSource / releases）+ 周 star 热榜（星标历史增量，最多 50 行；历史不足时如实返回实际窗口）+ 周 npm 下载热榜（npm 官方下载量真实计数，只收确认拿到数字的包；窗口取自采集时的 npm 区间，可能与另两榜不重合，见 boards.npm.window）。每行带 verdict（related/noise/manual）与 npm（周下载量可选列：status/package/downloads/window；缺省或失败为 unknown，不进排序）。npm 榜的行还带 npmAttribution（registry-repo = npm 声明仓库可对上 / npm-user = 只靠维护者同名弱校验 / unverified = 归属判不了）与 npmDeclaredRepo（npm 包自报的仓库），复制 package.json 的仓库不再被静默顶名；noise=hide 排除已判定噪声，only 只看噪声，默认 all（只标注不过滤）" },
       { method: "GET", path: "/api/categories", desc: "扇区（功能分类）与细枝及各自数量" },
       { method: "GET", path: "/api/npm-nodes", desc: "有 npm 包的仓库 id 列表（与市场索引源重叠的那批，供生态图画外圈光环用）；只回 id，不回数字" },
       { method: "GET", path: "/api/review-nodes", desc: "在评测站（review.lingshulab.com）有公开测评的仓库：ids + byId（各插件篇数与插件测评页 URL）。数据来自评测站公开接口，每 10 分钟同步、响应缓存 60 秒；失败沿用旧数据并标 stale，超过 7 天标 expired（前端隐藏光环）。注意：这里的 review 是「评测站测评」，不是节点字段 node.review 的「待人工复核」" },

@@ -208,6 +208,14 @@ export function createRankingBoard({ button, modal, tabs, body, close, fetcher, 
       chip.title = item.reason ? "已判定为噪声：" + item.reason : "已判定为噪声（与 DSH 生态无关或蹭标签的通用项目）";
       line.append(chip);
     }
+    // npm 榜归属判不了（npm 声明的仓库不在图里 / 没登记 repository）：只标注，不许复制件冒充真主人
+    if (item.npmAttribution === "unverified") {
+      const chip = el("span", "attr-unk", "归属未核验");
+      chip.title = item.npmDeclaredRepo
+        ? "npm 包自报的仓库是 " + item.npmDeclaredRepo + "，但它不在图里；当前行只是同名认领仓库，不代表真实归属"
+        : "npm 包没有登记 repository，无法核实这个仓库是不是真主人";
+      line.append(chip);
+    }
     // 版本（采集器单独抓的 releases）：最新一个做成小胶囊，其余在悬停里列全
     const versions = Array.isArray(item.releases) ? item.releases : [];
     if (versions.length) {

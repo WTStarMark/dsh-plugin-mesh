@@ -828,6 +828,12 @@ input[type="range"]::-moz-range-thumb {
   font-family: var(--font-code); font-size: 10.5px; color: var(--warn-ink);
   border: 1px solid var(--warn-line); border-radius: 999px; background: transparent;
 }
+/* npm 归属未核验：npm 声明的仓库不在图里 / 没登记 repository —— 虚线胶囊表示"别当真主人"，不是告警 */
+.rank-row .who .line .attr-unk {
+  flex: none; padding: 0 6px; line-height: 16px; white-space: nowrap;
+  font-family: var(--font-code); font-size: 10.5px; color: var(--warn-ink);
+  border: 1px dashed var(--warn-line); border-radius: 999px; background: transparent;
+}
 /* 子目录包（仓库根没有 package.json，包住在仓库内某个目录）：中性标注，不是告警 */
 .rank-row .who .line .subdir {
   flex: none; padding: 0 6px; line-height: 16px; white-space: nowrap;
