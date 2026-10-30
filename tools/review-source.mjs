@@ -18,7 +18,7 @@
  * 失败按 60s→…→10min 退避。快照超过 maxStaleMs 标 expired，前端隐藏光环。
  */
 
-const UA = "dsh-plugin-mesh/0.5.3 (+https://www.moc-chen.cn)";
+const UA = "dsh-plugin-mesh/0.5.4 (+https://www.moc-chen.cn)";
 const SOURCE = "plugins-pages";
 const PAGE_SIZE = 50;
 const FALLBACK_PAGE_SIZE = 20;

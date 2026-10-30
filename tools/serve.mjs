@@ -28,7 +28,7 @@ import { loadAdminConfig, loadManifesto, clusterPublic, selfNodeId, readEnv } fr
 import { createReviewSource } from "./review-source.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const VERSION = "0.5.3";
+const VERSION = "0.5.4";
 /** 卡片默认去处（线上站点），可用环境变量 SITE_URL 或请求参数 ?link= 覆盖 */
 const SITE_URL = process.env.SITE_URL ?? "https://www.moc-chen.cn/";
 
