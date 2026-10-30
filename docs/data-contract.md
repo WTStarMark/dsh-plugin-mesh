@@ -91,3 +91,27 @@
    （无信号仓库本来就无从分类，算进分母是量数据稀疏度，不是量分类器质量）。
 6. **功能分类不得退化为标签分组**：同一个 GitHub 标签必须横跨多个扇区（`tests/data.test.mjs` 强制校验）。
 7. `meta.kind === "sample-seed"` 时必须带 `note` 与 `queries`（取样数据必须自带局限说明）。
+
+## 身份不变式：full_name 不是身份，githubId 才是（v0.5.4）
+
+GitHub 仓库改名（含大小写改名、换 owner、转手）后 `full_name` 会变，而**所有以 full_name 为键的台账**
+（`data/cache/star-daily.json`、`star-history.json`、`update-log.json`、`releases.json`、`npm-*.json`、
+`readmes.json.gz`）都会出现「旧名有账、现名无账」。历史事故：`ccch1mneyyy/dsh-go → dsh-Go` 改名后，
+1233 星增量挂在旧名下，周 star 榜上整条仓库消失。
+
+规则：
+
+1. `node.renamedFrom` 是**唯一权威的旧名列表**（采集器在 `SegmentStore.merge` 识别到 githubId 相同、full_name
+   不同时写入，链式历史会累积）。任何跨时间/跨缓存的 id 连接都必须先过它。
+2. 读取侧（`tools/api.mjs` 的 `aliasIndexOf`）：旧名 → 现名归一时，**旧名仍是活节点则跳过**（名字后来被别的
+   仓库占用，归一就是张冠李戴）；链式 A→B→C 收敛到终端；A→B、B→C 同时存在时按 ≤5 跳防环。
+3. 写入侧（`backend/dsh_mesh/snapshot.py`）：改名当轮，现名首见但旧名有基线时，用**旧基线**接续计数，
+   不得按「首次见到」落基线；随后旧名从台账退出（不和新名并存，避免重复计数）。
+4. 别名表 `data/cache/aliases.json` 由采集器 `SegmentStore.save()` 自动维护（从 `renamedFrom` 派生 +
+   合并历史），不再依赖手工跑 `tools/dedupe-renames.mjs`。
+5. 已经落错的历史账用 `tools/repair-identities.mjs` 一次性补（默认 dry-run；只迁 `star-daily`，先备份）。
+6. 可观测：`/api/health.identity` 报告 `renamedNodes / aliasIds / aliasedLedgerIds / orphanLedgerIds /
+   ledgerAheadOfMesh`。`orphanLedgerIds > 0` = 账本里出现既不是活节点、也没有 `renamedFrom` 指向的旧名。
+   注意：采集器一轮里**先写台账、最后写 mesh.json**，所以 `ledgerAheadOfMesh === true` 时 orphan 会被临时高估
+   （这一轮新进来的仓库还没进图），等 mesh 落盘后复核；为 false 时才需要按数据故障排查（仓库删除/移出索引
+   也会留下一个窗口期的 orphan，需人工确认）。
