@@ -22,6 +22,40 @@ export const dayOf = (when) => {
   return new Date(ms + DAY_TZ_OFFSET_HOURS * 3600000).toISOString().slice(0, 10);
 };
 
+/**
+ * 改名别名表：旧 full_name → 现 full_name。数据来源是 mesh 节点自带的 renamedFrom（采集器识别改名时写下，
+ * 链式历史都留着）。三条规矩：
+ * ① 旧名若仍是活节点（改名后旧名被别的仓库占用）→ 不归一，否则会把那个仓库的账本算到别人头上；
+ * ② A→B→C 链式收敛到终端，≤5 跳，防环；
+ * ③ 只认「现名确实在图里」的映射。
+ * 为什么要有它：所有以 full_name 为键的数据（star 逐日台账、星标环、update-log、releases、npm、README 索引）
+ * 在改名后都会出现「旧名有账、现名无账」，读取侧必须过这张表才能把同一仓库的历史接起来。
+ */
+export function aliasIndexOf(nodes) {
+  const alive = new Set((nodes ?? []).map((n) => n.id));
+  const alias = new Map();
+  for (const n of nodes ?? []) {
+    if (!n || !alive.has(n.id)) continue;
+    for (const old of n.renamedFrom ?? []) {
+      const from = String(old ?? "");
+      if (!from || from === n.id || alive.has(from)) continue;
+      alias.set(from, n.id);
+    }
+  }
+  for (const from of [...alias.keys()]) {
+    let cur = alias.get(from);
+    const seen = new Set([from]);
+    let hops = 0;
+    while (alias.has(cur) && !seen.has(cur) && hops < 5) {
+      seen.add(cur);
+      cur = alias.get(cur);
+      hops += 1;
+    }
+    alias.set(from, cur);
+  }
+  return alias;
+}
+
 
 const DATA_TTL_MS = 5 * 60 * 1000;
 export const DEFAULT_SITE = "https://www.moc-chen.cn/";
@@ -202,6 +236,34 @@ async function fetchAvatarDataUri(owner, fetchImpl = globalThis.fetch) {
 
 export function createApi({ root }) {
   let cache = { at: 0, mesh: null };
+  /* 别名派生缓存：随 mesh 对象（load() 按 mtime 换新）一起失效。
+     idsOf = 现名 → [现名, 旧名...]（用于把 full_name 键的台账并集起来）；
+     byLower 用来给 /api/one 做大小写不敏感 + 旧名兜底。 */
+  let aliasCache = { mesh: null, alias: new Map(), idsOf: new Map(), byLower: new Map(), aliasLower: new Map() };
+
+  function aliasesOf(mesh) {
+    if (aliasCache.mesh === mesh) return aliasCache;
+    const nodes = mesh?.nodes ?? [];
+    const alias = aliasIndexOf(nodes);
+    const idsOf = new Map(nodes.map((n) => [n.id, [n.id]]));
+    for (const [old, cur] of alias) {
+      const list = idsOf.get(cur);
+      if (list) list.push(old);
+      else idsOf.set(cur, [old]);
+    }
+    const byLower = new Map(nodes.map((n) => [String(n.id).toLowerCase(), n]));
+    const aliasLower = new Map();
+    for (const [old, cur] of alias) aliasLower.set(old.toLowerCase(), cur);
+    aliasCache = { mesh, alias, idsOf, byLower, aliasLower };
+    return aliasCache;
+  }
+
+  /** 一组名字里第一个在 map 里有数字的值（星标环是「绝对值快照」，改名前后要跨名字取值） */
+  function firstNumber(map, ids) {
+    for (const id of ids) if (typeof map?.[id] === "number") return map[id];
+    return undefined;
+  }
+
   // README 索引（data/cache/readmes.json）在检索时拼成【一个全小写的大字符串】，用 indexOf 找命中位置、
 // 再二分定位到仓库 id —— 每次查询只有一次内存扫描，不必对几万篇正文逐篇 toLowerCase()。
   let readmeCache = { mtimeMs: -1, blob: "", ids: [], offsets: [], indexed: 0 };
@@ -361,7 +423,9 @@ export function createApi({ root }) {
     let readme = { indexed: 0, total: 0 };
     if (q) {
       await loadReadmes();
-      const viaReadme = readmeHits(q);
+      // README 索引也以 full_name 为键：改名后旧名下的文档命中要归到现名节点（否则"搜得到但列表里没有"）
+      const { alias } = aliasesOf(mesh);
+      const viaReadme = new Set([...readmeHits(q)].map((id) => alias.get(id) ?? id));
       readme = { indexed: readmeCache.indexed, total: 0 };
       const before = hits.length;
       hits = hits.filter((n) => {
@@ -726,6 +790,33 @@ export function createApi({ root }) {
         : noiseFilter === "only"
           ? allNodes.filter((n) => verdictOf(n) === "noise")
           : allNodes;
+    /* 改名归一：旧名 → 现名。所有「以 full_name 为键」的台账在读取时都要过这张表（见 aliasIndexOf 注释）。 */
+    const { alias, idsOf } = aliasesOf(mesh);
+    const aliased = (id) => idsOf.get(id) ?? [id];
+    /* releases 缓存同样以 full_name 为键：现名 + 旧名并集，按 at+tag 去重（同一版本新旧两份缓存都可能有） */
+    const mergedReleases = (id) => {
+      const seenRelease = new Set();
+      const out = [];
+      for (const name of aliased(id)) {
+        for (const r of releasesIndex.repos[name] ?? []) {
+          const key = String(r?.at ?? "") + "|" + String(r?.tag ?? "");
+          if (seenRelease.has(key)) continue;
+          seenRelease.add(key);
+          out.push(r);
+        }
+      }
+      return out;
+    };
+    /* npm 缓存也以 full_name 为键：现名没有条目时回退旧名（改名后新名要等下一轮 npm 抓取才可能有） */
+    const npmEntryOf = (id) => {
+      const direct = npmIndex.repos[id];
+      if (direct) return direct;
+      for (const name of aliased(id)) {
+        const entry = npmIndex.repos[name];
+        if (entry) return entry;
+      }
+      return null;
+    };
     const now = Date.now();
     const windowDays = Math.min(30, Math.max(1, Number(params.get("days") ?? 7) || 7));
     const limit = Math.min(RANKING_LIMIT, Math.max(1, Number(params.get("limit") ?? 20) || 20));
@@ -736,9 +827,9 @@ export function createApi({ root }) {
 
     const row = (n) => ({
       id: n.id,
-      releases: releasesIndex.repos[n.id] ?? [],
+      releases: mergedReleases(n.id),
       // 可选标注：周下载量。缺省 → unknown；暂时失败 → error；都不进排序、不写 0
-      npm: publicNpm(npmIndex.repos[n.id]),
+      npm: publicNpm(npmEntryOf(n.id)),
       name: n.name,
       owner: n.owner,
       avatar: n.avatar ?? null,
@@ -770,15 +861,18 @@ export function createApi({ root }) {
     /* 次数 = 采样到的推进次数（每轮最多记一次，是**下界**）；一次都没采样到、但窗口内确有推送时保底 1。
      * 为什么不是「1 + 采样」：采样到的推进里已经包含「把 pushedAt 推到窗口内的那次推送」，再加 1 就是同一次推送算两遍
      * —— 线上实测前 50 行全部多算 1，趋势柱加总永远比总数少 1。 */
+    /* 改名：update-log 也以 full_name 为键，旧名采到的推送应算到现名头上（否则改名后计数被重置为 0） */
+    const advancesOf = (id) => aliased(id).reduce((s, x) => s + (updateStats.advances.get(x) ?? 0), 0);
     const updatesOf = (n) => {
-      const advances = updateStats.advances.get(n.id) ?? 0;
+      const advances = advancesOf(n.id);
       if (updateStats.source === "update-log") return Math.max(1, advances);
       return 1 + advances;
     };
-    const seriesOfUpdates = (id) =>
-      updateStats.source === "update-log"
-        ? seriesDays.map((d) => (updateStats.sampledSet.has(d) ? updateStats.perDay.get(d)?.get(id) ?? 0 : null))
-        : seriesDays.map(() => null);
+    const seriesOfUpdates = (id) => {
+      if (updateStats.source !== "update-log") return seriesDays.map(() => null);
+      const names = aliased(id);
+      return seriesDays.map((d) => (updateStats.sampledSet.has(d) ? names.reduce((s, x) => s + (updateStats.perDay.get(d)?.get(x) ?? 0), 0) : null));
+    };
     const updatedAll = nodes
       .filter((n) => {
         if (n.archived || n.fork) return false;
@@ -801,7 +895,7 @@ export function createApi({ root }) {
     const releaseRows = [];
     for (const n of nodes) {
       if (n.archived || n.fork) continue;
-      const list = releasesIndex.repos[n.id];
+      const list = mergedReleases(n.id);
       if (!Array.isArray(list) || !list.length) continue;
       const inWindow = list.filter((r) => typeof r.at === "string" && r.at >= windowStartDay && r.at <= meshDay);
       if (!inWindow.length) continue;
@@ -832,16 +926,42 @@ export function createApi({ root }) {
     const coveredDays = seriesDays.filter((d) => starDailyIndex.sampled.has(d));
     const hasStarDaily = coveredDays.length > 0;
 
-    const seriesFromDaily = (id) => seriesDays.map((d) => (starDailyIndex.sampled.has(d) ? starDailyIndex.days.get(d)?.get(id) ?? 0 : null));
-    const dailySum = (id) => coveredDays.reduce((s, d) => s + (starDailyIndex.days.get(d)?.get(id) ?? 0), 0);
-    const spansFromDaily = (id) =>
-      starDailyIndex.spans
+    /* 逐日台账以 full_name 为键：改名后「旧名有账、现名无账」，读取时把 [现名, 旧名...] 并集起来算。
+     * 入参可以是 id（自动展开别名）或已展开的 ids 数组。 */
+    const namesOf = (idOrIds) => (Array.isArray(idOrIds) ? idOrIds : aliased(idOrIds));
+    const seriesFromDaily = (idOrIds) => {
+      const names = namesOf(idOrIds);
+      return seriesDays.map((d) => {
+        if (!starDailyIndex.sampled.has(d)) return null;
+        const bucket = starDailyIndex.days.get(d);
+        if (!bucket) return 0;
+        let sum = 0;
+        for (const id of names) sum += bucket.get(id) ?? 0;
+        return sum;
+      });
+    };
+    const dailySum = (idOrIds) => {
+      const names = namesOf(idOrIds);
+      let sum = 0;
+      for (const d of coveredDays) {
+        const bucket = starDailyIndex.days.get(d);
+        if (!bucket) continue;
+        for (const id of names) sum += bucket.get(id) ?? 0;
+      }
+      return sum;
+    };
+    const spansFromDaily = (idOrIds) => {
+      const names = namesOf(idOrIds);
+      return starDailyIndex.spans
         .map((s) => {
           const toIdx = seriesDays.indexOf(s.to);
           if (toIdx < 0) return null; // 终点不在窗口里：整段丢弃，不硬塞到别的天
-          return { fromIdx: Math.max(0, seriesDays.indexOf(s.from)), toIdx, from: s.from, to: s.to, hours: s.hours, value: s.d.get(id) ?? 0 };
+          let value = 0;
+          for (const id of names) value += s.d.get(id) ?? 0;
+          return { fromIdx: Math.max(0, seriesDays.indexOf(s.from)), toIdx, from: s.from, to: s.to, hours: s.hours, value };
         })
         .filter((s) => s && s.value > 0);
+    };
 
     /* —— 兜底：台账还没有数据（刚部署 / 文件没生成）时，用星标环给端点差 —— */
     const newest = points[points.length - 1] ?? null;
@@ -907,11 +1027,17 @@ export function createApi({ root }) {
         }
       }
     }
-    const spansForStars = (id) =>
-      starSpans
-        .map((s) => ({ fromIdx: s.fromIdx, toIdx: s.toIdx, from: s.from, to: s.to, days: s.days, value: s.values.get(id) ?? 0 }))
+    /* 星标环兜底路径同样按别名并集：环里的旧名点和新名点要能跨名字比 */
+    const spansForStars = (idOrIds) => {
+      const names = Array.isArray(idOrIds) ? idOrIds : aliased(idOrIds);
+      return starSpans
+        .map((s) => ({ fromIdx: s.fromIdx, toIdx: s.toIdx, from: s.from, to: s.to, days: s.days, value: names.reduce((sum, x) => sum + (s.values.get(x) ?? 0), 0) }))
         .filter((s) => s.value > 0);
-    const seriesForStars = (id) => seriesDays.map((d) => (starDaily.has(d) ? starDaily.get(d).get(id) ?? 0 : null));
+    };
+    const seriesForStars = (idOrIds) => {
+      const names = Array.isArray(idOrIds) ? idOrIds : aliased(idOrIds);
+      return seriesDays.map((d) => (starDaily.has(d) ? names.reduce((sum, x) => sum + (starDaily.get(d).get(x) ?? 0), 0) : null));
+    };
 
     const starsBoard = {
       label: "周 star 热榜",
@@ -942,21 +1068,31 @@ export function createApi({ root }) {
        *   delta === Σ(series 里的数值) + Σ(spans 的 value)
        * 谁动这里的口径，先看 tests/api.test.mjs 的同名断言。 */
       const byId = new Map(nodes.map((n) => [n.id, n]));
+      const canon = (id) => alias.get(id) ?? id;
       const observed = new Set();
-      for (const d of coveredDays) for (const id of starDailyIndex.days.get(d)?.keys() ?? []) observed.add(id);
-      for (const s of starDailyIndex.spans) for (const id of s.d.keys()) observed.add(id);
+      for (const d of coveredDays) for (const id of starDailyIndex.days.get(d)?.keys() ?? []) observed.add(canon(id));
+      for (const s of starDailyIndex.spans) for (const id of s.d.keys()) observed.add(canon(id));
       const gains = [];
+      // 有多少行的增量是「改名后合并旧名台账」来的：透明计数，供接口/页面说明
+      let aliasMerged = 0;
+      const oldHasGain = (old) =>
+        coveredDays.some((d) => (starDailyIndex.days.get(d)?.get(old) ?? 0) !== 0) || starDailyIndex.spans.some((s) => (s.d.get(old) ?? 0) !== 0);
       for (const id of observed) {
         const node = byId.get(id);
         if (!node || node.archived || node.fork) continue;
-        const spans = spansFromDaily(id);
-        const delta = dailySum(id) + spans.reduce((s, x) => s + x.value, 0);
-        if (delta > 0) gains.push({ node, delta, spans });
+        const names = aliased(id);
+        const spans = spansFromDaily(names);
+        const delta = dailySum(names) + spans.reduce((s, x) => s + x.value, 0);
+        if (delta > 0) {
+          if (names.length > 1 && names.slice(1).some(oldHasGain)) aliasMerged += 1;
+          gains.push({ node, delta, spans });
+        }
       }
       gains.sort((a, b) => b.delta - a.delta || (b.node.stars ?? 0) - (a.node.stars ?? 0));
       starsBoard.available = true;
       starsBoard.matched = starDailyIndex.baselined;
       starsBoard.source = "star-daily";
+      starsBoard.aliasMerged = aliasMerged;
       starsBoard.window = { from: coveredDays[0], to: coveredDays[coveredDays.length - 1], days: coveredDays.length, target: windowDays };
       starsBoard.total = gains.length;
       starsBoard.count = Math.min(limit, gains.length);
@@ -976,18 +1112,25 @@ export function createApi({ root }) {
         coveredDays.length + " 天（" + coveredDays[0] + " 起）" +
         (missingDays > 0 ? "，另有 " + missingDays + " 天没有观测 —— 那是「未知」而不是「零增长」" : "") +
         (starDailyIndex.spans.length ? "；" + starDailyIndex.spans.length + " 段跨天观测画成宽条，不计入任何一天" : "") +
+        (aliasMerged > 0 ? "；其中 " + aliasMerged + " 行的增量来自改名仓库的旧名台账（已并入现名，旧名不再单独成行）" : "") +
         "。";
     } else if (base) {
       const byId = new Map(nodes.map((n) => [n.id, n]));
+      const canon = (id) => alias.get(id) ?? id;
       const gains = [];
       let matched = 0;
-      for (const [id, value] of Object.entries(currentStars)) {
-        const before = base.stars[id];
+      // 星标环是「绝对值快照」：改名后旧名点与新名点要按别名并成同一条仓库再比大小
+      const allIds = new Set([...Object.keys(currentStars), ...Object.keys(base.stars)].map(canon));
+      for (const id of allIds) {
+        const node = byId.get(id);
+        if (!node) continue;
+        const names = aliased(id);
+        const before = firstNumber(base.stars, names);
+        const value = firstNumber(currentStars, names);
         if (typeof before !== "number" || typeof value !== "number") continue;
         matched += 1;
         const delta = value - before;
-        const node = byId.get(id);
-        if (delta > 0 && node && !node.archived && !node.fork) gains.push({ node, delta, before, after: value });
+        if (delta > 0 && !node.archived && !node.fork) gains.push({ node, delta, before, after: value });
       }
       gains.sort((a, b) => b.delta - a.delta || (b.after ?? 0) - (a.after ?? 0));
       const fromMs = Date.parse(base.at);
@@ -1053,7 +1196,7 @@ export function createApi({ root }) {
     let npmSkippedNotBundle = 0;
     for (const n of nodes) {
       if (n.archived || n.fork) continue;
-      const entry = npmIndex.repos[n.id];
+      const entry = npmEntryOf(n.id);
       if (!entry || entry.status !== "ok" || typeof entry.downloads !== "number") continue;
       const pkg = String(entry.package ?? "");
       if (!pkg) continue;
@@ -1078,7 +1221,8 @@ export function createApi({ root }) {
     for (const [pkg, rec] of Object.entries(npmExtra.packages)) {
       if (!rec || rec.status !== "ok" || typeof rec.downloads !== "number") continue;
       if (npmByPkg.has(pkg)) continue;
-      const node = nodeById.get(String(rec.repoId ?? ""));
+      const rawRepoId = String(rec.repoId ?? "");
+      const node = nodeById.get(alias.get(rawRepoId) ?? rawRepoId);
       if (!node || node.archived || node.fork) continue;
       if (pkg.startsWith("@deepseek-ai/")) {
         npmSkippedOfficial += 1;
@@ -1298,7 +1442,7 @@ export function createApi({ root }) {
               items: updatedAll.slice(0, limit).map((n) => ({
                 ...row(n),
                 updates: updatesOf(n),
-                observedAdvances: updateStats.advances.get(n.id) ?? 0,
+                observedAdvances: advancesOf(n.id),
                 // 逐日趋势：没观测到的天给 null，界面画成"无数据"而不是 0
                 series: seriesOfUpdates(n.id),
               })),
@@ -1340,7 +1484,10 @@ export function createApi({ root }) {
     const mesh = await load();
     const id = owner + "/" + name;
     const nodes = mesh.nodes ?? [];
-    const node = nodes.find((n) => n.id.toLowerCase() === id.toLowerCase());
+    // 大小写不敏感 + 旧名兜底：仓库改名后，旧链接/旧卡片地址不应 404（aliasesOf 里有 byLower / aliasLower）
+    const { byLower, aliasLower } = aliasesOf(mesh);
+    const lower = id.toLowerCase();
+    const node = byLower.get(lower) ?? byLower.get(aliasLower.get(lower) ?? "");
     if (!node) return null;
     const byId = new Map(nodes.map((n) => [n.id, n]));
     const links = [];
@@ -1672,7 +1819,47 @@ export function createApi({ root }) {
     };
   }
 
-  return { load, search, searchIds, readmeStats, starDailyStats, status, ranking, categories, one, cardSvg, cardPage, publicNode, slim, npmNodes };
+  /** 身份对账（/api/health 用）：改名映射规模 + 台账里真正的孤儿（有增量、既不是活节点、也没有任何
+   * renamedFrom 指向它）。孤儿 ID > 0 就是「又有仓库有账无主」的早期告警位 —— 本次事故在接口上就看得见。 */
+  async function identityStats() {
+    const mesh = await load();
+    const { alias } = aliasesOf(mesh);
+    const alive = new Set((mesh.nodes ?? []).map((n) => n.id));
+    const index = await loadStarDaily();
+    const delta = new Map();
+    for (const bucket of index.days.values()) for (const [id, value] of bucket) if (value) delta.set(id, (delta.get(id) ?? 0) + value);
+    for (const span of index.spans) for (const [id, value] of span.d) if (value) delta.set(id, (delta.get(id) ?? 0) + value);
+    let aliasedLedgerIds = 0;
+    const orphans = [];
+    for (const [id, value] of delta) {
+      if (alive.has(id)) continue;
+      if (alias.has(id)) {
+        aliasedLedgerIds += 1;
+        continue;
+      }
+      orphans.push({ id, delta: value });
+    }
+    orphans.sort((a, b) => b.delta - a.delta);
+    const meshAt = Date.parse(mesh.meta?.generatedAt ?? "");
+    const ledgerAt = Date.parse(index.updatedAt ?? "");
+    /* 一轮采集里台账先写、mesh.json 最后写（collect.py 的落盘顺序）：台账比 mesh 新时，
+       这一轮新进来的仓库还没出现在 mesh 里，orphan 会被临时高估 —— 如实标出来，别让人误判成故障。 */
+    const ledgerAheadOfMesh = Number.isFinite(meshAt) && Number.isFinite(ledgerAt) && ledgerAt > meshAt + 60000;
+    return {
+      renamedNodes: (mesh.nodes ?? []).filter((n) => (n.renamedFrom ?? []).length).length,
+      aliasIds: alias.size,
+      aliasedLedgerIds,
+      orphanLedgerIds: orphans.length,
+      orphanTotalDelta: orphans.reduce((s, x) => s + x.delta, 0),
+      orphanSample: orphans.slice(0, 5),
+      meshGeneratedAt: mesh.meta?.generatedAt ?? null,
+      ledgerUpdatedAt: index.updatedAt ?? null,
+      // true = 台账已更新、mesh 还是上一轮的（一轮之内），orphan 数量此时不可当真，等 mesh 落盘后复核
+      ledgerAheadOfMesh,
+    };
+  }
+
+  return { load, search, searchIds, readmeStats, starDailyStats, status, ranking, categories, one, cardSvg, cardPage, publicNode, slim, npmNodes, identityStats };
 }
 
 /** API 自描述：给调用者一份可发现的端点清单 */

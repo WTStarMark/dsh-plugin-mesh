@@ -652,6 +652,8 @@ async function handleApi(req, res, method, pathname, url) {
     const readme = await api.readmeStats().catch(() => null);
     // starDaily 字段让「逐日星标这几天齐不齐」一眼可见（coveredDays / missingDays / spans / lastRound）；没有它，「7 天有没有」只能点开榜单去猜。
     const starDaily = await api.starDailyStats().catch(() => null);
+    // identity 字段做「改名对账」：台账里有增量、却既不是活节点也没被任何 renamedFrom 指向的，就是有账无主（应为 0）
+    const identity = await api.identityStats().catch(() => null);
     sendJson(
       res,
       {
@@ -661,6 +663,7 @@ async function handleApi(req, res, method, pathname, url) {
         generatedAt: cats.generatedAt,
         readme,
         starDaily,
+        identity,
         // 评测联动概况：matched / unmatched 只在 health 里算（这里本来就要读 mesh），不拖慢 /api/review-nodes
         review: await reviewHealth(reviewSource.snapshot()),
         time: new Date().toISOString(),

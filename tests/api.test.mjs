@@ -1405,3 +1405,246 @@ test("索引仓库光环：以市场索引的归属为准，清单缺失时才�
     await rm(tmp, { recursive: true, force: true });
   }
 });
+
+/* ---------------- 改名（renamedFrom）与身份归一（v0.5.4） ----------------
+ * 事故背景：仓库改名后 full_name 变了，所有以 full_name 为键的台账（star-daily / update-log / releases / npm /
+ * README）都会「旧名有账、现名无账」。以下用例钉住读取侧的归一行为，防止再出现「dsh-Go 不在周 star 榜」。 */
+
+const RENAME_NODE = (id, stars, renamedFrom, extra = {}) => ({
+  id,
+  name: id.split("/")[1],
+  owner: id.split("/")[0],
+  stars,
+  archived: false,
+  fork: false,
+  matchedTags: ["dsh"],
+  topics: [],
+  ...(renamedFrom ? { renamedFrom } : {}),
+  ...extra,
+});
+
+test("改名归一：star 台账旧名增量并入现名、旧名不单独成行、Σ 不变式保持、旧名被占用不归", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "mesh-star-rename-"));
+  try {
+    await mkdir(join(tmp, "data", "cache"), { recursive: true });
+    const nowIso = new Date().toISOString();
+    const anchor = dayOf(Date.parse(nowIso));
+    const shift = (d, n) => new Date(Date.parse(d + "T00:00:00Z") + n * 86400000).toISOString().slice(0, 10);
+    const d0 = shift(anchor, -2);
+    const d1 = shift(anchor, -1);
+    const d2 = anchor;
+    await writeFile(
+      join(tmp, "data", "mesh.json"),
+      JSON.stringify({
+        meta: { generatedAt: nowIso },
+        nodes: [
+          // 链式改名：a/old → a/mid → a/new
+          RENAME_NODE("a/new", 300, ["a/old", "a/mid"]),
+          RENAME_NODE("b/new", 50, ["b/old"]),
+          // b/old 仍是活节点（名字被另一个仓库占用）：此时不许把 b/old 的账归到 b/new
+          RENAME_NODE("b/old", 999),
+          RENAME_NODE("c/plain", 10),
+        ],
+        edges: [],
+        clusters: [],
+      }),
+    );
+    await writeFile(
+      join(tmp, "data", "cache", "star-daily.json"),
+      JSON.stringify({
+        updatedAt: nowIso,
+        lastRound: { at: nowIso, day: d2, counted: 3, gained: 130, spans: 0, carried: 0, baseline: false },
+        seen: { "a/old": 100, "a/mid": 120, "a/new": 300, "b/old": 900, "b/new": 50, "c/plain": 10 },
+        sampledDays: [d0, d1, d2],
+        days: {
+          [d0]: { "a/old": 40, "b/old": 77 },
+          [d1]: { "a/mid": 20 },
+          [d2]: { "a/new": 10, "c/plain": 3 },
+        },
+        spans: [],
+        rounds: { [d0]: { first: nowIso, last: nowIso } },
+      }),
+    );
+    const out = await createApi({ root: tmp }).ranking(new URLSearchParams("limit=10"));
+    const board = out.boards.stars;
+    const byId = new Map(board.items.map((r) => [r.id, r]));
+    assert.equal(byId.has("a/old"), false, "旧名不许单独成行");
+    assert.equal(byId.has("a/mid"), false, "链式改名的中间名也不许成行");
+    const aNew = byId.get("a/new");
+    assert.ok(aNew, "现名 a/new 应在榜上");
+    assert.equal(aNew.delta, 70, "旧名 40（d0）+ 中间名 20（d1）+ 现名 10（d2）必须全并进来");
+    assert.equal(aNew.starsBefore, 230, "starsAfter - starsBefore 必须等于 delta");
+    assert.deepEqual(
+      aNew.series.slice(out.seriesDays.indexOf(d0), out.seriesDays.indexOf(d2) + 1),
+      [40, 20, 10],
+      "逐日柱也要把旧名的柱子并到现名那一天",
+    );
+    // 旧名被占用：b/old 的 77 分给活着的 b/old，绝不归给 b/new
+    assert.equal(byId.get("b/new") ?? null, null, "b/new 没有自己的增量就不该因旧名账上榜");
+    assert.equal(byId.get("b/old").delta, 77, "旧名仍是活仓库时，它的账留在它自己名下");
+    assert.equal(board.aliasMerged, 1, "只有 a/new 这一行是合并旧名来的");
+    for (const it of board.items) {
+      const bars = (it.series ?? []).filter((v) => typeof v === "number").reduce((s, v) => s + v, 0);
+      const spans = (it.spans ?? []).reduce((s, x) => s + x.value, 0);
+      assert.equal(bars + spans, it.delta, "Σ逐日 + Σ宽条 必须等于行内增量：" + it.id);
+    }
+    // 身份对账：旧名有账但都能被 renamedFrom 指向 → 孤儿为 0
+    const identity = await createApi({ root: tmp }).identityStats();
+    assert.equal(identity.aliasedLedgerIds, 2, "a/old 与 a/mid 应算已归一的台账旧名");
+    assert.equal(identity.orphanLedgerIds, 0, "改名旧名不算孤儿");
+    assert.equal(identity.aliasIds, 2, "a/old、a/mid 两条别名；b/old 仍是活节点不算");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("改名兜底：/api/one 旧名可解析（旧链接不 404），README 搜索旧名命中归到现名", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "mesh-rename-one-"));
+  try {
+    await mkdir(join(tmp, "data", "cache"), { recursive: true });
+    const nowIso = new Date().toISOString();
+    await writeFile(
+      join(tmp, "data", "mesh.json"),
+      JSON.stringify({
+        meta: { generatedAt: nowIso },
+        nodes: [RENAME_NODE("a/new", 12, ["a/old"], { description: "现名仓库" })],
+        edges: [],
+        clusters: [],
+      }),
+    );
+    await writeFile(
+      join(tmp, "data", "cache", "readmes.json"),
+      JSON.stringify({ count: 1, docs: { "a/old": { t: "renamekey 专属关键词在正文里" } } }),
+    );
+    const local = createApi({ root: tmp });
+    const old = await local.one("a", "old");
+    assert.ok(old, "旧名必须还能解析（大小写/改名都算）");
+    assert.equal(old.repo.id, "a/new", "旧名解析结果指向现名");
+    const searched = await local.search(new URLSearchParams("q=renamekey"));
+    assert.ok(searched.items.some((n) => n.id === "a/new"), "旧名 README 的命中要归到现名节点");
+    assert.equal(searched.readme.total, 1, "README 命中数按归一名算");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("改名归一：周更新榜的 release 记录、以及没有 releases 时的推送采样都跨旧名接续", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "mesh-rename-updated-"));
+  try {
+    await mkdir(join(tmp, "data", "cache"), { recursive: true });
+    const nowIso = new Date().toISOString();
+    const anchor = dayOf(Date.parse(nowIso));
+    await writeFile(
+      join(tmp, "data", "mesh.json"),
+      JSON.stringify({
+        meta: { generatedAt: nowIso },
+        nodes: [RENAME_NODE("r/new", 8, ["r/old"], { pushedAt: nowIso })],
+        edges: [],
+        clusters: [],
+      }),
+    );
+    // releases 缓存还在旧名下
+    await writeFile(
+      join(tmp, "data", "cache", "releases.json"),
+      JSON.stringify({
+        updatedAt: nowIso,
+        repos: { "r/old": { at: nowIso, releases: [{ tag: "v2", name: "v2", at: anchor, pre: false }] } },
+      }),
+    );
+    const withReleases = await createApi({ root: tmp }).ranking(new URLSearchParams("limit=10"));
+    const row = withReleases.boards.updated.items.find((r) => r.id === "r/new");
+    assert.ok(row, "release 记录在旧名下也要能归到现名进榜");
+    assert.equal(row.updates, 1, "窗口内旧名下的 release 要算进现名");
+
+    // 没有 releases → 退回 update-log 采样口径，旧名采到的推送同样要并进来
+    await rm(join(tmp, "data", "cache", "releases.json"));
+    await writeFile(
+      join(tmp, "data", "cache", "update-log.json"),
+      JSON.stringify({
+        updatedAt: nowIso,
+        seen: {},
+        days: { [anchor]: { "r/old": 2 } },
+        sampledDays: [anchor],
+      }),
+    );
+    const sampled = await createApi({ root: tmp }).ranking(new URLSearchParams("limit=10"));
+    const sampledRow = sampled.boards.updated.items.find((r) => r.id === "r/new");
+    assert.ok(sampledRow, "update-log 里旧名的推送要归到现名");
+    assert.equal(sampledRow.updates, 2, "旧名采样到的 2 次推送必须并进现名，而不是被首见重置");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("改名归一：npm 周下载榜现名没有缓存条目时回退旧名", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "mesh-rename-npm-"));
+  try {
+    await mkdir(join(tmp, "data", "cache"), { recursive: true });
+    const nowIso = new Date().toISOString();
+    await writeFile(
+      join(tmp, "data", "mesh.json"),
+      JSON.stringify({
+        meta: { generatedAt: nowIso },
+        nodes: [RENAME_NODE("p/new", 6, ["p/old"], { description: "插件" })],
+        edges: [],
+        clusters: [],
+      }),
+    );
+    await writeFile(
+      join(tmp, "data", "cache", "npm-downloads.json"),
+      JSON.stringify({
+        updatedAt: nowIso,
+        repos: {
+          "p/old": { status: "ok", package: "dsh-pkg-x", downloads: 4321, window: { start: "2026-10-20", end: "2026-10-26" } },
+        },
+      }),
+    );
+    const out = await createApi({ root: tmp }).ranking(new URLSearchParams("limit=10"));
+    const row = out.boards.npm.items.find((x) => x.id === "p/new");
+    assert.ok(row, "现名缺 npm 缓存时要回退旧名，不能凭空掉榜");
+    assert.equal(row.downloads, 4321);
+    assert.equal(row.npmPackage, "dsh-pkg-x");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("身份对账：真孤儿（有增量、无节点、无 renamedFrom 指向）必须能被报出来", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "mesh-identity-orphan-"));
+  try {
+    await mkdir(join(tmp, "data", "cache"), { recursive: true });
+    const nowIso = new Date().toISOString();
+    const anchor = dayOf(Date.parse(nowIso));
+    await writeFile(
+      join(tmp, "data", "mesh.json"),
+      JSON.stringify({ meta: { generatedAt: nowIso }, nodes: [RENAME_NODE("ok/node", 5)], edges: [], clusters: [] }),
+    );
+    await writeFile(
+      join(tmp, "data", "cache", "star-daily.json"),
+      JSON.stringify({
+        updatedAt: nowIso,
+        seen: {},
+        sampledDays: [anchor],
+        days: { [anchor]: { "gone/orphan": 33, "ok/node": 2 } },
+        spans: [],
+        rounds: {},
+        lastRound: { at: nowIso, day: anchor, counted: 2, gained: 35, spans: 0, carried: 0, baseline: false },
+      }),
+    );
+    const identity = await createApi({ root: tmp }).identityStats();
+    assert.equal(identity.orphanLedgerIds, 1, "真孤儿要报出来");
+    assert.equal(identity.orphanTotalDelta, 33);
+    assert.equal(identity.orphanSample[0].id, "gone/orphan");
+    assert.equal(identity.ledgerAheadOfMesh, false, "同一轮内台账与 mesh 同步时不该打标");
+
+    // 采集器一轮里台账先写、mesh.json 最后写：台账比 mesh 新时 orphan 只是临时现象，必须打标
+    const daily = JSON.parse(await readFile(join(tmp, "data", "cache", "star-daily.json"), "utf8"));
+    daily.updatedAt = new Date(Date.parse(nowIso) + 5 * 60000).toISOString();
+    await writeFile(join(tmp, "data", "cache", "star-daily.json"), JSON.stringify(daily));
+    const ahead = await createApi({ root: tmp }).identityStats();
+    assert.equal(ahead.ledgerAheadOfMesh, true, "台账领先 mesh 时要标出来");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
