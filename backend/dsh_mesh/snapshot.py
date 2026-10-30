@@ -210,6 +210,41 @@ def _hours_between(a: str, b: str) -> float:
     return max(0.0, (tb - ta).total_seconds() / 3600.0)
 
 
+def rename_alias_maps(nodes: list[dict]) -> tuple[dict[str, str], dict[str, list[str]]]:
+    """改名别名：旧 full_name → 现 full_name，以及现名 → [旧名...]（数据来自节点上的 renamedFrom）。
+
+    规则与 tools/api.mjs 的 aliasIndexOf 保持一致：
+    ① 旧名若仍是活节点（改名后旧名被别的仓库占用）→ 不归一，否则会把那个仓库的账算到别人头上；
+    ② A→B→C 链式收敛，≤5 跳，防环；
+    ③ 只认「现名确实在本次节点里」的映射。
+    所有以 full_name 为键的台账（star-daily / update-log）都必须过这张表，否则改名当轮会把「改名」当「首次见到」，
+    旧名下的历史增量再也对不上现名。
+    """
+    alive = {str(n.get("id")) for n in nodes if n.get("id")}
+    alias: dict[str, str] = {}
+    for node in nodes:
+        nid = str(node.get("id") or "")
+        if not nid or nid not in alive:
+            continue
+        for old in node.get("renamedFrom") or []:
+            old = str(old)
+            if old and old != nid and old not in alive:
+                alias[old] = nid
+    for old in list(alias):
+        cur = alias[old]
+        seen_chain = {old}
+        hops = 0
+        while cur in alias and cur not in seen_chain and hops < 5:
+            seen_chain.add(cur)
+            cur = alias[cur]
+            hops += 1
+        alias[old] = cur
+    olds_of: dict[str, list[str]] = {}
+    for old, cur in alias.items():
+        olds_of.setdefault(cur, []).append(old)
+    return alias, olds_of
+
+
 def update_star_daily(
     mesh: dict,
     path: Path,
@@ -225,12 +260,16 @@ def update_star_daily(
     2) 基线超过 gap_hours 的增量写进 spans 不进当天桶（一次停机恢复不能把几天涨幅塞进恢复日）；
     3) 缺席仓库在 grace_days 内保留基线，否则下次出现会被当"首次见到"、这段变化被静默吞掉；
     4) 首次见到只记基线不计数。每轮都落盘（0 变化也写），这是"这轮确实观测过"的唯一证据。
+    5) 改名：现名首次出现、但旧名在 seen 里有基线时，用【旧基线】接续计数（改名当轮不丢空档），旧名从台账退出。
     """
     at = (mesh.get("meta") or {}).get("generatedAt") or now or utcnow()
     day = day_of(at)
     payload = load_star_daily(path)
     seen = dict(payload["seen"])
     carry = dict(payload["seenCarry"])
+    nodes = mesh.get("nodes", [])
+    alias_to_new, olds_of = rename_alias_maps(nodes)
+    aliased_old = set(alias_to_new)  # 这些旧名已归一到现名，本轮不再作为独立基线保留/携带
     days = {k: dict(v) for k, v in payload["days"].items()}
     spans = [dict(s) for s in payload["spans"]]
     rounds = {k: dict(v) for k, v in payload["rounds"].items()}
@@ -247,8 +286,9 @@ def update_star_daily(
     present: set[str] = set()
     counted = 0
     gained = 0
+    alias_used = 0
 
-    for node in mesh.get("nodes", []):
+    for node in nodes:
         nid = node.get("id")
         stars = node.get("stars")
         if not nid or not isinstance(stars, (int, float)):
@@ -257,6 +297,14 @@ def update_star_daily(
         present.add(nid)
         next_seen[nid] = stars
         before = seen.get(nid)
+        alias_src = None
+        if before is None:
+            # 改名当轮：现名首见，但旧名有基线 → 用最近观测到的旧基线接续（不是「首见不计数」）
+            candidates = [old for old in olds_of.get(nid, []) if old in seen]
+            if candidates:
+                alias_src = max(candidates, key=lambda old: str(carry.get(old, "")))
+                before = seen[alias_src]
+                alias_used += 1
         if before is None:
             continue  # 首次见到：只记基线
         delta = stars - before
@@ -265,7 +313,7 @@ def update_star_daily(
         counted += 1
         if delta > 0:
             gained += delta
-        obs_at = carry.get(nid, prev_at)  # 这份基线是什么时候观测到的
+        obs_at = carry.get(alias_src or nid, prev_at)  # 这份基线是什么时候观测到的
         gap = _hours_between(obs_at, at)
         if gap > gap_hours:
             key = (day_of(obs_at), day)
@@ -279,7 +327,7 @@ def update_star_daily(
     grace_floor = _day_shift(day, -grace_days)
     carried = 0
     for nid, stars in seen.items():
-        if nid in present:
+        if nid in present or nid in aliased_old:
             continue
         last = carry.get(nid, prev_at)
         if last and day_of(last) >= grace_floor:
@@ -322,6 +370,7 @@ def update_star_daily(
             "spans": span_added,
             "carried": carried,
             "baseline": not has_baseline,
+            "renamed": alias_used,
         },
         "seen": dict(sorted(next_seen.items())),
         "seenCarry": dict(sorted(next_carry.items())),
@@ -387,10 +436,14 @@ def update_update_log(mesh: dict, path: Path, *, keep: int = UPDATE_LOG_KEEP, no
     seen = dict(payload["seen"])
     days = {k: dict(v) for k, v in payload["days"].items()}
     sampled = set(payload.get("sampledDays") or []) | {day}  # 本轮观测过 = 这一天在观测
+    nodes = mesh.get("nodes", [])
+    alias_to_new, olds_of = rename_alias_maps(nodes)
+    aliased_old = set(alias_to_new)
 
     floor = _day_shift(day, -UPDATE_LOG_SEEN_DAYS)
     counted = 0
-    for node in mesh.get("nodes", []):
+    renamed = 0
+    for node in nodes:
         nid = node.get("id")
         pushed = node.get("pushedAt")
         if not nid or not pushed:
@@ -400,11 +453,20 @@ def update_update_log(mesh: dict, path: Path, *, keep: int = UPDATE_LOG_KEEP, no
             seen.pop(nid, None)  # 太久没动：不再跟踪，也不必计数
             continue
         before = seen.get(nid)
+        if before is None:
+            # 改名当轮：旧名的 pushedAt 接着比，避免把「改名」当「首次见到」把推送计数重置
+            candidates = [old for old in olds_of.get(nid, []) if old in seen]
+            if candidates:
+                alias_src = max(candidates, key=lambda old: str(seen.get(old, "")))
+                before = seen[alias_src]
+                renamed += 1
         if before is not None and pushed > before:
             days.setdefault(day, {})
             days[day][nid] = int(days[day].get(nid, 0)) + 1
             counted += 1
         seen[nid] = pushed
+    for old in aliased_old:
+        seen.pop(old, None)  # 旧名基线退出，避免改名后新旧两条同时计数
 
     keep_floor = _day_shift(day, -(keep - 1))  # 含当天在内共 keep 天
     days = {d: c for d, c in days.items() if d >= keep_floor and c}
@@ -414,7 +476,7 @@ def update_update_log(mesh: dict, path: Path, *, keep: int = UPDATE_LOG_KEEP, no
         "unit": "pushes/day",
         "keepDays": keep,
         "note": "每轮采样一次：pushedAt 比上次观测前进了就记一次推进（同一次推送最多记一次，首次见到不记）。前端「周更新热榜」的次数 = 这个推进次数（每轮最多记一次，是下界），窗口内确有推送但没采样到时保底记 1。",
-        "lastRound": {"at": at, "counted": counted},
+        "lastRound": {"at": at, "counted": counted, "renamed": renamed},
         "seen": dict(sorted(seen.items())),
         "days": dict(sorted(days.items())),
         # 逐日趋势图要区分「当天 0 次」与「当天没观测」：这里记的是观测到的日子

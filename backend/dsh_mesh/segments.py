@@ -141,6 +141,7 @@ class SegmentStore:
         # 有了它，后续扫描即使从 GitHub 搜索索引拿到旧名，也会被归一成现名，不会再冒出第二个球。
         self.aliases_path = Path(aliases_path) if aliases_path else Path(repos_path).parent / "aliases.json"
         self.aliases: dict[str, str] = self._load_aliases()
+        self._aliases_dirty = False
         self.state = self._load_state()
         self.repos: dict[str, dict] = self._load_repos()
         # 噪声作者黑名单：这些 owner 的仓库一律不进累积索引（省配额、也省得再被剔除一次）
@@ -188,10 +189,23 @@ class SegmentStore:
         return cur
 
     def _apply_aliases(self) -> int:
-        """把索引里残留的旧名键挪到现名下（现名已存在就合并，保留信息更多的记录）。"""
+        """把索引里残留的旧名键挪到现名下（现名已存在就合并，保留信息更多的记录）。
+        旧名若已被别的仓库占用（githubId 不同）→ 不挪：否则会把那个仓库整个并掉。"""
         moved = 0
         for key in [k for k in self.repos if k in self.aliases]:
             target = self.canonical(key)
+            if target == key:
+                continue
+            record = self.repos.get(key)
+            existing = self.repos.get(target)
+            if (
+                record
+                and existing
+                and record.get("githubId") is not None
+                and existing.get("githubId") is not None
+                and str(record["githubId"]) != str(existing["githubId"])
+            ):
+                continue  # 名字被别的仓库复用：保持井水不犯河水
             record = self.repos.pop(key)
             if target in self.repos:
                 keep = self.repos[target]
@@ -225,6 +239,65 @@ class SegmentStore:
             json.dumps({"updatedAt": iso(), "count": len(self.repos), "repos": self.repos}, ensure_ascii=False, separators=(",", ":")),
         )
         _atomic_write(self.state_path, json.dumps(self.state, ensure_ascii=False, separators=(",", ":")))
+        self._save_aliases()
+
+    def _remember_alias(self, old: str, new: str) -> None:
+        """记一条 旧名 → 现名（链式收敛到当前现名），由 save() 持久化。"""
+        old, new = str(old or ""), str(new or "")
+        if not old or not new or old == new:
+            return
+        target = self.canonical(new)
+        if target == old or self.aliases.get(old) == target:
+            return
+        self.aliases[old] = target
+        self._aliases_dirty = True
+
+    def _export_aliases(self) -> dict[str, str]:
+        """导出要落盘的别名表。权威来源是累积索引里的改名痕迹（merge 每次识别到改名都会写 renamedFrom）；
+        再合并磁盘上的历史别名（dedupe-renames 手工核对的那些）；旧名一旦被活仓库占用就丢弃，避免误归一。"""
+        live = set(self.repos)
+        out: dict[str, str] = {}
+        for rid, record in self.repos.items():
+            for old in record.get("renamedFrom") or []:
+                old = str(old)
+                if old and old != rid and old not in live:
+                    out[old] = str(rid)
+        try:
+            data = json.loads(self.aliases_path.read_text(encoding="utf-8"))
+            for old, cur in (data.get("aliases") or {}).items():
+                old, cur = str(old), str(cur)
+                if old and cur and old != cur and old not in live and old not in out:
+                    out[old] = cur
+        except (OSError, json.JSONDecodeError):
+            pass
+        for old in list(out):
+            cur = out[old]
+            seen_chain = {old}
+            hops = 0
+            while cur in out and cur not in seen_chain and hops < 5:
+                seen_chain.add(cur)
+                cur = out[cur]
+                hops += 1
+            out[old] = cur
+        return {k: v for k, v in out.items() if k != v}
+
+    def _save_aliases(self) -> None:
+        """原子写回 data/cache/aliases.json，让「采集器自己维护别名表」，不再依赖手工跑 dedupe-renames。
+        别名是读取侧归一的依据，写坏了会连锁污染：内容没变就不重写（每 5 段就会 save 一次）。"""
+        aliases = self._export_aliases()
+        try:
+            current = json.loads(self.aliases_path.read_text(encoding="utf-8"))
+            same = (current.get("aliases") or {}) == aliases
+        except (OSError, json.JSONDecodeError):
+            same = False
+        if not same:
+            self.aliases_path.parent.mkdir(parents=True, exist_ok=True)
+            _atomic_write(
+                self.aliases_path,
+                json.dumps({"updatedAt": iso(), "aliases": dict(sorted(aliases.items()))}, ensure_ascii=False, indent=1),
+            )
+        self.aliases = aliases
+        self._aliases_dirty = False
 
     def ensure_seeded(self, tags: list[str]) -> int:
         added = 0
@@ -347,8 +420,20 @@ class SegmentStore:
             # 旧名归一：GitHub 搜索索引有延迟，改名后仍可能返回旧 full_name
             canonical = self.canonical(rid)
             if canonical != rid:
-                record = dict(record, id=canonical, renamedFrom=sorted(set(record.get("renamedFrom") or ()) | {rid}))
-                rid = canonical
+                # 名字被别的仓库占用（githubId 不同）→ 不归一，否则会把那个仓库整个并掉
+                existing = self.repos.get(canonical)
+                gid_in = record.get("githubId")
+                if (
+                    existing is not None
+                    and gid_in is not None
+                    and existing.get("githubId") is not None
+                    and str(existing["githubId"]) != str(gid_in)
+                ):
+                    record = dict(record)
+                else:
+                    self._remember_alias(rid, canonical)
+                    record = dict(record, id=canonical, renamedFrom=sorted(set(record.get("renamedFrom") or ()) | {rid}))
+                    rid = canonical
             # 规模在"整个记录处理之前"取：改名会先 pop 旧键再插新键，中途取会算错
             size_before = len(self.repos)
             gid = record.get("githubId")
@@ -360,6 +445,7 @@ class SegmentStore:
                         history = list(old.get("renamedFrom") or [])
                         history.append(prev_key)
                         record = dict(record, renamedFrom=sorted(set(history)))
+                        self._remember_alias(prev_key, rid)
                     self._by_github.pop(str(gid), None)
                 self._by_github[str(gid)] = rid
             prev = self.repos.get(rid)

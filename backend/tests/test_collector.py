@@ -3020,6 +3020,132 @@ class NpmPackagesTest(unittest.TestCase):
         self.assertEqual(sum(entry["days"][i]["downloads"] for i in range(len(entry["days"]))), 42, "逐日求和 == 总量")
 
 
+class RenameIdentityTest(unittest.TestCase):
+    """改名身份归一（v0.5.4）：采集器的两份台账都要在改名当轮接续，别名表要自动维护。"""
+
+    def setUp(self):
+        shutil.rmtree(TMP, ignore_errors=True)
+        TMP.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self):
+        shutil.rmtree(TMP, ignore_errors=True)
+
+    @staticmethod
+    def _mesh(at: str, nodes: list[dict]) -> dict:
+        return {"meta": {"generatedAt": at}, "nodes": nodes}
+
+    def test_star_daily_rename_carries_old_baseline_instead_of_baselining(self):
+        path = TMP / "star-daily.json"
+        snap.update_star_daily(self._mesh("2026-10-07T00:30:00Z", [{"id": "u/old", "stars": 100}, {"id": "u/keep", "stars": 50}]), path)
+        out = snap.update_star_daily(
+            self._mesh("2026-10-07T02:30:00Z", [
+                {"id": "u/keep", "stars": 50},
+                {"id": "u/new", "stars": 130, "renamedFrom": ["u/old"]},
+            ]),
+            path,
+        )
+        self.assertEqual(out["days"]["2026-10-07"]["u/new"], 30, "改名当轮必须用旧基线接续（130-100），不能被当成首见丢掉")
+        self.assertEqual(out["lastRound"]["renamed"], 1)
+        self.assertNotIn("u/old", out["seen"], "旧名基线要退出，否则新旧并存会重复算")
+        self.assertNotIn("u/old", out["seenCarry"])
+        self.assertEqual(out["seen"]["u/new"], 130)
+
+        out2 = snap.update_star_daily(
+            self._mesh("2026-10-07T03:30:00Z", [
+                {"id": "u/keep", "stars": 50},
+                {"id": "u/new", "stars": 140, "renamedFrom": ["u/old"]},
+            ]),
+            path,
+        )
+        self.assertEqual(out2["days"]["2026-10-07"]["u/new"], 40, "改名后按现名基线正常累加，不能重复计")
+
+    def test_star_daily_rename_chain_and_alive_old_name(self):
+        """链式 A→B→C 要接上；旧名仍是活节点（被别的仓库占用）时不许归。"""
+        path = TMP / "star-daily.json"
+        snap.update_star_daily(
+            self._mesh("2026-10-07T00:30:00Z", [
+                {"id": "c/orig", "stars": 10},
+                {"id": "c/mid", "stars": 20},
+                {"id": "live/old", "stars": 900},
+            ]),
+            path,
+        )
+        # 第二次改名：c/orig → c/mid（历史 renamedFrom 开始累积）
+        snap.update_star_daily(
+            self._mesh("2026-10-07T01:30:00Z", [
+                {"id": "c/mid", "stars": 20, "renamedFrom": ["c/orig"]},
+                {"id": "live/old", "stars": 920},
+            ]),
+            path,
+        )
+        out = snap.update_star_daily(
+            self._mesh("2026-10-07T02:30:00Z", [
+                {"id": "c/new", "stars": 55, "renamedFrom": ["c/orig", "c/mid"]},
+                {"id": "live/old", "stars": 950},
+                {"id": "live/new", "stars": 30, "renamedFrom": ["live/old"]},
+            ]),
+            path,
+        )
+        self.assertEqual(out["days"]["2026-10-07"]["c/new"], 35, "链式改名要接到最近一次已计数观测（20 → 55）")
+        self.assertEqual(out["days"]["2026-10-07"]["live/old"], 50, "旧名仍是活节点时，它的变化留在自己名下")
+        self.assertNotIn("live/new", out["days"]["2026-10-07"], "旧名被占用时不许把它的账归到新名")
+        self.assertEqual(out["lastRound"]["renamed"], 1, "只有链式那一对算改名接续")
+
+    def test_update_log_rename_keeps_push_continuity(self):
+        path = TMP / "update-log.json"
+        snap.update_update_log(self._mesh("2026-10-07T00:30:00Z", [{"id": "u/old", "pushedAt": "2026-10-06T00:00:00Z"}]), path)
+        out = snap.update_update_log(
+            self._mesh("2026-10-07T01:30:00Z", [{"id": "u/new", "pushedAt": "2026-10-07T00:10:00Z", "renamedFrom": ["u/old"]}]),
+            path,
+        )
+        self.assertEqual(out["days"]["2026-10-07"]["u/new"], 1, "改名当轮旧名的 pushedAt 要接着比，不能被首见重置")
+        self.assertEqual(out["lastRound"]["renamed"], 1)
+        self.assertNotIn("u/old", out["seen"], "旧名基线要退出")
+
+    def test_store_save_auto_maintains_aliases_json(self):
+        """采集器 save() 后，aliases.json 要自动从 renamedFrom 派生，不再依赖手工跑 dedupe-renames。"""
+        import tempfile
+
+        from dsh_mesh.segments import SegmentStore
+
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "segments.json"
+            repos = Path(tmp) / "repos.json"
+            store = SegmentStore(state, repos)
+            store.merge([{"id": "u/old", "githubId": 42, "owner": "u", "name": "old", "topics": ["dsh-plugin"]}])
+            store.merge([{"id": "u/new", "githubId": 42, "owner": "u", "name": "new", "topics": ["dsh-plugin"]}])
+            store.save()
+            aliases = json.loads((Path(tmp) / "aliases.json").read_text(encoding="utf-8"))
+            self.assertEqual(aliases["aliases"].get("u/old"), "u/new", "改名要自动写进别名表")
+
+    def test_store_alias_does_not_merge_repo_reusing_old_name(self):
+        """旧名被另一个仓库占用（githubId 不同）时，加载/合并都不许把两家并成一家。"""
+        import tempfile
+
+        from dsh_mesh.segments import SegmentStore
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repos = Path(tmp) / "repos.json"
+            repos.write_text(
+                json.dumps({
+                    "repos": {
+                        "u/old": {"id": "u/old", "githubId": 1, "owner": "u", "name": "old"},
+                        "u/new": {"id": "u/new", "githubId": 2, "owner": "u", "name": "new"},
+                    }
+                }),
+                encoding="utf-8",
+            )
+            (Path(tmp) / "aliases.json").write_text(json.dumps({"aliases": {"u/old": "u/new"}}), encoding="utf-8")
+            store = SegmentStore(Path(tmp) / "segments.json", repos)
+            self.assertIn("u/old", store.repos, "名字被复用时不许把活仓库并走")
+            self.assertIn("u/new", store.repos)
+            # 搜索索引延迟返回旧名（原仓库 githubId=1）：不许把它并进占用这个名字的 u/new(githubId=2)
+            store.merge([{"id": "u/old", "githubId": 1, "owner": "u", "name": "old", "topics": ["dsh-plugin"]}])
+            self.assertIn("u/old", store.repos)
+            self.assertEqual(store.repos["u/old"]["githubId"], 1, "旧名记录要留在原地，不能被别名并走")
+            self.assertEqual(store.repos["u/new"]["githubId"], 2, "占用旧名的新仓库也不能被覆盖")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
 
