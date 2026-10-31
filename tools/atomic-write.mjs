@@ -6,12 +6,12 @@
  */
 import { existsSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 
-/** 原子写文本；返回写入的字节数。失败时清掉临时文件并抛原异常，旧文件保持完整。 */
-export function atomicWriteText(file, text) {
-  const payload = String(text);
+/** 原子写二进制；返回写入的字节数。失败时清掉临时文件并抛原异常，旧文件保持完整。 */
+export function atomicWriteBuffer(file, buffer) {
+  const payload = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
   const tmp = file + ".tmp-" + process.pid + "-" + Date.now().toString(36);
   try {
-    writeFileSync(tmp, payload, "utf8");
+    writeFileSync(tmp, payload);
     renameSync(tmp, file);
   } catch (err) {
     try {
@@ -21,7 +21,12 @@ export function atomicWriteText(file, text) {
     }
     throw err;
   }
-  return Buffer.byteLength(payload);
+  return payload.length;
+}
+
+/** 原子写文本；返回写入的字节数。失败时清掉临时文件并抛原异常，旧文件保持完整。 */
+export function atomicWriteText(file, text) {
+  return atomicWriteBuffer(file, Buffer.from(String(text), "utf8"));
 }
 
 /** 原子写 JSON；indent 传 1/2 可读，0 表示紧凑。 */

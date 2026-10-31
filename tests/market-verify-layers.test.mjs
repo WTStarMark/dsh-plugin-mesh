@@ -149,6 +149,9 @@ test("索引不变量自检：合法条目通过，坏条目逐条报出来", ()
     versions: [{ version: "1.0.0", publishTimestamp: 1790000000, source: { type: "npm" } }],
   };
   assert.deepEqual(validateIndex([good], labels), []);
+  const noTitle = { ...good };
+  delete noTitle.title;
+  assert.deepEqual(validateIndex([noTitle], labels), [], "title 可选：缺省显示 name（省掉与 name 重复的字符串）");
   const bad = [
     { ...good, title: "repo-name" },
     { ...good, name: "pkg-a" },

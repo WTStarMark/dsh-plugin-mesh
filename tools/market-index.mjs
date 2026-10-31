@@ -19,10 +19,14 @@
  *     索引格式要求整数秒，编一个时间戳比少一个包更糟。
  *   · 整个 engines 字段都不写：DSH 的校验器把这一项当可选（缺失时自己补 {}），写上就是纯体积。
  *     仍然不猜 engines.dsh：我们只有 cordis 的同伴依赖范围，推不出 DSH 版本范围，空 = 不限制。
+ *   · 产物是「紧凑 JSON + 预压缩」：索引只给机器读，缩进是纯体积；同时写 index.json.gz（level 9）
+ *     与 index.json.br（brotli，默认 q10），serve.mjs 优先直发预压缩文件，省掉每请求重压。
+ *   · title 不写：规范里可选，缺省显示 name；我们本来 title 恒等于 name，9162 条重复字符串纯属白送体积。
  */
 
 import { readFileSync, mkdirSync, existsSync } from "node:fs";
-import { atomicWriteText } from "./atomic-write.mjs";
+import { atomicWriteBuffer, atomicWriteText } from "./atomic-write.mjs";
+import { compressIndex } from "./market-compress.mjs";
 import { dirname, resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -533,7 +537,8 @@ export function validateIndex(plugins, labelIds = null) {
     if (!pkg) { bad.push({ pkg: "(空)", why: "缺少包名" }); continue; }
     if (seen.has(pkg)) bad.push({ pkg, why: "包名重复" });
     seen.add(pkg);
-    if (p.title !== pkg) bad.push({ pkg, why: "title 必须等于 npm 包名（当前 " + String(p.title) + "）" });
+    // title 可选（缺省显示 name）；但只要写了，就必须等于 npm 包名，别把仓库名冒充成插件名
+    if (p.title !== undefined && p.title !== pkg) bad.push({ pkg, why: "title 写了就必须等于 npm 包名（当前 " + String(p.title) + "）" });
     const versions = Array.isArray(p.versions) ? p.versions : [];
     if (!versions.length) bad.push({ pkg, why: "没有版本" });
     for (const v of versions) {
@@ -936,8 +941,10 @@ async function main() {
     const entry = {
       name: pkg,
       /* 插件名 = npm 包名：仓库名（dsh-web / dsh-market / deepseek-harness）只说明"它住在哪"，
-       * 拿仓库名当插件名会让同一仓库的多个包看起来是同一个插件，也给了冒名者借名字的机会。 */
-      title: pkg,
+       * 拿仓库名当插件名会让同一仓库的多个包看起来是同一个插件，也给了冒名者借名字的机会。
+       * title 省略不写：format 1 里 title 可选、缺省显示 name，而我们的 title 恒等于 name ——
+       * 9162 条重复字符串（约 200KB）没有任何信息量。 */
+
       /* 人气数字：索引格式里**没有"显示数字"的字段**（sortKeys 只进排序菜单，值不显示），
        * 而前端渲染的字段只有 标题 / 标签胶囊 / 描述 / 版本·作者·日期。描述是唯一能放自由文本的位，
        * 且列表里两行截断 —— 所以把数字放**开头**，放结尾会被截掉。
@@ -1008,7 +1015,7 @@ async function main() {
     for (const v of selfCheck.slice(0, 8)) console.error("   - " + v.pkg + "：" + v.why);
     process.exitCode = 1;
   } else {
-    console.log("✓ 索引不变量自检通过（包名唯一 / title=包名 / 版本与标签合法 / 仓库地址格式正确）");
+    console.log("✓ 索引不变量自检通过（包名唯一 / title 可选但写了须等于包名 / 版本与标签合法 / 仓库地址格式正确）");
   }
 
   /* 分类计数：索引格式里 category 声明**只有 title、没有计数字段**（前端 displayDeclarations 也只渲染 title），
@@ -1052,7 +1059,20 @@ async function main() {
   };
 
   mkdirSync(dirname(OUT), { recursive: true });
-  atomicWriteText(OUT, JSON.stringify(index, null, 1));
+  /* 紧凑 JSON：索引只给机器读，缩进是纯体积（10.7MB → 7.7MB）。
+     同时预压缩 .gz/.br：serve.mjs 直接发文件，避免每个请求重压（DSH Host 只协商 gzip，.br 给浏览器/curl）。
+     压缩失败不能影响索引本身：降级为只写 index.json，serve 会回落到运行时压缩。 */
+  const indexText = JSON.stringify(index);
+  atomicWriteText(OUT, indexText);
+  let packed = null;
+  try {
+    packed = compressIndex(indexText);
+    atomicWriteBuffer(OUT + ".gz", packed.gzip);
+    atomicWriteBuffer(OUT + ".br", packed.br);
+  } catch (err) {
+    console.log("预压缩失败（不影响索引，serve 会回落到运行时压缩）：" + String(err && err.message ? err.message : err));
+    packed = null;
+  }
   /* 生态图外圈光环名单（serve 的 /api/npm-nodes 读它）。
    * 为什么必须由索引产出：旧判据是"仓库 package.json 里写了个 npm 上存在的包名"，不校验归属 ——
    * 线上实测 9830 个这样的仓库里，2091 个的包在索引里其实归别人（同名抢注），
@@ -1060,7 +1080,13 @@ async function main() {
   const haloPath = join(dirname(OUT), "index-nodes.json");
   atomicWriteText(haloPath, JSON.stringify({ generatedAt: new Date().toISOString(), count: haloIds.size, ids: [...haloIds].sort() }));
   console.log("写入 " + haloPath + "：" + haloIds.size + " 个仓库（生态图「索引仓库」光环名单，与索引归属同源）");
-  console.log("写入 " + OUT + "：" + plugins.length + " 个插件 · " + (JSON.stringify(index).length / 1024).toFixed(0) + " KB");
+  console.log(
+    "写入 " + OUT + "：" + plugins.length + " 个插件 · raw " + (Buffer.byteLength(indexText) / 1024).toFixed(0) + " KB"
+    + (packed
+      ? " · gzip " + (packed.gzip.length / 1024).toFixed(0) + " KB · br " + (packed.br.length / 1024).toFixed(0)
+        + " KB（压缩 " + packed.ms + "ms，q" + packed.quality + "）"
+      : ""),
+  );
 
   /* 构建统计落盘：后台「索引源 → 工作流」直接读它画流水线（每个阶段进出多少、挡在哪）。
    * 与索引同目录；失败不影响索引本身。 */
@@ -1077,7 +1103,15 @@ async function main() {
       total: skipReasons.size,
       top: [...skipReasons.entries()].slice(0, 30).map(([pkg, why]) => ({ pkg, why })),
     };
-    buildStats.index = { plugins: plugins.length, categories: Object.keys(declaredCategories).length, haloRepos: haloIds.size };
+    buildStats.index = {
+      plugins: plugins.length,
+      categories: Object.keys(declaredCategories).length,
+      haloRepos: haloIds.size,
+      bytes: packed
+        ? { raw: Buffer.byteLength(indexText), gzip: packed.gzip.length, br: packed.br.length, brotliQuality: packed.quality }
+        : { raw: Buffer.byteLength(indexText) },
+    };
+    buildStats.timings.compressMs = packed ? packed.ms : null;
     buildStats.seed = seed;
     atomicWriteText(join(dirname(OUT), "build-stats.json"), JSON.stringify(buildStats, null, 1));
   } catch (err) {

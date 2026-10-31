@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { atomicWriteJson, atomicWriteText } from "../tools/atomic-write.mjs";
+import { atomicWriteBuffer, atomicWriteJson, atomicWriteText } from "../tools/atomic-write.mjs";
 
 const dir = mkdtempSync(join(tmpdir(), "mesh-atomic-"));
 test.after?.(() => rmSync(dir, { recursive: true, force: true }));
@@ -17,6 +17,14 @@ test("原子写：覆盖旧内容，且不留临时文件", () => {
   atomicWriteText(file, "新内容");
   assert.equal(readFileSync(file, "utf8"), "新内容");
   assert.deepEqual(readdirSync(dir), ["index.json"], "不应残留 .tmp 文件");
+});
+
+test("原子写二进制：内容逐字节一致，失败也清理临时文件", () => {
+  const file = join(dir, "index.json.br");
+  const payload = Buffer.from([0x1f, 0x8b, 0x08, 0x00, 0xff, 0x00]);
+  assert.equal(atomicWriteBuffer(file, payload), payload.length);
+  assert.deepEqual(readFileSync(file), payload);
+  assert.deepEqual(readdirSync(dir).filter((name) => name.includes(".tmp-")), []);
 });
 
 test("原子写 JSON：可读缩进与紧凑两种", () => {
