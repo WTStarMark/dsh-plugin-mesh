@@ -74,7 +74,15 @@ test("体积：二进制明显小于 JSON，主干分片再小一截", (t) => {
   const headBr = brotliCompressSync(encodeCore(head)).length;
   assert.ok(bin.length < jsonBytes.length / 6, "二进制原始体积应小于 JSON 的 1/6：实际 " + bin.length + " vs " + jsonBytes.length);
   assert.ok(binBr < jsonBr * 0.8, "二进制 brotli 应明显小于 JSON brotli：实际 " + binBr + " vs " + jsonBr);
-  assert.ok(headBr < binBr * 0.4, "主干分片（3000 个）应远小于整份：实际 " + headBr + " vs " + binBr);
+  // 不能拿"分片 < 整份的固定比例"断言：分片固定 3000 个，整份节点数一变比例就变。
+  // 本机 4081 节点时 3000/4081≈73%，旧断言 0.4 必红；CI 的 593 节点夹具又直接跳过，红灯被藏起来。
+  // 真正要守的是"分片没有变肥"：按每节点压缩体积比较，与数据规模无关。
+  const headPerNode = headBr / head.nodes.length;
+  const fullPerNode = binBr / core.nodes.length;
+  assert.ok(
+    headPerNode < fullPerNode * 2,
+    "主干分片每节点压缩体积不应明显高于整份：实际 " + headPerNode.toFixed(1) + " vs " + fullPerNode.toFixed(1),
+  );
   assert.equal(head.meta.partial, true);
   assert.equal(head.nodes.length, 3000);
   assert.ok(encodeCore(head).length > 0);
