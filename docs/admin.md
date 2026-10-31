@@ -231,7 +231,7 @@ python3 backend/collect.py --from-store
   产物里对应标签从条目与 `metadata.labels` 一起移除；保存后需重建 + 发布才生效。
 - **构建与发布**：点「重建索引（草稿）」→ 异步跑 `tools/market-index.mjs` 到 `data/admin/market-index/drafts/<jobId>/`，
   页面轮询进度与日志尾；完成后出 **差异预览**（新增 / 移除 / 身份变化 / 标签变化 / 标题变化），
-  确认后「发布」→ 原子替换 `dist/market/index.json`（先备份到 `history/`，保留最近 10 版），可回滚。
+  确认后「发布」→ 原子替换 `dist/market/index.json` 并同步 `.gz/.br` 预压缩件（先备份到 `history/`，保留最近 10 版），可回滚（回滚会删掉旧压缩件，serve 自动回落运行时压缩）。
 
 人工裁决优先级：**entries（人工）> 名单 > 自动核验结论**；名单支持包名 / 发布者 / 仓库三张一维名单 + 仓库白名单。
 

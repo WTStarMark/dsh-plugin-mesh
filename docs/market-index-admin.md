@@ -10,7 +10,7 @@
 索引源现在是一条**全自动、无观测、无出口**的流水线：
 
 ```
-采集器 → data/cache/{npm-downloads,npm-search,npm-packages,npm-registry}.json → tools/market-index.mjs → dist/market/index.json → DSH「发现」页
+采集器 → data/cache/{npm-downloads,npm-search,npm-packages,npm-registry}.json → tools/market-index.mjs → dist/market/index.json（+ .gz/.br 预压缩）→ DSH「发现」页
 ```
 
 它能跑，但运营者看不到也管不了：
@@ -321,13 +321,13 @@ flowchart LR
 | 移除 | 从索引消失的包（附 skipReasons：人工拉黑 / 不再是 DSH 包 / 出错） |
 | 标签变化 | `owner-unverified` / `subdir-package` / `recent-release` 等增减 |
 | 身份变化 | author / repository / stars 从 A → B（冒名修复应该都在这里） |
-| 标题/描述变化 | title（=包名政策）与 description 前缀 |
+| 标题/描述变化 | title（省略时按 name 比；写了必须等于包名）与 description 前缀 |
 
 界面上以 4 个数字卡 + 分组列表呈现，默认只展开"身份变化"和"移除"（风险最高）。
 
 ### 7.4 发布与回滚
 
-- 发布 = `history/index-<ts>.json` 备份 → `rename(draft, dist/market/index.json)` → 同时写 `index-nodes.json` → 审计；
+- 发布 = `history/index-<ts>.json` 备份 → `rename(draft, dist/market/index.json)` → 同时写 `index-nodes.json` 与预压缩件 `index.json.gz/.br` → 审计；
 - 保留最近 10 版；回滚选历史版本 → 先 diff → confirm → 原子恢复；
 - 发布后 `/api/health` 与首页「索引源」计数自动刷新（serve 按 mtime 读，无需重启）。
 
@@ -406,7 +406,7 @@ flowchart LR
 | 配额被后台耗尽 | 「失效重查」按 key 限 200 条/次；code search 复用生成器限速；配额 <500 时按钮置灰 |
 | 后台拖慢公共站点 | 所有作业异步 spawn；明细查询分页；diff 在作业结束时算好存文件，不每次重算 |
 
-回滚步骤：`history/index-<ts>.json` 拷回 `dist/market/index.json` → 写 `index-nodes.json` → 审计 → health 刷新。配置回滚：`overrides.json.bak`。
+回滚步骤：`history/index-<ts>.json` 拷回 `dist/market/index.json` → 写 `index-nodes.json` → 删掉当前 `.gz/.br`（serve 会自动回落到运行时压缩，避免旧压缩件配新索引）→ 审计 → health 刷新。配置回滚：`overrides.json.bak`。
 
 ---
 

@@ -1,13 +1,18 @@
 # 插件生态图
 
-插件生态图是一个网页：把 GitHub 上带 `dsh` 系列标签的仓库，按功能画成一张可交互的关系图。圆心固定是官方仓库 `deepseek-ai/deepseek-harness`，往外分成 21 个功能扇区（扇区就是功能分区），数据按小时采集（一轮通常几十分钟；没有令牌或网络慢时会拉长）。
+插件生态图是一个网页：把 GitHub 上带 `dsh` 系列标签的仓库，按功能画成一张可交互的关系图。圆心固定是官方仓库 `deepseek-ai/deepseek-harness`，往外分成 21 个功能扇区。数据按小时采集，一轮通常几十分钟；没有令牌或网络慢时会拉长。
 
-[![在线访问](https://img.shields.io/badge/在线访问-www.moc--chen.cn-2f7df6?style=flat-square)](https://www.moc-chen.cn/)
-[![测试](https://img.shields.io/badge/tests-374%20JS%20%2B%20182%20Python-3fb8a8?style=flat-square)](#测试与-ci)
+[![在线访问](https://img.shields.io/badge/在线访问-node.moc--chen.cn-2f7df6?style=flat-square)](https://node.moc-chen.cn/)
+[![测试](https://img.shields.io/badge/tests-379%20JS%20%2B%20182%20Python-3fb8a8?style=flat-square)](#测试与-ci)
 [![依赖](https://img.shields.io/badge/dependencies-0-57b894?style=flat-square)](#技术选型)
 [![版本](https://img.shields.io/badge/version-v0.5.4-9b8cf0?style=flat-square)]()
 
-在线地址：<https://www.moc-chen.cn/>
+在线地址有两个节点：
+
+- **悉尼节点（AWS 主节点，国内用户推荐）**：<https://node.moc-chen.cn/>
+- **洛杉矶节点（104 镜像）**：<https://www.moc-chen.cn/>
+
+国内访问优先用悉尼节点；直连不畅时用洛杉矶镜像。两边的页面、API、卡片数据一致，各自独立采集。
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://www.moc-chen.cn/preview.svg?theme=dark&size=1400&sample=6000">
@@ -17,7 +22,7 @@
 
 > 预览图由站点实时渲染（`/preview.svg?theme=dark|light`），读 `data/mesh-core.json`，随采集更新。地址里的 `size` / `sample` 可省：不带参数时默认 1400px / 6000 球；字号、图例、球半径都会随画布等比缩放，所以任何尺寸出的都是同一张图的不同分辨率。
 
-**页面本身没有明暗开关。** 顶栏只有「清爽 / 粉黛」两套配色键，`<html data-theme="light">` 固定浅色。`src/palettes.js` 里的深色变体仍然保留，但只服务于上面这张预览图（以及 `docs/preview.svg`、`docs/preview-light.svg` 两个离线副本）——预览图按读者的系统明暗偏好选色，页面上切不到深色。
+**页面本身没有明暗开关。** 顶栏只有「清爽 / 粉黛」两套配色键，`<html data-theme="light">` 固定浅色。`src/palettes.js` 里的深色变体仍然保留，但只服务于上面这张预览图和两个离线副本——预览图按读者的系统明暗偏好选色，页面上切不到深色。
 
 本项目是独立站点：静态前端 + Python 采集后端 + 同端口的只读查询 API。不依赖 DSH 运行时，也不是 DSH 插件。
 
@@ -39,7 +44,7 @@
 
 ## 赞赏支持
 
-业余时间做的项目，服务器和采集一直在自己掏钱跑。如果它对你有用，可以扫码请作者喝杯咖啡（微信赞赏码）：
+业余时间做的项目，服务器和采集一直在自己掏钱跑。如果它对你有用，可以扫码请作者喝杯咖啡：
 
 <img src="docs/screenshots/donate-wechat.jpg" alt="微信赞赏码" width="200">
 
@@ -112,6 +117,7 @@ GitHub 搜索 API
 - 噪声黑名单就是 `data/noise-blacklist.json`，后台可直接增删。它是**两个键**：`owners`（作者级，整个账号不可信）和 `repos`（单仓库级，那人还有真项目、只剔这一个）。采集器写盘前会重读并**原样保留**人工条目与单仓库条目。
 - 白名单别名组放在 `data/admin/config.json` 的 `whitelistAliases`。它只影响**匹配**（别名归到规范标签上），**不影响抓取**：GitHub 搜索只认精确 topic，别名只对已经在索引里的仓库起作用。默认不内置任何别名组。
 - 共鸣边是有向边（基座 → 插件）；同作者、主题共现是对等关系，按字母序归一化去重。
+- 市场索引是**紧凑 JSON + 预压缩**：构建时同时写 `dist/market/index.json.gz`（gzip9）和 `.br`（brotli q10），serve 直接发文件、不再每请求重压。当前约 9170 个插件：原文 7.5MB、gzip 1.54MB、br 1.0MB；DSH Host 只协商 gzip，所以它实际下载约 1.5MB。
 - 星标环、更新日志、逐日星标、版本日期统一按北京时间 00:00 切天（`DAY_TZ_OFFSET_HOURS = 8`）。
 
 更细的口径与缓存文件说明见 [backend/README.md](backend/README.md)。
@@ -134,7 +140,7 @@ npm run serve                       # 然后访问 http://127.0.0.1:8788/<ADMIN_
 - 名单页加人时会先算**影响预估**：这个作者当前收录了几个仓库、点应用后会少几个；**一个都没有就直说"他当前不在数据里，加名单不会有可见变化"**——避免"加了没反应"的错觉。
 - 单仓库级拉黑要写 `owner/repo`（例如 `xing-shuyin/some-noise-repo`），只剔这一个仓库，不动他名下别的项目。
 - 界面配色可切「清爽 / 粉黛」，选择记在浏览器本地。
-- 安全：口令以 scrypt 哈希存 `.env`（手工指定至少 12 位）；会话 Cookie 是 HttpOnly + SameSite=Strict；写操作要 CSRF 令牌；登录按并发上限 + 失败退避限流（**没有锁定期，正确口令始终可用**，避免被人故意输错锁死）；访问日志不写后台路径。
+- 安全：口令以 scrypt 哈希存 `.env`，手工指定至少 12 位；会话 Cookie 是 HttpOnly + SameSite=Strict；写操作要 CSRF 令牌；登录按并发上限 + 失败退避限流，没有锁定期，正确口令始终可用，避免被人故意输错锁死；访问日志不写后台路径。
 
 完整说明（接口清单、锚定条件、回滚、生产安全清单）见 [docs/admin.md](docs/admin.md)。
 
@@ -152,7 +158,7 @@ npm run serve                       # 然后访问 http://127.0.0.1:8788/<ADMIN_
 ## 测试与 CI
 
 ```bash
-npm test                           # 前端 + 后端（本机实测：前端 374 项、后端 182 项）
+npm test                           # 前端 + 后端（本机实测：前端 379 项、后端 182 项）
 npm run test:js                    # 只跑前端（node:test）
 npm run test:py                    # 只跑后端（unittest）
 npm run seed:fixture               # 用 data/sample-raw.json 生成夹具数据集（npm test 会自动调用）
@@ -203,7 +209,7 @@ docs/                    data-contract.md、admin.md、frontend-design.md 与预
 
 ## 查询 API
 
-`https://www.moc-chen.cn` 上，API 与前端共用同一个端口。它不需要另外开服务，也不需要密钥。接口零依赖、只读、允许跨域（`Access-Control-Allow-Origin: *`），响应带 5 分钟公共缓存。
+`https://node.moc-chen.cn`（悉尼，国内推荐）与 `https://www.moc-chen.cn`（洛杉矶镜像）上，API 与前端共用同一个端口。它不需要另外开服务，也不需要密钥。接口零依赖、只读、允许跨域（`Access-Control-Allow-Origin: *`），响应带 5 分钟公共缓存；两个节点接口完全一致，任选其一即可。
 
 ### 数据接口
 
@@ -211,7 +217,7 @@ docs/                    data-contract.md、admin.md、frontend-design.md 与预
 |---|---|---|
 | GET | `/api` | 端点清单（自描述） |
 | GET | `/api/health` | 健康检查 + 数据概况（节点数、生成时间、README 索引规模） |
-| GET | `/api/categories` | 扇区（功能分类）与细枝及各自数量 |
+| GET | `/api/categories` | 扇区与细枝及各自数量 |
 | GET | `/api/repos` | 检索仓库（过滤 / 排序 / 翻页），`q` 同时匹配 README 正文；行带 `verdict` |
 | GET | `/api/search?q=&limit=` | 紧凑检索：只回命中 id 与计数；超过 limit 时 `truncated=true`，`total` 仍是真实命中数 |
 | GET | `/api/ranking?days=7&limit=50` | 两个榜单，含口径字段与数据新鲜度；行带 `verdict`，可传 `noise=hide|only` |
@@ -223,14 +229,14 @@ docs/                    data-contract.md、admin.md、frontend-design.md 与预
 |---|---|---|
 | GET | `/api/repos/:owner/:name` | 单个仓库详情 + 同作者 / 主题共现连线 |
 | GET | `/api/card/:owner/:name.svg` | SVG 卡片 |
-| GET | `/card/:owner/:name` | 卡片分享页（预览 + 嵌入代码） |
+| GET | `/card/:owner/:name` | 卡片分享页 |
 | GET | `/preview.svg`（同 `/api/preview.svg`） | 预览图，按当前数据实时渲染 |
 | GET / POST | `/api/stats` · `/api/ping` | 访问统计 / 上报一次访问（前端自动调用） |
 
 ### 快速上手
 
 ```bash
-BASE=https://www.moc-chen.cn
+BASE=https://node.moc-chen.cn          # 国内推荐；洛杉矶镜像：https://www.moc-chen.cn
 
 curl -s "$BASE/api/repos?sort=stars&limit=5"                 # 星标最高的 5 个仓库
 curl -s "$BASE/api/repos?sort=stars&limit=10&noise=hide"     # 同上，但排除已判定噪声
@@ -267,7 +273,7 @@ curl -s "$BASE/api/ranking?limit=10" | jq '.boards.updated.items[] | {id, update
 
 - 令牌桶按 IP 计：默认 90 令牌/分钟、每秒回填 1.5 个；可用 `RATE_LIMIT_MAX` / `RATE_LIMIT_REFILL` 调。
 - 按接口权重扣：`/api/ranking` 记 5 个、卡片 SVG 记 4 个、`/api/repos` 与 `/api/categories` 记 2 个、市场索引 `/market/index.json` 记 2 个、其余 1 个。
-- 每个响应都带 `X-RateLimit-Limit` / `Remaining` / `Reset` / `Cost`；超限返回 429 + `Retry-After`（秒）。
+- 每个响应都带 `X-RateLimit-Limit` / `Remaining` / `Reset` / `Cost`；超限返回 429 + `Retry-After`。
 - 数据一轮采集才更新一次（通常几十分钟到几小时），响应本身有 5 分钟公共缓存，按 `Retry-After` 退避即可。
 - 默认只信 socket 地址（`X-Forwarded-For` 可伪造）；挂了反向代理再设 `TRUST_PROXY=1`，并自行清洗该头。
 
@@ -280,7 +286,7 @@ curl -s "$BASE/api/ranking?limit=10" | jq '.boards.updated.items[] | {id, update
 | 状态码 | 含义 |
 |---|---|
 | 200 | 正常 |
-| 204 | 预检通过（OPTIONS） |
+| 204 | 预检通过 |
 | 400 | 仓库名不合法 |
 | 404 | 未收录该仓库 |
 | 405 | 使用了写方法 |
@@ -292,32 +298,34 @@ curl -s "$BASE/api/ranking?limit=10" | jq '.boards.updated.items[] | {id, update
 
 卡面含作者头像、`owner / name`、两行简介、语言色点、星标、复刻数、更新时间、所属扇区与站点入口。头像会内联成 data URI（抓不到时退回首字母圆标），所以卡片在 README 的 `<img>` 里也能完整显示。点卡片背景去站点，点仓库名去 GitHub。
 
-[![dsh-plugin-mesh 卡片示例（浅色）](docs/card-example.svg)](https://www.moc-chen.cn/)
+[![dsh-plugin-mesh 卡片示例](https://node.moc-chen.cn/api/card/WTStarMark/dsh-plugin-mesh.svg)](https://node.moc-chen.cn/)
 
-[![dsh-plugin-mesh 卡片示例（深色）](docs/card-example-dark.svg)](https://www.moc-chen.cn/)
+[![dsh-plugin-mesh 卡片示例（深色）](https://node.moc-chen.cn/api/card/WTStarMark/dsh-plugin-mesh.svg?theme=dark)](https://node.moc-chen.cn/)
 
-上面两张是仓库内的静态样本（随仓库版本化），点图去线上站点；真实卡片（随采集更新）见 <https://www.moc-chen.cn/api/card/WTStarMark/dsh-plugin-mesh.svg>。
+上面两张卡片由悉尼节点实时渲染，随采集更新；洛杉矶镜像也有同样的卡片。点图去站点。
 
 贴进 README：
 
 ```markdown
-[![dsh-plugin-mesh](https://www.moc-chen.cn/api/card/WTStarMark/dsh-plugin-mesh.svg)](https://www.moc-chen.cn/)
+[![dsh-plugin-mesh](https://node.moc-chen.cn/api/card/WTStarMark/dsh-plugin-mesh.svg)](https://node.moc-chen.cn/)
 ```
 
-贴进网页（用 `img` 嵌入时 SVG 内部链接不生效，所以去处也印在卡面上）：
+贴进网页：
 
 ```html
-<a href="https://www.moc-chen.cn/">
-  <img src="https://www.moc-chen.cn/api/card/WTStarMark/dsh-plugin-mesh.svg" alt="dsh-plugin-mesh" width="420" height="168">
+<a href="https://node.moc-chen.cn/">
+  <img src="https://node.moc-chen.cn/api/card/WTStarMark/dsh-plugin-mesh.svg" alt="dsh-plugin-mesh" width="420" height="168">
 </a>
 ```
+
+用 `img` 嵌入时 SVG 内部的链接不会生效，所以卡片上也印了站点入口。
 
 | 参数 | 默认 | 说明 |
 |---|---|---|
 | `theme` | `light` | 传 `dark` 出深色版（SVG 读不到 `prefers-color-scheme`，要显式指定） |
 | `link` | `https://www.moc-chen.cn/` | 点击去处，只接受 `http` / `https`（其他协议回落默认） |
 
-打开 `https://www.moc-chen.cn/card/<owner>/<name>`，可实时预览两版并复制 Markdown / HTML 代码。换默认去处用环境变量：`SITE_URL=https://your-site.example pm2 restart dsh-plugin-mesh --update-env`。
+打开 `https://node.moc-chen.cn/card/<owner>/<name>`（或洛杉矶镜像 `https://www.moc-chen.cn/card/<owner>/<name>`），可实时预览两版并复制 Markdown / HTML 代码。换默认去处用环境变量：`SITE_URL=https://your-site.example pm2 restart dsh-plugin-mesh --update-env`。
 
 ## 许可
 

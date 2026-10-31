@@ -29,7 +29,7 @@
 1. 先读 `GET /api` 的端点自述，再挑端点；不要盲猜路径。
 2. 只读、无需鉴权，但请勿高频轮询：接口按令牌计费，响应带 5 分钟公共缓存。遇到 429 请按 `Retry-After` 退避。
 3. 批量场景用 `/api/search`，不要逐个拉 `/api/repos/:owner/:name`。
-4. 请求请带 `Accept-Encoding: gzip`：市场索引有几 MB，不压缩容易超时。
+4. 请求请带 `Accept-Encoding: br, gzip`：市场索引原文约 7.5MB，预压缩后 br 约 1.0MB、gzip 约 1.5MB（DSH Host 只协商 gzip，浏览器/curl 可用 br），不压缩容易超时。
 5. `User-Agent` 标明身份与用途，方便放行与排查。
 6. `/market/index.json` 可自由引用给 DSH 使用。
 
