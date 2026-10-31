@@ -3,8 +3,13 @@
  * seed-sample — 临时取样器（非正式采集器）：只跑一次，为「前端原型」取一份真实、可信的样本数据；
  * 正式采集器（增量、缓存、去噪、快照 diff）见 README 路线图。
  * 输出 data/sample-raw.json（原始 API 响应，可追溯来源）与 data/mesh.json（前端数据契约）。
+ *
+ * 用法：node tools/seed-sample.mjs [--from-raw] [--out <path>] [--force]
+ * 保护：本机已有 data/mesh.json 时拒绝覆盖（要重建加 --force，或用 --out 指定别的路径）。
  */
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdir, readFile } from "node:fs/promises";
+import { atomicWriteText } from "./atomic-write.mjs";
 import { applyCategories, DEFAULT_OPTIONS, nonPluginReason } from "./categories.mjs";
 // 生态共鸣清单：后台管理副本优先，其次策展产物（与采集器同规则）
 import { loadAdminConfig, matchRepo, readEcosystem, whitelistAliasesOf, whitelistTagsOf } from "./admin-config.mjs";
@@ -261,6 +266,16 @@ function buildMesh(rawRepos, queryMeta) {
 }
 
 async function main() {
+  const outIndex = process.argv.indexOf("--out");
+  const explicitOut = outIndex > -1;
+  const force = process.argv.includes("--force");
+  const defaultMesh = resolve(DATA_DIR, "mesh.json");
+  // 与 seed:fixture 同一套保护：本机已有真实 data/mesh.json 时拒绝覆盖（要重建加 --force）。
+  // 以前这里无条件覆盖：在有真实数据的机器上跑一次 npm run seed，契约就被换成 593 节点样本。
+  if (!explicitOut && !force && existsSync(defaultMesh)) {
+    console.error("data/mesh.json 已存在，按本机真实数据对待，不覆盖。要重建取样数据加 --force（或用 --out 指定别的路径）");
+    process.exit(1);
+  }
   await mkdir(DATA_DIR, { recursive: true });
   const rawRepos = [];
   const queryMeta = [];
@@ -314,11 +329,10 @@ async function main() {
   mesh.meta.errors = errors;
   mesh.meta.builtFrom = fromRaw ? "sample-raw.json（离线重建）" : "GitHub REST Search API（本次抓取）";
   if (!fromRaw) {
-    await writeFile(resolve(DATA_DIR, "sample-raw.json"), JSON.stringify({ fetchedAt: new Date().toISOString(), queryMeta, errors, repos: rawRepos }, null, 1));
+    atomicWriteText(resolve(DATA_DIR, "sample-raw.json"), JSON.stringify({ fetchedAt: new Date().toISOString(), queryMeta, errors, repos: rawRepos }, null, 1));
   }
-  const outIndex = process.argv.indexOf("--out");
-  const outPath = outIndex > -1 ? resolve(process.cwd(), process.argv[outIndex + 1]) : resolve(DATA_DIR, "mesh.json");
-  await writeFile(outPath, JSON.stringify(mesh, null, 1));
+  const outPath = explicitOut ? resolve(process.cwd(), process.argv[outIndex + 1]) : defaultMesh;
+  atomicWriteText(outPath, JSON.stringify(mesh, null, 1));
   console.log("契约写入 " + outPath);
 
   console.log("\n=== 取样结果 ===");

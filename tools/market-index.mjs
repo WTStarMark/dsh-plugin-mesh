@@ -21,7 +21,8 @@
  *     仍然不猜 engines.dsh：我们只有 cordis 的同伴依赖范围，推不出 DSH 版本范围，空 = 不限制。
  */
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { readFileSync, mkdirSync, existsSync } from "node:fs";
+import { atomicWriteText } from "./atomic-write.mjs";
 import { dirname, resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -713,7 +714,7 @@ async function main() {
   await Promise.all(Array.from({ length: concurrency }, () => worker()));
 
   mkdirSync(dirname(cachePath), { recursive: true });
-  writeFileSync(cachePath, JSON.stringify(cache));
+  atomicWriteText(cachePath, JSON.stringify(cache));
   buildStats.timings.registryMs = Date.now() - tStart;
   console.log("registry: 新抓 " + fetched + " · 命中缓存 " + cacheHits + " · 超大跳过 " + tooLarge + " · 失败 " + failed);
 
@@ -1051,13 +1052,13 @@ async function main() {
   };
 
   mkdirSync(dirname(OUT), { recursive: true });
-  writeFileSync(OUT, JSON.stringify(index, null, 1));
+  atomicWriteText(OUT, JSON.stringify(index, null, 1));
   /* 生态图外圈光环名单（serve 的 /api/npm-nodes 读它）。
    * 为什么必须由索引产出：旧判据是"仓库 package.json 里写了个 npm 上存在的包名"，不校验归属 ——
    * 线上实测 9830 个这样的仓库里，2091 个的包在索引里其实归别人（同名抢注），
    * 图上有 10144 个球被标成「索引仓库」。名单与索引同源，两处口径就不可能再漂。 */
   const haloPath = join(dirname(OUT), "index-nodes.json");
-  writeFileSync(haloPath, JSON.stringify({ generatedAt: new Date().toISOString(), count: haloIds.size, ids: [...haloIds].sort() }));
+  atomicWriteText(haloPath, JSON.stringify({ generatedAt: new Date().toISOString(), count: haloIds.size, ids: [...haloIds].sort() }));
   console.log("写入 " + haloPath + "：" + haloIds.size + " 个仓库（生态图「索引仓库」光环名单，与索引归属同源）");
   console.log("写入 " + OUT + "：" + plugins.length + " 个插件 · " + (JSON.stringify(index).length / 1024).toFixed(0) + " KB");
 
@@ -1078,7 +1079,7 @@ async function main() {
     };
     buildStats.index = { plugins: plugins.length, categories: Object.keys(declaredCategories).length, haloRepos: haloIds.size };
     buildStats.seed = seed;
-    writeFileSync(join(dirname(OUT), "build-stats.json"), JSON.stringify(buildStats, null, 1));
+    atomicWriteText(join(dirname(OUT), "build-stats.json"), JSON.stringify(buildStats, null, 1));
   } catch (err) {
     console.log("构建统计写入失败（不影响索引）：" + String(err && err.message ? err.message : err));
   }

@@ -8,9 +8,10 @@
  * 用法：node tools/curate-ecosystem.mjs [--mesh dist/live-mesh.json] [--out tools/ecosystem.json] [--dry]
  * 令牌从 .env 的 GITHUB_TOKEN 读（只用于 GitHub API，不打印）。
  */
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { atomicWriteText } from "./atomic-write.mjs";
 import { effectiveAnchors, readEcosystem } from "./admin-config.mjs";
 import { CONTEXT_RULES, DEFAULT_CONTEXT } from "./ecosystem-bases.mjs";
 
@@ -156,6 +157,7 @@ if (DRY) {
   console.log("\n（--dry：不写文件）");
   console.log(JSON.stringify(out.bases.map((b) => ({ id: b.id, count: b.verified.length })), null, 1));
 } else {
-  await writeFile(OUT, JSON.stringify(out, null, 1), "utf8");
+  // 原子写：这份清单已入库（tools/ecosystem.json），写一半被杀会让共鸣边整批消失，git 工作区也会脏。
+  atomicWriteText(OUT, JSON.stringify(out, null, 1));
   console.log("\n写入 " + OUT.replace(ROOT + "/", "") + "：" + out.bases.map((b) => b.id + "→" + b.verified.length).join(" · "));
 }
