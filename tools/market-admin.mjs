@@ -627,7 +627,7 @@ export function createMarketAdmin({ root, sendJson, readJsonBody } = {}) {
     if (!p) return null;
     if (field === "stars") return (p.metadata && p.metadata.sortKeys && p.metadata.sortKeys.stars) || 0;
     if (field === "labels") return ((p.metadata && p.metadata.labels) || []).slice().sort().join(",");
-    if (field === "title") return p.title || null;
+    if (field === "title") return p.title || p.name || null; // title 省略时按 name 比，避免发布后整表报「标题变化」
     if (field === "author") return p.author || null;
     if (field === "repository") return (p.repository && p.repository.url) || null;
     if (field === "version") return p.versions && p.versions[0] ? p.versions[0].version : null;
@@ -704,6 +704,22 @@ export function createMarketAdmin({ root, sendJson, readJsonBody } = {}) {
       writeFileSync(distNodes + ".publish", readFileSync(draftNodes));
       renameSync(distNodes + ".publish", distNodes);
     }
+    /* 预压缩产物随发布一起更新：草稿里没有（老构建/旧版本）就删掉线上旧压缩件，
+       让 serve.mjs 回落到运行时压缩，绝不能把旧 .gz/.br 配着新 index.json 发出去。 */
+    for (const ext of [".gz", ".br"]) {
+      const draftPack = draftFile + ext;
+      const distPack = distIndex + ext;
+      if (existsSync(draftPack)) {
+        writeFileSync(distPack + ".publish", readFileSync(draftPack));
+        renameSync(distPack + ".publish", distPack);
+      } else {
+        try {
+          unlinkSync(distPack);
+        } catch {
+          /* 本来就没有 */
+        }
+      }
+    }
     return { ok: true, jobId: id, backupTs: ts, plugins: draft.plugins.length };
   }
 
@@ -719,6 +735,14 @@ export function createMarketAdmin({ root, sendJson, readJsonBody } = {}) {
     if (existsSync(nodes)) {
       writeFileSync(distNodes + ".rollback", readFileSync(nodes));
       renameSync(distNodes + ".rollback", distNodes);
+    }
+    // 历史备份只有 index.json：删掉当前预压缩件，避免旧 .gz/.br 配上回滚后的 index.json
+    for (const ext of [".gz", ".br"]) {
+      try {
+        unlinkSync(distIndex + ext);
+      } catch {
+        /* 没有就算了 */
+      }
     }
     return { ok: true, ts: stamp, plugins: doc.plugins.length };
   }

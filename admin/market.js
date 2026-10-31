@@ -514,7 +514,7 @@ export function mountMarketView(root, { request, post, toast } = {}) {
     kv.put("缓存结论", ev.check ? ev.check.state + (ev.check.reason ? "（" + ev.check.reason + "）" : "") : "无缓存记录");
     kv.put("人工裁决", detail.manual ? detail.manual.decision + (detail.manual.reason ? "：" + detail.manual.reason : "") : "未裁决");
     if (detail.entry) {
-      kv.put("当前标题", detail.entry.title);
+      kv.put("当前标题", detail.entry.title ?? detail.entry.name);
       kv.put("当前作者", detail.entry.author);
       kv.put("当前星标", fmtNum((detail.entry.metadata && detail.entry.metadata.sortKeys && detail.entry.metadata.sortKeys.stars) || 0));
       kv.put("当前版本", (detail.entry.versions && detail.entry.versions[0] && detail.entry.versions[0].version) || "—");

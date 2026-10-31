@@ -225,7 +225,42 @@ test("发布/回滚：草稿原子替换、history 备份、回滚恢复", async
   }
 });
 
+test("发布/回滚：预压缩件随发布同步；草稿没有压缩件时清掉线上旧件，回滚也不留陈旧件", async () => {
+  const root = makeRoot();
+  try {
+    const admin = createMarketAdmin({ root });
+    const paths = marketPaths(root);
+    const distDir = join(root, "dist", "market");
 
+    // 草稿带 .gz/.br：发布要一起同步
+    const job1 = "20261023T150000";
+    const dir1 = join(paths.drafts, job1);
+    mkdirSync(dir1, { recursive: true });
+    writeFileSync(join(dir1, "index.json"), JSON.stringify({ format: 1, title: { en: "d", zh: "d" }, plugins: [{ name: "pkg-new", metadata: { labels: [], sortKeys: { stars: 0 } }, versions: [{ version: "1.0.0" }] }] }));
+    writeFileSync(join(dir1, "index.json.gz"), "GZ-DRAFT");
+    writeFileSync(join(dir1, "index.json.br"), "BR-DRAFT");
+    assert.equal(admin.publish(job1).ok, true);
+    assert.equal(readFileSync(join(distDir, "index.json.gz"), "utf8"), "GZ-DRAFT");
+    assert.equal(readFileSync(join(distDir, "index.json.br"), "utf8"), "BR-DRAFT");
+
+    // 草稿没有压缩件：线上旧件必须删掉，否则 serve 会发陈旧内容
+    const job2 = "20261023T160000";
+    const dir2 = join(paths.drafts, job2);
+    mkdirSync(dir2, { recursive: true });
+    writeFileSync(join(dir2, "index.json"), JSON.stringify({ format: 1, title: { en: "d", zh: "d" }, plugins: [{ name: "pkg-next", metadata: { labels: [], sortKeys: { stars: 0 } }, versions: [{ version: "1.0.0" }] }] }));
+    assert.equal(admin.publish(job2).ok, true);
+    assert.equal(existsSync(join(distDir, "index.json.gz")), false, "草稿没有 .gz 时要删掉线上旧 .gz");
+    assert.equal(existsSync(join(distDir, "index.json.br")), false, "草稿没有 .br 时要删掉线上旧 .br");
+
+    // 回滚也不留陈旧压缩件
+    const history = admin.historyList();
+    assert.equal(admin.rollback(history[0].ts).ok, true);
+    assert.equal(existsSync(join(distDir, "index.json.gz")), false);
+    assert.equal(existsSync(join(distDir, "index.json.br")), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("overrides 支持隐藏标签：去重、非法 id 丢弃", () => {
   const doc = normalizeOverrides({ labels: { hidden: ["owner-unverified", "owner-unverified", "Bad Label", "star-cta", "x".repeat(80)] } });
