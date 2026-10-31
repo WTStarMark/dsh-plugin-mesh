@@ -374,7 +374,7 @@ flowchart LR
 | `admin/index.html` / `app.js` / `market.js`（新） / `admin.css` | 「索引源」标签页 + 总览/复核台/构建发布三页 |
 | `tests/market-admin.test.mjs`（新） | 8 个用例：名单规范化/优先级/diff/发布回滚/并发保护 |
 
-已验证：341 个 JS 测试全过；临时服务冒烟（登录 → overview → queue → 裁决写盘 → 撤销 → 采集器在跑时构建返回 409）通过。
+已验证：JS 测试全过（数量见 README 徽章）；临时服务冒烟（登录 → overview → queue → 裁决写盘 → 撤销 → 采集器在跑时构建返回 409）通过。
 **P1 未做**：条目库/缓存/名单/配额的独立页面（接口已有 cache/lists），危险操作二次确认弹窗正在用 `window.confirm`。
 
 ### P0（一天可验收）：只读 + 裁决 + 手动发布

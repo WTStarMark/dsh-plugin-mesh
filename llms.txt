@@ -1,6 +1,6 @@
 # 插件生态图 · Plugin Ecosystem Map
 
-> 把 GitHub 上带 dsh 系列标签的 DSH 插件仓库，按功能铺成一张可交互的生态图。静态前端 + 只读查询 API + 每小时采集一次。本站是社区独立项目，不是 DeepSeek 官方站点。
+> 把 GitHub 上带 dsh 系列标签的 DSH 插件仓库，按功能铺成一张可交互的生态图。静态前端 + 只读查询 API + 按小时采集。本站是社区独立项目，不是 DeepSeek 官方站点。
 
 - 站点：https://www.moc-chen.cn
 - 项目仓库：https://github.com/WTStarMark/dsh-plugin-mesh
@@ -8,7 +8,7 @@
 
 ## 这是什么
 
-三万个带 dsh 标签的 GitHub 仓库，分成 21 个功能扇区；带三档相关性结论（related / noise / manual），带周 star 与周 npm 下载两张榜。数据每小时采集一次，所有数字都是采集那一刻的快照。
+三万个带 dsh 标签的 GitHub 仓库，分成 21 个功能扇区；带三档相关性结论（related / noise / manual），带周 star 与周 npm 下载两张榜。数据按小时采集（一轮通常几十分钟），所有数字都是采集那一刻的快照。
 
 ## API
 

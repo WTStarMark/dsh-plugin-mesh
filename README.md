@@ -1,9 +1,9 @@
 # 插件生态图
 
-插件生态图是一个网页：把 GitHub 上带 `dsh` 系列标签的仓库，按功能画成一张可交互的关系图。圆心固定是官方仓库 `deepseek-ai/deepseek-harness`，往外分成 21 个功能扇区（扇区就是功能分区），数据每小时自动更新。
+插件生态图是一个网页：把 GitHub 上带 `dsh` 系列标签的仓库，按功能画成一张可交互的关系图。圆心固定是官方仓库 `deepseek-ai/deepseek-harness`，往外分成 21 个功能扇区（扇区就是功能分区），数据按小时采集（一轮通常几十分钟；没有令牌或网络慢时会拉长）。
 
 [![在线访问](https://img.shields.io/badge/在线访问-www.moc--chen.cn-2f7df6?style=flat-square)](https://www.moc-chen.cn/)
-[![测试](https://img.shields.io/badge/tests-319%20JS%20%2B%20165%20Python-3fb8a8?style=flat-square)](#测试与-ci)
+[![测试](https://img.shields.io/badge/tests-374%20JS%20%2B%20182%20Python-3fb8a8?style=flat-square)](#测试与-ci)
 [![依赖](https://img.shields.io/badge/dependencies-0-57b894?style=flat-square)](#技术选型)
 [![版本](https://img.shields.io/badge/version-v0.5.4-9b8cf0?style=flat-square)]()
 
@@ -32,7 +32,7 @@
 | 搜索与筛选 | 搜仓库名 / 作者 / 描述 / topics，README 正文走后端检索；筛选只淡化、不改变位置 |
 | 三类连线 | 同作者（完整关系）、主题共现（琥珀虚线）、生态共鸣（紫罗兰实线，基座 → 插件） |
 | 评测联动 | 在评测站（review.lingshulab.com）有公开测评的仓库外圈套一层紫色光环，右栏可跳该仓库的插件测评页；数据由服务端只读聚合、每 10 分钟同步，失败沿用旧数据、7 天后自动隐藏（默认关闭，配 `REVIEWS_SITE_URL` 才开） |
-| 管理后台 | 与站点同进程同端口，七个标签页；改完两份黑名单或共鸣清单点「应用变更」离线重建，采集参数下一轮自动生效 |
+| 管理后台 | 与站点同进程同端口，八个标签页；改完两份黑名单或共鸣清单点「应用变更」离线重建，采集参数下一轮自动生效 |
 | 数据出口 | 只读查询 API + 每个仓库一张自包含 SVG 卡片 |
 | 名单两档粒度 | 作者级（整个账号不可信）与单仓库级（那人有真项目，只剔这一个）；列表里能直接看到"加了他会少几个仓库" |
 | 白名单别名组 | 同义标签（如 `dsh-theme`）显式登记为某个规范标签的别名，匹配时归并，抓取口径不变 |
@@ -62,11 +62,11 @@ npm run serve                           # 打开 http://127.0.0.1:8788/
 ```bash
 cp .env.example .env                                # 填入 GITHUB_TOKEN=...
 python3 backend/collect.py --once                   # 跑一轮真实采集
-python3 backend/collect.py --loop --interval 3600   # 常驻，每小时一轮
+python3 backend/collect.py --loop --interval 3600   # 常驻，按 interval 轮询（一轮耗时可能超过它）
 python3 backend/collect.py --from-store             # 改完规则后离线重算（不联网、不耗配额）
 ```
 
-运行数据（`data/mesh.json`、`data/mesh-core.*`、`data/cache/` 等）体积大，且每小时都变，所以不入库。它们由部署机上的采集器生成。干净克隆先跑一次 `--from-raw`，就有一份可看可测的数据。
+运行数据（`data/mesh.json`、`data/mesh-core.*`、`data/cache/` 等）体积大，且每轮都变，所以不入库。它们由部署机上的采集器生成。干净克隆先跑一次 `--from-raw`，就有一份可看可测的数据。
 
 两点注意：
 
@@ -100,14 +100,14 @@ GitHub 搜索 API
        └─ 产出 data/mesh.json + data/snapshots/<时间戳>.json + data/last-crawl.json
 ```
 
-**收录口径**：只收「有信号」的仓库，也就是至少一个白名单 topic，或一句 ≥10 字的描述。只有名字带 dsh、既没描述也没 topic 的空壳不入库。数量记在 `meta.noSignalSkipped`。
+**收录口径**：只收「有信号」的仓库，也就是至少一个白名单 topic，或一句 ≥10 字的描述。只有名字带 dsh、既没描述也没 topic 的空壳不入库。数量记在 `meta.noSignalSkipped`。白名单在**抓取**和**构图**两层同时生效：后台加的标签下一轮抓回来就能进图，删掉的标签点「应用变更」即可从图里移除。
 
 **白名单标签**：`dsh`、`dsh-desktop`、`dsh-plugin`、`dsh-plugin-desktop`、`dsh-plugin-market`、`dsh-plugins`。名字里含 `dsh-` 的仓库也收。
 
 **几条硬规矩**：
 
-- 缩水保护：某轮构建出的索引不足现有规模的 80% 时，拒绝覆盖前端数据与快照；落盘用临时文件 + 原子替换，写到一半被杀也不会留下半截 JSON。
-- 白名单标签放在 `data/admin/config.json`（后台改过才有，没有就用内置默认）。采集器与前端工具读同一份。
+- 缩水保护：某轮构建出的索引不足现有规模的 80% 时，拒绝覆盖前端数据与快照；但白名单删标签、拉黑名单、改名这类「能解释的减少」不计入缩水，不会被误拦。落盘用临时文件 + 原子替换，写到一半被杀也不会留下半截 JSON。
+- 白名单标签放在 `data/admin/config.json`（后台改过才有，没有就用内置默认）。采集器（抓取 + 构图）与前端工具读同一份。
 - 生态共鸣清单优先读后台副本 `data/admin/ecosystem.json`；没有它才用策展产物 `tools/ecosystem.json`。
 - 噪声黑名单就是 `data/noise-blacklist.json`，后台可直接增删。它是**两个键**：`owners`（作者级，整个账号不可信）和 `repos`（单仓库级，那人还有真项目、只剔这一个）。采集器写盘前会重读并**原样保留**人工条目与单仓库条目。
 - 白名单别名组放在 `data/admin/config.json` 的 `whitelistAliases`。它只影响**匹配**（别名归到规范标签上），**不影响抓取**：GitHub 搜索只认精确 topic，别名只对已经在索引里的仓库起作用。默认不内置任何别名组。
@@ -126,7 +126,7 @@ node tools/admin-setup.mjs --show   # 查看后台地址
 npm run serve                       # 然后访问 http://127.0.0.1:8788/<ADMIN_PATH>/
 ```
 
-打开后有七个标签页：状态、数据、工作流、名单、**设置**、共鸣、审计。
+打开后有八个标签页：状态、数据、工作流、名单、**设置**、共鸣、索引源、审计。
 
 - 能改：两份黑名单（作者级 / 单仓库级）、白名单标签与**别名组**、生态共鸣清单（含每个基座的锚定条件与子项）、以及**采集参数**。
 - **设置页**能改预算、翻页、刷新窗口、README / releases / npm 预算、轮询间隔等 11 项参数。优先级是 **后台配置 > 启动参数 > 内置默认值**：启动命令里的 `--budget 600` 只在该项**从没在后台配置过**时生效，所以后台改完**下一轮采集自动按新值跑，不用重启**。页面会标出每一项当前值是从哪来的。
@@ -134,7 +134,7 @@ npm run serve                       # 然后访问 http://127.0.0.1:8788/<ADMIN_
 - 名单页加人时会先算**影响预估**：这个作者当前收录了几个仓库、点应用后会少几个；**一个都没有就直说"他当前不在数据里，加名单不会有可见变化"**——避免"加了没反应"的错觉。
 - 单仓库级拉黑要写 `owner/repo`（例如 `xing-shuyin/some-noise-repo`），只剔这一个仓库，不动他名下别的项目。
 - 界面配色可切「清爽 / 粉黛」，选择记在浏览器本地。
-- 安全：口令以 scrypt 哈希存 `.env`；会话 Cookie 是 HttpOnly + SameSite=Strict；写操作要 CSRF 令牌；连错 5 次锁 10 分钟；访问日志不写后台路径。
+- 安全：口令以 scrypt 哈希存 `.env`（手工指定至少 12 位）；会话 Cookie 是 HttpOnly + SameSite=Strict；写操作要 CSRF 令牌；登录按并发上限 + 失败退避限流（**没有锁定期，正确口令始终可用**，避免被人故意输错锁死）；访问日志不写后台路径。
 
 完整说明（接口清单、锚定条件、回滚、生产安全清单）见 [docs/admin.md](docs/admin.md)。
 
@@ -152,7 +152,7 @@ npm run serve                       # 然后访问 http://127.0.0.1:8788/<ADMIN_
 ## 测试与 CI
 
 ```bash
-npm test                           # 前端 + 后端（本机实测：前端 319 项、后端 165 项）
+npm test                           # 前端 + 后端（本机实测：前端 374 项、后端 182 项）
 npm run test:js                    # 只跑前端（node:test）
 npm run test:py                    # 只跑后端（unittest）
 npm run seed:fixture               # 用 data/sample-raw.json 生成夹具数据集（npm test 会自动调用）
@@ -161,7 +161,7 @@ python3 backend/verify_parity.py   # 跨语言一致性（JS 管线 vs Python �
 
 - 数据前提：运行时产物不入库。干净克隆里 `npm test` 会先跑 `npm run seed:fixture`（走 `--from-raw`，零网络），生成一份夹具数据集。
 - 按真实规模才成立的断言：数据集不够大或样本过期时，相关用例会显式跳过并写明原因（统一判断在 `tests/helpers/dataset.mjs`）。
-- CI：`.github/workflows/ci.yml` 在每次 push 与 PR 上跑「语法自检 → 生成夹具 → `npm test`」。矩阵是 Node 22 × Python 3.9 / 3.12，与线上（Node 22.23 + Python 3.9）对齐。仓库无第三方依赖，CI 不装任何包。
+- CI：`.github/workflows/ci.yml` 在每次 push 与 PR 上跑「语法自检 → 生成夹具 → 跨语言一致性 → `npm test`」。矩阵是 Node 22 × Python 3.9 / 3.12，与线上（Node 22.23 + Python 3.9）对齐。仓库无第三方依赖，CI 不装任何包。
 
 ## 部署（pm2 + 端口 80）
 
@@ -191,7 +191,7 @@ tools/                   服务与工具：serve（静态服务 + API + 后台�
 backend/                 Python 采集器：collect.py（--once / --loop / --from-store / --from-raw /
                          --budget / --readme-budget / --releases-budget）、dsh_mesh/（github / segments /
                          classify / build / snapshot / releases / readmes / status / admin_config / config）、
-                         verify_parity.py、check_token.py、tests/（165 项后端测试）
+                         verify_parity.py、check_token.py、tests/（182 项后端测试）
 docs/                    data-contract.md、admin.md、frontend-design.md 与预览图
 ```
 
@@ -213,7 +213,7 @@ docs/                    data-contract.md、admin.md、frontend-design.md 与预
 | GET | `/api/health` | 健康检查 + 数据概况（节点数、生成时间、README 索引规模） |
 | GET | `/api/categories` | 扇区（功能分类）与细枝及各自数量 |
 | GET | `/api/repos` | 检索仓库（过滤 / 排序 / 翻页），`q` 同时匹配 README 正文；行带 `verdict` |
-| GET | `/api/search?q=&limit=` | 紧凑检索：只回命中 id 与计数 |
+| GET | `/api/search?q=&limit=` | 紧凑检索：只回命中 id 与计数；超过 limit 时 `truncated=true`，`total` 仍是真实命中数 |
 | GET | `/api/ranking?days=7&limit=50` | 两个榜单，含口径字段与数据新鲜度；行带 `verdict`，可传 `noise=hide|only` |
 | GET | `/api/review-nodes` | 在评测站有公开测评的仓库：`ids` + `byId`（各插件篇数与插件测评页 URL）。每 10 分钟同步、响应缓存 60 秒；失败沿用旧数据并标 `stale`，超过 7 天标 `expired`。注意这里的 review 指「评测站测评」，不是节点字段 `node.review` 的「待人工复核」 |
 
@@ -263,12 +263,12 @@ curl -s "$BASE/api/ranking?limit=10" | jq '.boards.updated.items[] | {id, update
 
 每个仓库带一个 `verdict`：`related`（确认相关）/ `noise`（确认噪声：与 DSH 生态无关、或挂了一堆 DSH 标签却没有任何插件线索的通用项目）/ `manual`（线索不足，待人工复核）。`/api/repos` 与 `/api/ranking` 的每一行都会带上它，默认**只标注、不过滤**——榜单的排序口径不因为噪声而改变；要过滤就显式传 `noise=hide`（或 `only`），响应里的 `noise.filter` 与 `noise.matched` 会如实说明当前口径和这批条件里一共有多少条噪声。判定规则在 `tools/relevance.mjs`（纯规则、零 AI），与前端球图的「隐藏确认噪声」是同一套结论。
 
-### 限流（所有 `/api` 共用）
+### 限流（所有接口共用，含 `/market/index.json`）
 
 - 令牌桶按 IP 计：默认 90 令牌/分钟、每秒回填 1.5 个；可用 `RATE_LIMIT_MAX` / `RATE_LIMIT_REFILL` 调。
-- 按接口权重扣：`/api/ranking` 记 5 个、卡片 SVG 记 4 个、`/api/repos` 与 `/api/categories` 记 2 个、其余 1 个。
+- 按接口权重扣：`/api/ranking` 记 5 个、卡片 SVG 记 4 个、`/api/repos` 与 `/api/categories` 记 2 个、市场索引 `/market/index.json` 记 2 个、其余 1 个。
 - 每个响应都带 `X-RateLimit-Limit` / `Remaining` / `Reset` / `Cost`；超限返回 429 + `Retry-After`（秒）。
-- 数据每小时才更新一次，响应本身有 5 分钟公共缓存，按 `Retry-After` 退避即可。
+- 数据一轮采集才更新一次（通常几十分钟到几小时），响应本身有 5 分钟公共缓存，按 `Retry-After` 退避即可。
 - 默认只信 socket 地址（`X-Forwarded-For` 可伪造）；挂了反向代理再设 `TRUST_PROXY=1`，并自行清洗该头。
 
 ### 约定与错误码
@@ -296,7 +296,7 @@ curl -s "$BASE/api/ranking?limit=10" | jq '.boards.updated.items[] | {id, update
 
 [![dsh-plugin-mesh 卡片示例（深色）](docs/card-example-dark.svg)](https://www.moc-chen.cn/)
 
-上面两张是仓库内的静态样本（随仓库版本化），点图去线上站点；真实卡片（每小时更新）见 <https://www.moc-chen.cn/api/card/WTStarMark/dsh-plugin-mesh.svg>。
+上面两张是仓库内的静态样本（随仓库版本化），点图去线上站点；真实卡片（随采集更新）见 <https://www.moc-chen.cn/api/card/WTStarMark/dsh-plugin-mesh.svg>。
 
 贴进 README：
 

@@ -46,5 +46,9 @@ jobs:
       - name: 生成夹具数据集
         run: npm run seed:fixture
 
+      # 跨语言一致性：用冻结的 JS 参照物复算 Python 构建结果（不联网、不依赖运行时产物）
+      - name: 跨语言一致性（JS 参照物 vs Python 构建）
+        run: python3 backend/verify_parity.py
+
       - name: 测试（JS + Python）
         run: npm test

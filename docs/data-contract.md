@@ -51,7 +51,7 @@
 | `archived` / `fork` | boolean | 归档与 fork 标记 |
 | `description` | string | 仅用于展示，前端一律 textContent 写入（不拼 HTML） |
 | `topics` | string[] | 仓库真实主题数组 |
-| `matchedTags` | string[] | **白名单里精确命中的标签**，至少 1 个 |
+| `matchedTags` | string[] | **白名单里精确命中的标签**；名字收录的仓库为空数组（此时 `primaryTag` 为 `dsh-*（名字收录）`） |
 | `relevance` / `noise` | number | 相关度评分（0~8）与噪声分（`1 - relevance/5`，仅展示用） |
 | `verdict` | `"related" \| "noise" \| "manual"` | **三档相关性结论**（v0.4.2）：确认相关 / 确认噪声（可一键隐藏）/ 仍需人工复核 |
 | `reason` | string | 上面那条结论的一句话原因，面板直接展示 |
