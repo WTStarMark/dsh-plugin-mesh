@@ -71,6 +71,32 @@ test("紧凑检索：README 正文命中也能搜到，并如实区分（v0.4.6�
   await rm(tmp, { recursive: true, force: true });
 });
 
+test("紧凑检索：计数不被 limit 截断（truncated 标记真实命中数）", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "mesh-api-trunc-"));
+  await mkdir(join(tmp, "data", "cache"), { recursive: true });
+  const nodes = Array.from({ length: 5 }, (_, i) => ({
+    id: "u/alpha-" + i,
+    name: "alpha-" + i,
+    owner: "u",
+    stars: 5,
+    description: "alpha 仓库",
+    topics: ["dsh-plugin"],
+    matchedTags: ["dsh-plugin"],
+    category: "tools",
+    categoryLabel: "工具命令",
+  }));
+  await writeFile(join(tmp, "data", "mesh.json"), JSON.stringify({ nodes, edges: [], clusters: [], meta: {} }));
+  const local = createApi({ root: tmp });
+  const hit = await local.searchIds(new URLSearchParams("q=alpha&limit=2"));
+  assert.equal(hit.total, 5, "total 必须是真实命中数，不能被 limit 截成 2");
+  assert.equal(hit.ids.length, 2, "id 列表仍按 limit 截断");
+  assert.equal(hit.truncated, true, "被截断时要如实标记");
+  const full = await local.searchIds(new URLSearchParams("q=alpha&limit=10"));
+  assert.equal(full.truncated, false);
+  assert.equal(full.ids.length, 5);
+  await rm(tmp, { recursive: true, force: true });
+});
+
 test("紧凑检索：采集器写的 gzip 索引（readmes.json.gz）也能读（v0.4.6 主路径）", async () => {
   const tmp = await mkdtemp(join(tmpdir(), "mesh-api-gz-"));
   await mkdir(join(tmp, "data", "cache"), { recursive: true });

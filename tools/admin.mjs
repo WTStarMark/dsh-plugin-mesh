@@ -255,27 +255,37 @@ export function createAdmin({ version, api, securityHeaders }) {
     return new Promise((resolvePromise) => {
       let size = 0;
       const chunks = [];
+      let done = false;
+      const finish = (value) => {
+        if (done) return;
+        done = true;
+        resolvePromise(value);
+      };
       req.on("data", (chunk) => {
+        if (done) return;
         size += chunk.length;
         if (size > BODY_LIMIT) {
-          resolvePromise({ error: "请求体过大" });
-          req.destroy();
+          // 不能 destroy：socket 一断，400 发不出去（客户端只会看到空响应）。丢弃剩余 body，正常回包。
+          chunks.length = 0;
+          req.resume();
+          finish({ error: "请求体过大" });
           return;
         }
         chunks.push(chunk);
       });
       req.on("end", () => {
+        if (done) return;
         const raw = Buffer.concat(chunks).toString("utf8");
-        if (!raw.trim()) return resolvePromise({ value: {} });
+        if (!raw.trim()) return finish({ value: {} });
         try {
           const value = JSON.parse(raw);
-          if (!value || typeof value !== "object" || Array.isArray(value)) return resolvePromise({ error: "请求体必须是 JSON 对象" });
-          resolvePromise({ value });
+          if (!value || typeof value !== "object" || Array.isArray(value)) return finish({ error: "请求体必须是 JSON 对象" });
+          finish({ value });
         } catch {
-          resolvePromise({ error: "请求体不是合法 JSON" });
+          finish({ error: "请求体不是合法 JSON" });
         }
       });
-      req.on("error", () => resolvePromise({ error: "读取请求体失败" }));
+      req.on("error", () => finish({ error: "读取请求体失败" }));
     });
   }
 

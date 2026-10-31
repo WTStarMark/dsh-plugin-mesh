@@ -5,7 +5,8 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { request, createServer } from "node:http";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -170,6 +171,44 @@ test("统计接口的边界与防滥用", async () => {
   assert.equal(await status("/api/ping"), 405, "GET /api/ping 应 405");
   assert.equal(await status("/api/stats", { method: "POST" }), 405, "POST /api/stats 应 405");
   assert.equal(await status("/api/secret"), 404, "未知接口应 404");
+});
+
+test("卡片分享页：内联样式有 CSP sha256 放行（否则页面无样式）", async (t) => {
+  const mesh = JSON.parse(readFileSync(resolve(ROOT, "data/mesh.json"), "utf8"));
+  const id = mesh.nodes?.[0]?.id;
+  if (!id) {
+    t.skip("没有数据，跳过");
+    return;
+  }
+  const res = await fetch(base + "/card/" + id);
+  assert.equal(res.status, 200);
+  const csp = res.headers.get("content-security-policy") ?? "";
+  const m = /style-src 'self' '(sha256-[^']+)'/.exec(csp);
+  assert.ok(m, "卡片页 CSP 应放行内联样式的 sha256：" + csp);
+  const html = await res.text();
+  const style = /<style>([\s\S]*?)<\/style>/.exec(html)?.[1];
+  assert.ok(style, "页面应有内联 <style>");
+  const hash = "sha256-" + createHash("sha256").update(style).digest("base64");
+  assert.equal(m[1], hash, "CSP 里的 hash 必须与页面内联样式逐字节匹配");
+});
+
+test("OPTIONS 预检：所有 /api 路由（含预览图）都回 204 且不扣令牌", async () => {
+  for (const path of ["/api/health", "/api/preview.svg", "/preview.svg"]) {
+    const res = await fetch(base + path, { method: "OPTIONS" });
+    assert.equal(res.status, 204, path + " 的 OPTIONS 应回 204");
+    assert.equal(res.headers.get("x-ratelimit-cost"), null, path + " 的预检不该扣令牌");
+  }
+});
+
+test("请求体超限回 413，而不是断连接让客户端拿空响应", async () => {
+  // 回归：readBody 曾在超限时先 req.destroy()，413 根本发不出去，curl 看到的是 Empty reply。
+  const res = await fetch(base + "/api/ping", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ id: "x".repeat(4096), first: true }),
+  });
+  assert.equal(res.status, 413, "超过 1KB 的请求体应回 413");
+  assert.match((await res.json()).error, /过大/);
 });
 
 test("统计文件本身绝不对外提供", async () => {

@@ -199,12 +199,34 @@ export function relativeTime(iso, now = Date.now()) {
 
 const FONT = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Microsoft YaHei',sans-serif";
 
+/** 卡片分享页的内联样式（独立常量：serve.mjs 要用它的 sha256 加进该路由的 CSP，否则浏览器会拦掉）。 */
+export const CARD_PAGE_STYLE = [
+  ":root{color-scheme:light dark}",
+  "body{margin:0;padding:32px 20px;font:15px/1.7 " + FONT + ";background:#f6f8fc;color:#1d2433}",
+  "main{max-width:820px;margin:0 auto}",
+  "h1{font-size:20px;margin:0 0 4px}h2{font-size:15px;margin:26px 0 8px;color:#5f6b80}",
+  ".row{display:flex;gap:16px;flex-wrap:wrap}",
+  "pre{background:#fff;border:1px solid #e6eaf2;border-radius:10px;padding:12px 14px;overflow:auto;font-size:12.5px}",
+  "a{color:#2f6df6}.note{color:#5f6b80;font-size:13px}",
+  "@media (prefers-color-scheme:dark){body{background:#0f1219;color:#e8ecf6}pre{background:#151823;border-color:#252a38}h2,.note{color:#98a2b8}a{color:#6aa9ff}}",
+].join("");
+
 
 /** 卡片作者头像：抓 64px PNG 内联成 data URI —— README 里卡片是 <img> 嵌的，外链图片不会加载，
  *  所以必须自包含。成功缓存 24h，失败缓存 10min（避免每次请求都等超时）。DSH_CARD_AVATAR=0 可整体关闭（测试用）。 */
 const AVATAR_TTL_MS = 24 * 3600 * 1000;
 const AVATAR_FAIL_TTL_MS = 10 * 60 * 1000;
+// 缓存上限：2.7 万作者 × 每条 3~8KB base64 能涨到上百 MB（这台机器有过 OOM 记录）。
+// 只留最近用到的 2048 条，够覆盖热门仓库；淘汰按最后写入时间，实现比 LRU 简单且够用。
+const AVATAR_CACHE_MAX = 2048;
 const avatarCache = new Map();
+
+function trimAvatarCache() {
+  if (avatarCache.size <= AVATAR_CACHE_MAX) return;
+  const excess = avatarCache.size - AVATAR_CACHE_MAX;
+  const oldest = [...avatarCache.entries()].sort((a, b) => (a[1].at ?? 0) - (b[1].at ?? 0)).slice(0, excess);
+  for (const [key] of oldest) avatarCache.delete(key);
+}
 async function fetchAvatarDataUri(owner, fetchImpl = globalThis.fetch) {
   const key = String(owner ?? "").trim().toLowerCase();
   if (!key) return null;
@@ -227,9 +249,11 @@ async function fetchAvatarDataUri(owner, fetchImpl = globalThis.fetch) {
     if (!bytes.length || bytes.length > 300 * 1024) throw new Error("bad-size");
     const uri = "data:" + type.split(";")[0] + ";base64," + bytes.toString("base64");
     avatarCache.set(key, { at: now, uri });
+    trimAvatarCache();
     return uri;
   } catch {
     avatarCache.set(key, { at: now, uri: null });
+    trimAvatarCache();
     return null;
   }
 }
@@ -1643,16 +1667,7 @@ export function createApi({ root }) {
     const base = origin + "/api/card/" + n.id + ".svg";
     const md = "[![" + n.id + "](" + base + ")](" + site + ")";
     const html = '<a href="' + site + '"><img src="' + base + '" alt="' + n.id + '" width="420" height="168"></a>';
-    const style = [
-      ":root{color-scheme:light dark}",
-      "body{margin:0;padding:32px 20px;font:15px/1.7 " + FONT + ";background:#f6f8fc;color:#1d2433}",
-      "main{max-width:820px;margin:0 auto}",
-      "h1{font-size:20px;margin:0 0 4px}h2{font-size:15px;margin:26px 0 8px;color:#5f6b80}",
-      ".row{display:flex;gap:16px;flex-wrap:wrap}",
-      "pre{background:#fff;border:1px solid #e6eaf2;border-radius:10px;padding:12px 14px;overflow:auto;font-size:12.5px}",
-      "a{color:#2f6df6}.note{color:#5f6b80;font-size:13px}",
-      "@media (prefers-color-scheme:dark){body{background:#0f1219;color:#e8ecf6}pre{background:#151823;border-color:#252a38}h2,.note{color:#98a2b8}a{color:#6aa9ff}}",
-    ].join("");
+    const style = CARD_PAGE_STYLE;
     const body = [
       "<!doctype html>",
       '<html lang="zh-CN"><head><meta charset="utf-8">',
@@ -1722,24 +1737,32 @@ export function createApi({ root }) {
     const mesh = await load();
     const q = String(params.get("q") ?? "").trim().toLowerCase();
     const cap = Math.min(2000, Math.max(1, Number(params.get("limit") ?? 500) || 500));
-    if (!q) return { q: "", total: 0, ids: [], readme: { indexed: 0, total: 0, ids: [] } };
+    if (!q) return { q: "", total: 0, ids: [], truncated: false, readme: { indexed: 0, total: 0, ids: [], truncated: false } };
     await loadReadmes();
     const viaReadme = readmeHits(q);
     const ids = [];
     const readmeIds = [];
+    // 计数必须单独累加：以前 total 直接取「返回的 id 个数」，被 cap 截断后会把 500/2000 当成真实命中数。
+    let total = 0;
+    let readmeTotal = 0;
     for (const n of mesh.nodes ?? []) {
       const hay = [n.id, n.description, (n.topics ?? []).join(" "), (n.matchedTags ?? []).join(" ")].join(" ").toLowerCase();
       const local = hay.includes(q);
       const readme = viaReadme.has(n.id);
       if (!local && !readme) continue;
+      total += 1;
       if (ids.length < cap) ids.push(n.id);
-      if (readme && readmeIds.length < cap) readmeIds.push(n.id);
+      if (readme) {
+        readmeTotal += 1;
+        if (readmeIds.length < cap) readmeIds.push(n.id);
+      }
     }
     return {
       q,
-      total: ids.length < cap ? ids.length : ids.length,
+      total,
       ids,
-      readme: { indexed: readmeCache.indexed, total: readmeIds.length, ids: readmeIds },
+      truncated: total > ids.length,
+      readme: { indexed: readmeCache.indexed, total: readmeTotal, ids: readmeIds, truncated: readmeTotal > readmeIds.length },
     };
   }
 
@@ -1876,7 +1899,7 @@ export function apiIndex(version) {
       { method: "GET", path: "/api/npm-nodes", desc: "有 npm 包的仓库 id 列表（与市场索引源重叠的那批，供生态图画外圈光环用）；只回 id，不回数字" },
       { method: "GET", path: "/api/review-nodes", desc: "在评测站（review.lingshulab.com）有公开测评的仓库：ids + byId（各插件篇数与插件测评页 URL）。数据来自评测站公开接口，每 10 分钟同步、响应缓存 60 秒；失败沿用旧数据并标 stale，超过 7 天标 expired（前端隐藏光环）。注意：这里的 review 是「评测站测评」，不是节点字段 node.review 的「待人工复核」" },
       { method: "GET", path: "/api/repos?q=&category=&subcategory=&tag=&language=&minStars=&archived=&noise=&sort=stars|pushed|created|name&limit=&offset=&fields=all", desc: "检索仓库（默认 20 条，最多 100 条）。行带 verdict；noise=hide|only 按三档判定过滤，默认 all 只标注" },
-      { method: "GET", path: "/api/search?q=&limit=", desc: "紧凑检索：只回命中 id 与计数（含 README 正文命中）" },
+      { method: "GET", path: "/api/search?q=&limit=", desc: "紧凑检索：只回命中 id 与计数（含 README 正文命中）；超过 limit 时 truncated=true，total 仍是真实命中数" },
       { method: "GET", path: "/api/repos/:owner/:name", desc: "单个仓库详情，含同作者/主题共现连线" },
       { method: "GET", path: "/preview.svg?theme=dark|light&size=&sample=", desc: "README 预览图：按当前数据实时渲染的生态图；不带参数时 size=1400、sample=6000（也可走 /api/preview.svg）" },
       { method: "GET", path: "/api/card/:owner/:name.svg?theme=light|dark&link=", desc: "可分享的 SVG 卡片" },

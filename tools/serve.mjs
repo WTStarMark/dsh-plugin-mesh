@@ -21,7 +21,7 @@ import { promisify } from "node:util";
 // 同步压缩会把单线程服务整个卡住（details 分片 250KB 用 q11 要 ~0.5-1s，期间连 /api/status 都在排队，表现就是「页面卡一下」）；改用异步版，压缩跑在 libuv 线程池里。
 const brotliAsync = promisify(brotliCompress);
 import { networkInterfaces } from "node:os";
-import { createApi, apiIndex, validNamePart } from "./api.mjs";
+import { createApi, apiIndex, CARD_PAGE_STYLE, validNamePart } from "./api.mjs";
 import { renderPreviewSvg, sceneFromCore } from "./preview-svg.mjs";
 import { createAdmin } from "./admin.mjs";
 import { loadAdminConfig, loadManifesto, clusterPublic, selfNodeId, readEnv } from "./admin-config.mjs";
@@ -180,6 +180,7 @@ function apiCost(pathname) {
   if (pathname.startsWith("/api/card/")) return 4;
   if (pathname === "/api/preview.svg") return 3;
   if (pathname === "/api/static-large") return 3;
+  if (pathname === "/market/index.json") return 2;
   if (pathname === "/api/repos" || pathname === "/api/categories") return 2;
   return 1;
 }
@@ -527,6 +528,12 @@ async function previewSvg(theme, size, sample) {
 }
 
 async function handlePreview(req, res, method, url) {
+  // 两个入口（/preview.svg 与 /api/preview.svg）都要按 API 约定回 OPTIONS 204，不扣令牌。
+  if (method === "OPTIONS") {
+    res.writeHead(204, { ...CORS, ...SECURITY_HEADERS });
+    res.end();
+    return;
+  }
   if (method !== "GET" && method !== "HEAD") {
     deny(res, 405, "405 只允许 GET / HEAD");
     return;
@@ -578,68 +585,69 @@ function sendSvg(res, svg, code = 200, extra = {}) {
   res.end(body);
 }
 
-function sendHtml(res, html, code = 200) {
-  const body = Buffer.from(html);
-  res.writeHead(code, {
-    "content-type": "text/html; charset=utf-8",
-    "content-length": body.length,
-    ...API_CACHE,
-    ...CORS,
-    ...SECURITY_HEADERS,
-  });
-  res.end(body);
-}
-
 function readBody(req, limit = 1024) {
   return new Promise((resolve) => {
     let size = 0;
     const chunks = [];
-    req.on("data", (chunk) => {
+    let done = false;
+    const finish = (value) => {
+      if (done) return;
+      done = true;
+      req.removeListener("data", onData);
+      resolve(value);
+    };
+    const onData = (chunk) => {
+      if (done) return;
       size += chunk.length;
       if (size > limit) {
-        resolve(null);
-        req.destroy();
+        // 不能在这里 req.destroy()：socket 一断，413 根本发不出去，客户端只会看到 Empty reply。
+        // 把剩余请求体读掉（丢弃），让调用方正常回 413。
+        chunks.length = 0;
+        req.resume();
+        finish(null);
         return;
       }
       chunks.push(chunk);
-    });
-    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
-    req.on("error", () => resolve(null));
+    };
+    req.on("data", onData);
+    req.on("end", () => finish(Buffer.concat(chunks).toString("utf8")));
+    req.on("error", () => finish(null));
   });
 }
 
 async function handleApi(req, res, method, pathname, url) {
-  // 预检（OPTIONS）不扣令牌：它只是浏览器问一句能不能跨域
-  if (method !== "OPTIONS") {
-    const gate = takeToken(req, pathname);
-    for (const [key, value] of Object.entries(gate.headers)) res.setHeader(key, value);
-    if (!gate.ok) {
-      sendJson(
-        res,
-        {
-          error: "请求过于频繁",
-          retryAfter: Number(gate.headers["retry-after"]),
-          cost: Number(gate.headers["x-ratelimit-cost"]),
-          hint: "重接口（/api/ranking 记 5 个令牌）请按 Retry-After 退避；数据本身 5 分钟缓存，不必高频拉",
-        },
-        429,
-        CORS,
-      );
-      return;
-    }
-  }
+  // 预检（OPTIONS）不扣令牌，且必须排在预览图分支之前：预览图路由自己也要回 204，
+  // 否则浏览器对 /api/preview.svg 的预检会拿到 405（核验时发现的回归）。
   if (method === "OPTIONS") {
     res.writeHead(204, { ...CORS, ...SECURITY_HEADERS });
     res.end();
     return;
   }
+  // 预览图有自己的限流与缓存（handlePreview 内部 takeToken 一次），这里直接交给它。
+  // 以前先过通用闸门、再进 handlePreview，同一请求扣两次令牌（实际成本 6，文档写的是 3）。
+  if (pathname === "/api/preview.svg") {
+    await handlePreview(req, res, method, url);
+    return;
+  }
+  const gate = takeToken(req, pathname);
+  for (const [key, value] of Object.entries(gate.headers)) res.setHeader(key, value);
+  if (!gate.ok) {
+    sendJson(
+      res,
+      {
+        error: "请求过于频繁",
+        retryAfter: Number(gate.headers["retry-after"]),
+        cost: Number(gate.headers["x-ratelimit-cost"]),
+        hint: "重接口（/api/ranking 记 5 个令牌）请按 Retry-After 退避；数据本身 5 分钟缓存，不必高频拉",
+      },
+      429,
+      CORS,
+    );
+    return;
+  }
   // 查询接口一律只读：除访问统计的 /api/ping（POST）外，写方法全部拒绝
   if (pathname !== "/api/ping" && method !== "GET" && method !== "HEAD") {
     sendJson(res, { error: "只读接口，只允许 GET / HEAD" }, 405, CORS);
-    return;
-  }
-  if (pathname === "/api/preview.svg") {
-    await handlePreview(req, res, method, url);
     return;
   }
   if (pathname === "/api") {
@@ -762,7 +770,7 @@ async function handleApi(req, res, method, pathname, url) {
     }
     const raw = await readBody(req);
     if (raw === null) {
-      sendJson(res, { error: "请求体过大" }, 413);
+      sendJson(res, { error: "请求体过大" }, 413, { ...CORS, connection: "close" });
       return;
     }
     let payload;
@@ -808,6 +816,16 @@ const SECURITY_HEADERS = {
 function deny(res, code, reason) {
   res.writeHead(code, { "content-type": "text/plain; charset=utf-8", ...SECURITY_HEADERS }).end(reason);
 }
+
+/** 卡片分享页有内联样式：给这条路由的 CSP 加 sha256（全局 CSP 仍是 style-src 'self'，不放开 unsafe-inline）。 */
+const CARD_STYLE_HASH = "sha256-" + createHash("sha256").update(CARD_PAGE_STYLE).digest("base64");
+const CARD_SECURITY_HEADERS = {
+  ...SECURITY_HEADERS,
+  "content-security-policy": SECURITY_HEADERS["content-security-policy"].replace(
+    "style-src 'self'",
+    "style-src 'self' '" + CARD_STYLE_HASH + "'",
+  ),
+};
 
 /** 管理后台：与站点同进程、同端口，不额外起服务也不额外占端口；路由前缀是 .env 里的 ADMIN_PATH（部署时由 tools/admin-setup.mjs 生成的 32 位随机串），没配置就整体关闭 —— 绝不留一个默认可猜的后台入口。 */
 const admin = createAdmin({ version: VERSION, api, securityHeaders: SECURITY_HEADERS });
@@ -878,21 +896,62 @@ async function handleRequest(req, res) {
    * 它给另一台机器上的 DSH「发现」标签页读取，不是本站页面资源，所以不进静态白名单、单独一条路由；
    * 跨机取用必须带 CORS，且不能跟着页面的 300 秒静态缓存走（改完索引要马上生效）。 */
   if (pathname === "/market/index.json") {
+    if (method === "OPTIONS") {
+      res.writeHead(204, { ...CORS, ...SECURITY_HEADERS });
+      res.end();
+      return;
+    }
     if (method !== "GET" && method !== "HEAD") {
       deny(res, 405, "405 只允许 GET / HEAD");
       return;
     }
+    // 这个接口对外公开、线上索引 5.6MB，每次响应都要 Brotli 压缩（CPU 活）。
+    // 以前既不限流也不缓存压缩结果：10~20 rps 就能把单线程服务压到喘不过气。
+    // 现在跟其它重接口一样扣令牌（成本 2），并按「文件内容 + 编码」缓存压缩产物。
+    const gate = takeToken(req, pathname);
+    for (const [key, value] of Object.entries(gate.headers)) res.setHeader(key, value);
+    if (!gate.ok) {
+      deny(res, 429, "429 请求过于频繁，请按 Retry-After 退避");
+      return;
+    }
     try {
       const raw = await readFile(join(ROOT, "dist", "market", "index.json"));
+      const etag = '"' + createHash("sha1").update(raw).digest("hex").slice(0, 20) + '"';
+      if (req.headers["if-none-match"] === etag) {
+        res.writeHead(304, {
+          etag,
+          "cache-control": "public, max-age=300",
+          "access-control-allow-origin": "*",
+          ...SECURITY_HEADERS,
+        });
+        res.end();
+        return;
+      }
       /* 必须压缩：索引有几 MB，而读它的 DSH 默认 15 秒超时（pluginMarket.fetchTimeoutMs）。
        * 线上实测：不压缩走公网 30 秒只下到 3.4MB/5.6MB —— 那边会直接判超时。Brotli 后约十分之一。 */
-      // 复用现成的协商压缩（encodeJson 就是为这类 JSON 写的；自己伸手调 brotliCompress 会踩"没有 callback"的坑）
-      const { payload: body, encoding } = await encodeJson(req, raw);
+      const accept = String(req.headers["accept-encoding"] ?? "");
+      let body = raw;
+      let encoding = null;
+      if (/\bbr\b/.test(accept)) {
+        encoding = "br";
+        body =
+          compressCacheGet(pathname, etag, "br") ??
+          compressCachePut(
+            pathname,
+            etag,
+            "br",
+            await brotliAsync(raw, { params: { [constants.BROTLI_PARAM_QUALITY]: 5, [constants.BROTLI_PARAM_SIZE_HINT]: raw.length } }),
+          );
+      } else if (/\bgzip\b/.test(accept)) {
+        encoding = "gzip";
+        body = compressCacheGet(pathname, etag, "gzip") ?? compressCachePut(pathname, etag, "gzip", gzipSync(raw));
+      }
       res.writeHead(200, {
         "content-type": "application/json; charset=utf-8",
         "access-control-allow-origin": "*",
         "cache-control": "public, max-age=300",
         "content-length": body.length,
+        etag,
         "vary": "accept-encoding",
         ...(encoding ? { "content-encoding": encoding } : {}),
       });
@@ -946,7 +1005,7 @@ async function handleRequest(req, res) {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "public, max-age=300",
       ...CORS,
-      ...SECURITY_HEADERS,
+      ...CARD_SECURITY_HEADERS,
     });
     res.end(html);
     return;
