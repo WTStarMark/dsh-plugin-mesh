@@ -431,6 +431,33 @@ function compressCachePut(pathname, etag, encoding, payload) {
   return payload;
 }
 
+/** 市场索引预压缩文件缓存：构建时已生成 index.json.gz/.br，运行时直发文件；按 index.json 的 mtime 失效。 */
+const marketIndexCache = { mtimeMs: -1, etag: null, rawBytes: 0, gzip: null, br: null };
+async function loadMarketIndex() {
+  const file = join(ROOT, "dist", "market", "index.json");
+  const info = await stat(file);
+  if (marketIndexCache.mtimeMs !== info.mtimeMs) {
+    const raw = await readFile(file);
+    marketIndexCache.mtimeMs = info.mtimeMs;
+    marketIndexCache.rawBytes = raw.length;
+    marketIndexCache.etag = '"' + createHash("sha1").update(raw).digest("hex").slice(0, 20) + '"';
+    marketIndexCache.gzip = null;
+    marketIndexCache.br = null;
+  }
+  return { file, info, cache: marketIndexCache };
+}
+
+/** 取预压缩产物：必须比 index.json 新。后台发布/回滚可能留下旧压缩件，绝不能发陈旧内容。 */
+async function marketPacked(file, info, encoding) {
+  if (marketIndexCache[encoding]) return marketIndexCache[encoding];
+  const path = file + (encoding === "br" ? ".br" : ".gz");
+  const packedInfo = await stat(path).catch(() => null);
+  if (!packedInfo || packedInfo.mtimeMs + 1 < info.mtimeMs) return null;
+  const buf = await readFile(path);
+  marketIndexCache[encoding] = buf;
+  return buf;
+}
+
 /** API JSON 也走协商压缩（榜单 200 行 ≈ 450KB，Brotli q5 后 ~84KB、本机实测 8ms）；动态响应不挂 compressCache —— 那份缓存是给大静态文件用的。 */
 async function encodeJson(req, body) {
   const accept = String(req.headers["accept-encoding"] ?? "");
@@ -915,8 +942,8 @@ async function handleRequest(req, res) {
       return;
     }
     try {
-      const raw = await readFile(join(ROOT, "dist", "market", "index.json"));
-      const etag = '"' + createHash("sha1").update(raw).digest("hex").slice(0, 20) + '"';
+      const { file, info, cache } = await loadMarketIndex();
+      const etag = cache.etag;
       if (req.headers["if-none-match"] === etag) {
         res.writeHead(304, {
           etag,
@@ -927,24 +954,46 @@ async function handleRequest(req, res) {
         res.end();
         return;
       }
-      /* 必须压缩：索引有几 MB，而读它的 DSH 默认 15 秒超时（pluginMarket.fetchTimeoutMs）。
-       * 线上实测：不压缩走公网 30 秒只下到 3.4MB/5.6MB —— 那边会直接判超时。Brotli 后约十分之一。 */
+      /* 必须压缩：原始索引 ~10.7MB，而读它的 DSH 默认 15 秒超时（pluginMarket.fetchTimeoutMs）。
+       * 构建时已生成 .gz/.br，这里优先直发预压缩文件；老部署或后台回滚后没有压缩件时才回落运行时压缩。 */
       const accept = String(req.headers["accept-encoding"] ?? "");
-      let body = raw;
+      const wantsBr = /\bbr\b/.test(accept);
+      const wantsGzip = /\bgzip\b/.test(accept);
+      let body = null;
       let encoding = null;
-      if (/\bbr\b/.test(accept)) {
-        encoding = "br";
-        body =
-          compressCacheGet(pathname, etag, "br") ??
-          compressCachePut(
-            pathname,
-            etag,
-            "br",
-            await brotliAsync(raw, { params: { [constants.BROTLI_PARAM_QUALITY]: 5, [constants.BROTLI_PARAM_SIZE_HINT]: raw.length } }),
-          );
-      } else if (/\bgzip\b/.test(accept)) {
-        encoding = "gzip";
-        body = compressCacheGet(pathname, etag, "gzip") ?? compressCachePut(pathname, etag, "gzip", gzipSync(raw));
+      let precompressed = false;
+      if (wantsBr) {
+        body = await marketPacked(file, info, "br");
+        if (body) {
+          encoding = "br";
+          precompressed = true;
+        }
+      }
+      if (!body && wantsGzip) {
+        body = await marketPacked(file, info, "gzip");
+        if (body) {
+          encoding = "gzip";
+          precompressed = true;
+        }
+      }
+      if (!body) {
+        const raw = await readFile(file);
+        if (wantsBr) {
+          encoding = "br";
+          body =
+            compressCacheGet(pathname, etag, "br") ??
+            compressCachePut(
+              pathname,
+              etag,
+              "br",
+              await brotliAsync(raw, { params: { [constants.BROTLI_PARAM_QUALITY]: 5, [constants.BROTLI_PARAM_SIZE_HINT]: raw.length } }),
+            );
+        } else if (wantsGzip) {
+          encoding = "gzip";
+          body = compressCacheGet(pathname, etag, "gzip") ?? compressCachePut(pathname, etag, "gzip", gzipSync(raw));
+        } else {
+          body = raw;
+        }
       }
       res.writeHead(200, {
         "content-type": "application/json; charset=utf-8",
@@ -956,7 +1005,10 @@ async function handleRequest(req, res) {
         ...(encoding ? { "content-encoding": encoding } : {}),
       });
       res.end(method === "HEAD" ? undefined : body);
-      console.log(method + " /market/index.json (" + raw.length + "B → " + body.length + "B" + (encoding ? " " + encoding : " 未压缩") + ")");
+      console.log(
+        method + " /market/index.json (" + cache.rawBytes + "B → " + body.length + "B"
+        + (encoding ? " " + encoding : " 未压缩") + (precompressed ? " 预压缩" : encoding ? " 运行时压缩" : "") + ")",
+      );
     } catch {
       sendJson(res, { error: "还没有生成索引：先跑 node tools/market-index.mjs" }, 404, CORS);
       console.log("404 /market/index.json (未生成)");

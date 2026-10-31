@@ -1,12 +1,12 @@
 /**
  * 公开重接口的两个回归：
- *   ① /market/index.json 以前不限流、也不缓存压缩结果（每次请求都重压 5.6MB），现在要带限流头 + ETag/304；
+ *   ① /market/index.json 以前不限流、也不缓存压缩结果（每次请求都重压 ~10.7MB），现在带限流头 + ETag/304，并优先直发预压缩文件；
  *   ② /api/preview.svg 与 /preview.svg 必须只扣一次令牌（以前走通用闸门 + handlePreview 各扣一次，成本 6）。
  */
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -53,6 +53,28 @@ test("市场索引：OPTIONS 预检回 204", async () => {
   const res = await fetch(base + "/market/index.json", { method: "OPTIONS" });
   assert.equal(res.status, 204);
   assert.equal(res.headers.get("access-control-allow-origin"), "*");
+});
+
+test("市场索引：优先直发预压缩文件（br/gzip），identity 回原文", async (t) => {
+  const dir = resolve(ROOT, "dist", "market");
+  const brPath = join(dir, "index.json.br");
+  const gzPath = join(dir, "index.json.gz");
+  if (!existsSync(brPath) || !existsSync(gzPath)) {
+    t.skip("没有预压缩文件（CI 干净克隆 / 还没跑构建）");
+    return;
+  }
+  const rawSize = statSync(join(dir, "index.json")).size;
+  const br = await fetch(base + "/market/index.json", { headers: { "accept-encoding": "br" } });
+  assert.equal(br.status, 200);
+  assert.equal(br.headers.get("content-encoding"), "br");
+  assert.equal(Number(br.headers.get("content-length")), statSync(brPath).size, "应直发预压缩 .br，而不是运行时重压");
+  assert.ok(statSync(brPath).size < rawSize, "预压缩件必须比原文小");
+  const gz = await fetch(base + "/market/index.json", { headers: { "accept-encoding": "gzip" } });
+  assert.equal(gz.headers.get("content-encoding"), "gzip");
+  assert.equal(Number(gz.headers.get("content-length")), statSync(gzPath).size, "应直发预压缩 .gz");
+  const raw = await fetch(base + "/market/index.json", { headers: { "accept-encoding": "identity" } });
+  assert.equal(raw.headers.get("content-encoding"), null);
+  assert.equal(Number(raw.headers.get("content-length")), rawSize, "不支持压缩的客户端拿原文");
 });
 
 test("市场索引：带限流头与 ETag，支持 304", async (t) => {
