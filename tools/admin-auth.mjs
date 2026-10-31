@@ -18,9 +18,10 @@ export const COOKIE_NAME = "mesh_admin";
 export const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const MAX_SESSIONS = 200;
 const LOCK_AFTER_FAILS = 5;
-const LOCK_MS = 10 * 60 * 1000;
-const LOGIN_WINDOW_MS = 60_000;
-const LOGIN_GLOBAL_MAX = 30;
+// 同时进行的 scrypt 校验上限。它保护的是 CPU，不是"每分钟次数"：
+// 旧写法用「60 秒内全局 30 次」的时间窗口，会把正确口令也一起拒掉 ——
+// 知道后台路径的人只要持续发 30 次/分钟，就能把管理员永久锁在门外。
+const MAX_INFLIGHT = 4;
 
 const b64 = (buf) => Buffer.from(buf).toString("base64url");
 
@@ -68,8 +69,8 @@ export function parseCookies(header) {
 
 export function createAuth({ secret, basePath, now = () => Date.now() }) {
   const sessions = new Map(); // sid -> { csrf, expiresAt, ip }
-  const failures = new Map(); // ip -> { fails, until }
-  let loginWindow = { at: 0, count: 0 };
+  const failures = new Map(); // ip -> { fails, at }
+  let inflight = 0; // 正在跑 scrypt 的登录请求数
 
   const prune = () => {
     const t = now();
@@ -100,26 +101,30 @@ export function createAuth({ secret, basePath, now = () => Date.now() }) {
      * 现在：口令正确一律放行；只有"失败"这条路径才被延迟与限流惩罚。
      */
     async login(password, ip) {
-      const t = now();
-      // 全局闸门：挡住"拿登录接口烧 CPU"的洪流（scrypt 是有成本的）
-      if (t - loginWindow.at > LOGIN_WINDOW_MS) loginWindow = { at: t, count: 0 };
-      loginWindow.count += 1;
-      if (loginWindow.count > LOGIN_GLOBAL_MAX) {
-        return { ok: false, reason: "busy", retryAfter: Math.max(1, Math.ceil((LOGIN_WINDOW_MS - (t - loginWindow.at)) / 1000)) };
-      }
       if (!secret) return { ok: false, reason: "disabled" };
-
-      const ok = await verifyPassword(password, secret);
+      // 并发闸门：只拒绝"同一瞬间挤进来"的请求，不做时间窗口。
+      // 口令校验（scrypt）有 CPU 成本，所以限并发；但正确口令永远不会被时间窗口锁死。
+      if (inflight >= MAX_INFLIGHT) return { ok: false, reason: "busy", retryAfter: 2 };
+      inflight += 1;
+      let ok = false;
+      try {
+        ok = await verifyPassword(password, secret);
+      } finally {
+        inflight -= 1; // 校验一结束就放槽位，后面的退避延迟不占并发
+      }
       if (!ok) {
+        const t = now();
         const fails = (failures.get(ip)?.fails ?? 0) + 1;
         failures.set(ip, { fails, at: t });
-        // 失败越多回得越慢：把暴力破解的吞吐压到没有意义（口令是随机 16 位，本来也猜不出来）
-        await new Promise((done) => setTimeout(done, Math.min(1000, 150 * fails)).unref?.());
+        prune(); // 失败也要清理过期条目：只靠成功登录清理的话，持续攻击会让这张表一直涨
+        // 失败越多回得越慢：把暴力破解的吞吐压到没有意义（默认口令是随机 16 位，本来也猜不出来）
+        await new Promise((done) => setTimeout(done, Math.min(1000, 150 * fails)));
         if (fails >= LOCK_AFTER_FAILS) {
           return { ok: false, reason: "locked", retryAfter: Math.min(60, 5 * (fails - LOCK_AFTER_FAILS + 1)) };
         }
         return { ok: false, reason: "bad", remaining: Math.max(0, LOCK_AFTER_FAILS - fails) };
       }
+      const t = now();
       failures.delete(ip);
       prune();
       const sid = b64(randomBytes(24));
@@ -146,6 +151,11 @@ export function createAuth({ secret, basePath, now = () => Date.now() }) {
     },
     cookieHeader,
     clearCookie,
-    stats: () => ({ sessions: sessions.size, locked: [...failures.values()].filter((f) => f.until > now()).length }),
+    stats: () => ({
+      sessions: sessions.size,
+      inflight,
+      // 达到退避阈值的 IP 数（旧实现查 f.until，但这个字段从来没被赋过值，永远报 0）
+      locked: [...failures.values()].filter((f) => (f.fails ?? 0) >= LOCK_AFTER_FAILS).length,
+    }),
   };
 }

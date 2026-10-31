@@ -81,6 +81,11 @@ if (!existingPath) lines.push(["ADMIN_PATH", path]);
 // 凭据这种键必须就地覆盖：同名只留一条。
 if (!flag("path-only") && (flag("force-password") || !env.ADMIN_PASSWORD_HASH)) {
   plainPassword = argOf("password") ?? randomString(16);
+  // 后台只有口令这一道锁（路径本身也是秘密）：手工指定的口令至少 12 位，别让弱口令把限流当摆设。
+  if (String(plainPassword).length < 12) {
+    console.error("口令太短：至少 12 位（随机生成的是 16 位）。后台路径泄露时，口令是唯一防线。");
+    process.exit(2);
+  }
   lines.push(["ADMIN_PASSWORD_HASH", await hashPassword(plainPassword)]);
 }
 
