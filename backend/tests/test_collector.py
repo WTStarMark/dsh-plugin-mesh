@@ -34,7 +34,7 @@ from dsh_mesh import build as build_mod  # noqa: E402
 from dsh_mesh.classify import apply_categories, classify_node  # noqa: E402
 from dsh_mesh.config import HUB_ID, ROOT, SAMPLE_MESH, SAMPLE_RAW, WHITELIST_TAGS  # noqa: E402
 from dsh_mesh.github import GitHubClient, load_token  # noqa: E402
-from collect import seconds_until_next, core_floor  # noqa: E402
+from collect import count_explained_missing, seconds_until_next, core_floor  # noqa: E402
 
 TMP = Path(__file__).resolve().parent / ".tmp"
 
@@ -2055,6 +2055,169 @@ class InclusionAndDirectionTest(unittest.TestCase):
         mesh = build_mesh(raws, {})
         owner = [(e["source"], e["target"]) for e in mesh["edges"] if e["type"] == "owner"]
         self.assertEqual(owner, [("alice/a-repo", "alice/b-repo")], "对等关系仍按字母序归一化（去重靠它）")
+
+
+class WhitelistScopeTest(unittest.TestCase):
+    """后台白名单必须同时作用于「抓取」与「构建」：新增 / 删除 / 别名三种场景。
+
+    回归：build_mesh 曾经只认内置 6 个标签，后台加标签只改了抓取，新仓库抓回来又被构图丢掉；
+    后台删标签则完全无效。见 docs/admin.md 的 FAQ。
+    """
+
+    def test_custom_whitelist_tag_is_indexed(self):
+        repo = fake_repo("alice", "foo-plugin", stars=5, topics=("dsh-theme",))
+        mesh = build_mesh([repo], {}, whitelist_tags=["dsh", "dsh-theme"])
+        self.assertIn("alice/foo-plugin", [n["id"] for n in mesh["nodes"]], "后台新增的标签必须能进图")
+        self.assertIn("dsh-theme", [t["id"] for t in mesh["tags"]], "契约里的标签清单也要跟着生效白名单走")
+
+    def test_default_whitelist_still_drops_custom_tag(self):
+        repo = fake_repo("alice", "foo-plugin", stars=5, topics=("dsh-theme",))
+        mesh = build_mesh([repo], {})
+        self.assertNotIn("alice/foo-plugin", [n["id"] for n in mesh["nodes"]])
+        self.assertEqual(mesh["meta"]["notMatchedSkipped"], 1, "被白名单挡掉的仓库要如实记账（缩水保护要用）")
+
+    def test_removed_tag_stops_being_indexed(self):
+        repo = fake_repo("alice", "foo-plugin", stars=5, topics=("dsh",))
+        mesh = build_mesh([repo], {}, whitelist_tags=["dsh-theme"])
+        self.assertNotIn("alice/foo-plugin", [n["id"] for n in mesh["nodes"]], "后台删掉的标签必须不再收录")
+
+    def test_alias_under_custom_tag_is_matched(self):
+        repo = fake_repo("alice", "foo-plugin", stars=5, topics=("awesome-theme",))
+        aliases = [{"tag": "dsh-theme", "aliases": ["awesome-theme"]}]
+        mesh = build_mesh([repo], {}, whitelist_tags=["dsh", "dsh-theme"], whitelist_aliases=aliases)
+        self.assertIn("alice/foo-plugin", [n["id"] for n in mesh["nodes"]], "自定义标签下的别名也要能命中")
+
+
+class SegmentPruneTest(unittest.TestCase):
+    """删白名单标签后，旧标签的分段必须从队列里清掉，否则会一直吃刷新预算。"""
+
+    def setUp(self):
+        shutil.rmtree(TMP, ignore_errors=True)
+        TMP.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self):
+        shutil.rmtree(TMP, ignore_errors=True)
+
+    def _store(self, tags):
+        from dsh_mesh.segments import SegmentStore, seed_segments
+
+        store = SegmentStore(TMP / "segments.json", TMP / "repos.json")
+        store.state["segments"] = {s["key"]: dict(s, state="pending") for s in seed_segments(tags)}
+        return store
+
+    def test_prune_topics_removes_removed_tags_but_keeps_name_sources(self):
+        from dsh_mesh.segments import NAME_SOURCES
+
+        store = self._store(["dsh", "old-tag"])
+        before = len(store.state["segments"])
+        pruned = store.prune_topics(["dsh"])
+        self.assertGreater(pruned, 0)
+        topics = {s["topic"] for s in store.state["segments"].values()}
+        self.assertEqual(topics, {"dsh", *NAME_SOURCES}, "名字收录源不能被清掉")
+        self.assertEqual(len(store.state["segments"]), before - pruned)
+
+    def test_empty_tags_does_not_wipe_queue(self):
+        store = self._store(["dsh"])
+        before = len(store.state["segments"])
+        self.assertEqual(store.prune_topics([]), 0, "配置读不到时不能把队列清空")
+        self.assertEqual(len(store.state["segments"]), before)
+
+
+class ShrinkExplanationTest(unittest.TestCase):
+    """缩水保护要能解释「白名单删标签 / 黑名单 / 改名」造成的减少，否则后台删标签永远被拒。"""
+
+    def test_known_reasons_are_explained_unknown_is_not(self):
+        prev = {
+            "nodes": [
+                {"id": "a/one", "topics": ["dsh"]},      # 作者黑名单
+                {"id": "b/two", "topics": ["dsh"]},      # 单仓库黑名单
+                {"id": "c/old", "topics": ["dsh"]},      # 改名
+                {"id": "d/three", "topics": ["old-tag"]},  # 白名单删标签
+                {"id": "e/four", "topics": ["dsh"]},     # 说不出的减少（数据故障）
+            ]
+        }
+        cur = {"nodes": [{"id": "c/new"}, {"id": "x/keep"}]}
+        explained = count_explained_missing(
+            prev,
+            cur,
+            blacklist={"a"},
+            blacklist_repos={"b/two"},
+            whitelist_tags=["dsh"],
+            aliases={"c/old": "c/new"},
+        )
+        self.assertEqual(explained, 4, "a/b/c/d 四个能解释，e/four 不能")
+        self.assertEqual(count_explained_missing(None, cur), 0, "没有上一份数据时不解释")
+
+    def test_renamed_node_not_double_counted_when_still_present(self):
+        prev = {"nodes": [{"id": "c/old", "topics": ["dsh"]}]}
+        cur = {"nodes": [{"id": "c/new", "topics": ["dsh"]}]}
+        self.assertEqual(count_explained_missing(prev, cur, aliases={"c/old": "c/new"}), 1)
+
+
+class CollectWiringTest(unittest.TestCase):
+    """collect.run_once 必须把「本轮生效白名单」传给构建层（后台改标签才能真正生效）。"""
+
+    def test_run_once_passes_effective_whitelist_to_build(self):
+        import collect
+
+        captured = {}
+        real_build = collect.build_mesh
+
+        def spy(raws, totals, **kwargs):
+            captured.update(kwargs)
+            return real_build(raws, totals, **kwargs)
+
+        args = argparse.Namespace(
+            dry_run=True,
+            from_raw=True,
+            from_store=False,
+            tags=["dsh", "dsh-theme"],
+            interval=3600,
+            budget=0,
+            collector=None,
+            collector_source=None,
+        )
+        with mock.patch.object(collect, "build_mesh", spy):
+            summary = collect.run_once(args, lambda *a, **k: None)
+        self.assertEqual(captured.get("whitelist_tags"), ["dsh", "dsh-theme"], "run_once 必须把生效白名单传给 build_mesh")
+        self.assertEqual(summary.get("mode"), "from-raw")
+        self.assertTrue(summary.get("dryRun"), "dry-run 不应写盘")
+
+
+class HeartbeatTest(unittest.TestCase):
+    """长耗时阶段的心跳：后台靠 status.updatedAt 判活，心跳必须真的刷新它，且失败不能打断采集。"""
+
+    def setUp(self):
+        import collect
+
+        shutil.rmtree(TMP, ignore_errors=True)
+        TMP.mkdir(parents=True, exist_ok=True)
+        self.collect = collect
+        self._old_status = collect.STATUS_FILE
+        self.path = TMP / "status.json"
+        collect.STATUS_FILE = self.path
+
+    def tearDown(self):
+        self.collect.STATUS_FILE = self._old_status
+        shutil.rmtree(TMP, ignore_errors=True)
+
+    def test_heartbeat_refreshes_updated_at_and_keeps_state(self):
+        self.collect._write_status(state="precomputing", phase="precompute")
+        first = json.loads(self.path.read_text(encoding="utf-8"))["updatedAt"]
+        time.sleep(1.1)  # updatedAt 是秒级时间戳，必须跨过一秒
+        with self.collect._heartbeat(interval=0.05, phase="precompute"):
+            time.sleep(0.3)
+        data = json.loads(self.path.read_text(encoding="utf-8"))
+        self.assertEqual(data["state"], "precomputing", "心跳不能把 state 写丢")
+        self.assertEqual(data["phase"], "precompute")
+        self.assertNotEqual(data["updatedAt"], first, "心跳必须刷新 updatedAt（否则后台仍会判死）")
+
+    def test_heartbeat_write_failure_is_swallowed(self):
+        blocker = TMP / "blocker"
+        blocker.write_text("x", encoding="utf-8")
+        self.collect.STATUS_FILE = blocker / "status.json"  # 父路径是文件 → 写入必失败
+        with self.collect._heartbeat(interval=0.05, phase="precompute"):
+            time.sleep(0.2)  # 不抛异常即通过
 
 
 class StarDailyTest(unittest.TestCase):

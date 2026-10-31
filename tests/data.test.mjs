@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { skipUnless, hasRealDataset } from "./helpers/dataset.mjs";
+import { loadAdminConfig, whitelistTagsOf } from "../tools/admin-config.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const mesh = JSON.parse(await readFile(resolve(ROOT, "data/mesh.json"), "utf8"));
@@ -52,7 +53,8 @@ test("边必须引用存在的节点，且没有自环", () => {
 });
 
 test("精确命中：每个节点的 matchedTags 都真的出现在其 topics 里", () => {
-  const WHITELIST = ["dsh", "dsh-desktop", "dsh-plugin", "dsh-plugin-desktop", "dsh-plugin-market", "dsh-plugins"];
+  // 用「当前生效」的白名单（后台可改），不能硬编码默认 6 个：否则配了自定义标签的机器会假红。
+  const WHITELIST = whitelistTagsOf(loadAdminConfig());
   for (const n of mesh.nodes) {
     for (const tag of n.matchedTags) {
       assert.ok(WHITELIST.includes(tag), "标签不在白名单: " + tag);

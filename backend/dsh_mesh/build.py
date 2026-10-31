@@ -12,7 +12,6 @@ from pathlib import Path
 
 from . import admin_config
 from .classify import apply_categories, non_plugin_reason
-from .config import ROOT  # noqa: E402  (ROOT 在下面 config 段还会用到)
 
 
 def load_ecosystem(path=None) -> dict:
@@ -55,9 +54,9 @@ from .config import (
     NOISE_OWNER_STRICT_MIN_REPOS,
     NOISE_OWNER_ZERO_RATIO,
     OWNER_CLIQUE_MAX,
+    ROOT,
     WHITELIST_TAGS,
 )
-from . import admin_config
 
 # 生态共鸣清单（人工策展，见 tools/curate-ecosystem.mjs）：基座 → 长在它上面的插件
 ECOSYSTEM_JSON = ROOT / "tools" / "ecosystem.json"
@@ -143,8 +142,10 @@ def owner_of(repo: dict) -> str:
     return str(owner or "")
 
 
-def relevance_score(repo: dict) -> int:
-    """朴素相关度启发式（0~8），作为 analyze_relevance 的参考分。"""
+def relevance_score(repo: dict, whitelist_tags=None) -> int:
+    """朴素相关度启发式（0~8），作为 analyze_relevance 的参考分。
+    whitelist_tags：本轮生效的白名单（后台可改）；不传时用内置默认，冻结参照物保持不变。"""
+    tags = [str(t).strip() for t in (whitelist_tags or WHITELIST_TAGS) if str(t).strip()]
     score = 0
     if _NAME_RE.search(repo.get("name") or ""):
         score += 3
@@ -153,7 +154,7 @@ def relevance_score(repo: dict) -> int:
     topics = repo.get("topics") or []
     if "deepseek-harness" in topics:
         score += 1
-    if sum(1 for t in topics if t in WHITELIST_TAGS) >= 2:
+    if sum(1 for t in topics if t in tags) >= 2:
         score += 1
     if _CORDIS_RE.search(repo.get("description") or "") or "cordis" in topics:
         score += 1
@@ -225,14 +226,14 @@ OTHER_ECOSYSTEM_TAGS = {
 }
 
 
-def analyze_relevance(repo: dict) -> dict:
+def analyze_relevance(repo: dict, whitelist_tags=None) -> dict:
     """三档结论：related（有 DSH 专有线索）/ noise（与 DSH 无关、空壳、堆标签）/ manual（需人工）。
     能一眼定性的先定掉，只把真正模糊的留给人工队列（否则上千个仓库全进"待复核"）。"""
     name = str(repo.get("name") or "")
     desc = str(repo.get("description") or "").strip()
     topics = [str(t).lower() for t in (repo.get("topics") or [])]
     tags = repo.get("matchedTags") or []
-    relevance = relevance_score(repo)
+    relevance = relevance_score(repo, whitelist_tags)
 
     def out(verdict: str, reason: str, review: bool) -> dict:
         return {"relevance": relevance, "review": review, "verdict": verdict, "reason": reason}
@@ -261,6 +262,7 @@ def build_mesh(
     blacklist_repos: dict | None = None,
     aliases: dict | None = None,
     whitelist_aliases: list[dict] | None = None,
+    whitelist_tags: list[str] | None = None,
 ) -> dict:
     """主构图流程：精确命中 -> 剔除黑名单/新识别的噪声作者 -> 去重 -> 分类 -> 连线 -> 裁剪。
     blacklist 是已判定的噪声作者，一旦判定长期生效（data/noise-blacklist.json）。
@@ -271,12 +273,19 @@ def build_mesh(
     whitelist_aliases 是白名单别名组（issue#5 第3条）：不传 = 老行为（只认精确标签），
     data.test.mjs / 跨语言校验那份"精确命中"的冻结参照物就靠这个默认值保持原样。"""
     tag_totals = tag_totals or {}
+    # 生效白名单：后台改过的标签由 collect.py 传进来，抓取与构图必须用同一份。
+    # 不传时退回内置默认 —— 冻结参照物与跨语言一致性测试因此保持原样。
+    effective_tags = [str(t).strip() for t in (whitelist_tags or WHITELIST_TAGS) if str(t).strip()]
+    if not effective_tags:
+        effective_tags = list(WHITELIST_TAGS)
     blacklist = dict(blacklist or {})
     blacklist_repos = dict(blacklist_repos or {})
     nodes: list[dict] = []
     seen: dict[str, dict] = {}
     skipped_blacklisted = 0
     skipped_blacklisted_repos = 0
+    # 不在本轮白名单里的仓库：删标签时节点会变少，缩水保护要能解释这部分（见 collect.count_explained_missing）
+    skipped_not_matched = 0
     # 只有名字命中 dsh、却无描述也无主题标签的仓库不收录：分类器无从下手，画进图里是纯噪点。
     # 只计数不逐个记录（excludedNotPlugin 留给"非 DSH 语境"这类需要复核的）。
     no_signal_desc_chars = 10  # 与 non_plugin_reason 里"没有描述"的判据保持一致
@@ -287,12 +296,11 @@ def build_mesh(
         aliases = load_aliases()
     # 匹配层展开别名：仓库只打了 awsome-dsh 这种同义标签时，也归到规范标签上。
     # 抓取层完全不用这份展开表（GitHub 只认精确 topic，拿别名去搜纯属白烧配额）。
-    match_tags = list(WHITELIST_TAGS)
+    match_tags = list(effective_tags)
     alias_to_canon: dict[str, str] = {}
     if whitelist_aliases:
-        match_tags, alias_to_canon = admin_config.effective_tags(WHITELIST_TAGS, whitelist_aliases)
-    tag_order = {tag: i for i, tag in enumerate(WHITELIST_TAGS)}
-    broad_tag = WHITELIST_TAGS[-1] if WHITELIST_TAGS else "dsh"
+        match_tags, alias_to_canon = admin_config.effective_tags(effective_tags, whitelist_aliases)
+    tag_order = {tag: i for i, tag in enumerate(effective_tags)}
 
     def match_whitelist(topics: list[str]) -> tuple[list[str], list[str]]:
         """返回 (规范标签, 命中标签)：规范标签按白名单顺序排；只认精确 topic，别名也是精确比对。"""
@@ -333,6 +341,7 @@ def build_mesh(
         # 命中白名单 topic（含别名）或名字带 dsh- 都收录（很多插件没打标签，靠名字收录，matchedTags 为空）
         by_name = bool(_NAME_DASH_RE.search(str(repo.get("name") or "")))
         if (not matched and not by_name) or not repo["id"]:
+            skipped_not_matched += 1
             continue
         # 稳定身份是 githubId（改名不变），老记录退回 id；改名前后两条并存时，展示采用更新的那条。
         key = str(repo.get("githubId") or repo["id"])
@@ -346,7 +355,7 @@ def build_mesh(
             continue
         repo["matchedTags"] = matched
         repo["primaryTag"] = matched[0] if matched else NAME_TAG
-        verdict = analyze_relevance(repo)
+        verdict = analyze_relevance(repo, effective_tags)
         rel = verdict["relevance"]
         repo["relevance"] = rel
         repo["noise"] = min(1.0, max(0.0, 1 - rel / 5))
@@ -368,7 +377,7 @@ def build_mesh(
 
     # 策展认定的生态基座（tools/ecosystem.json）直接归入协议基座，下面建共鸣边时复用同一份清单
     ecosystem = load_ecosystem()
-    categories = apply_categories(nodes, base_ids=set(ecosystem.keys()))
+    categories = apply_categories(nodes, base_ids=set(ecosystem.keys()), whitelist_tags=effective_tags)
 
     # ---------- 连线 ----------
     edge_map: dict[tuple, dict] = {}
@@ -461,7 +470,7 @@ def build_mesh(
             "sampleCount": sum(1 for n in nodes if tag in n["matchedTags"]),
             "apiTotal": tag_totals.get(tag),
         }
-        for tag in WHITELIST_TAGS  # 统计只按规范标签：别名命中已经归到规范标签上了
+        for tag in effective_tags  # 统计只按生效标签：别名命中已经归到规范标签上了
     ]
 
     return {
@@ -491,6 +500,7 @@ def build_mesh(
             "excludedNotPlugin": dict(sorted(excluded_repos.items())),
             "excludedNotPluginCount": len(excluded_repos),
             "noSignalSkipped": skipped_no_signal,
+            "notMatchedSkipped": skipped_not_matched,
             "noiseBlacklist": dict(sorted(blacklist.items())),
             "noiseBlacklistSize": len(blacklist),
             "noiseNodesRemoved": noise_removed,

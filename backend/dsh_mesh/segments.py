@@ -307,6 +307,19 @@ class SegmentStore:
                 added += 1
         return added
 
+    def prune_topics(self, tags: list[str]) -> int:
+        """删掉不再抓取的 topic 分段（后台把白名单标签删掉时用），永远保留名字收录源。
+        返回删掉的段数；tags 为空时不动（配置读不到不能把队列清空）。"""
+        clean = {str(t).strip() for t in (tags or []) if str(t).strip()}
+        if not clean:
+            return 0  # 配置读不到（空列表）时不能把队列清空
+        keep = clean | set(NAME_SOURCES)
+        segments = self.state.get("segments") or {}
+        stale = [key for key, segment in segments.items() if segment.get("topic") not in keep]
+        for key in stale:
+            segments.pop(key, None)
+        return len(stale)
+
     def pending_summary(self) -> dict:
         segs = list(self.state["segments"].values())
         return {

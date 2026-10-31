@@ -349,11 +349,13 @@ def _score_of(counter, sig: dict, weight: int) -> float:
     return (in_name * 2 + in_last + in_desc + in_topics * 1.5) * weight
 
 
-def _signals(node: dict) -> dict:
-    """信号来源：仓库名 + 描述 + 非白名单 topic（白名单标签本身不算证据）。"""
+def _signals(node: dict, whitelist_tags=None) -> dict:
+    """信号来源：仓库名 + 描述 + 非白名单 topic（白名单标签本身不算证据）。
+    whitelist_tags：本轮生效的白名单（后台可改）；不传时用内置默认，与 JS 端读同一份配置。"""
     from .config import WHITELIST_TAGS
 
-    topics = " ".join(t for t in (node.get("topics") or []) if t not in WHITELIST_TAGS)
+    tags = {str(t).strip() for t in (whitelist_tags or WHITELIST_TAGS) if str(t).strip()}
+    topics = " ".join(t for t in (node.get("topics") or []) if t not in tags)
     name = node.get("name")
     if name is None:
         name = node.get("id") or ""
@@ -397,9 +399,9 @@ def _strong_hit(rule: dict, sig: dict) -> bool:
     return any(strong.get(key) and strong[key].search(sig[key]) for key in ("name", "desc", "topics"))
 
 
-def classify_node(node: dict) -> dict:
+def classify_node(node: dict, whitelist_tags=None) -> dict:
     """单仓库分类：返回 {id,label,score,hits,blocked}。"""
-    sig = _signals(node)
+    sig = _signals(node, whitelist_tags)
     best = None
     blocked = None
     for rule in RULE_BY_PRIORITY:
@@ -462,6 +464,7 @@ def apply_categories(
     max_sectors: int = 20,
     keep_ids=KEEP_ALWAYS,
     base_ids=(),
+    whitelist_tags=None,
 ) -> dict:
     """全量归类 + 长尾合并，语义与 JS 的 applyCategories 一致。
     base_ids：策展认定的生态基座直接归入协议基座 —— 它们"别人长在上面"，但正文未必写"基座"。"""
@@ -471,7 +474,7 @@ def apply_categories(
         node["id"]: (
             {"id": "spec", "label": spec_label, "score": 0, "hits": ["策展基座"], "strong": True, "curatedBase": True}
             if node["id"] in curated
-            else classify_node(node)
+            else classify_node(node, whitelist_tags)
         )
         for node in nodes
     }

@@ -2,22 +2,25 @@
 """DSH 插件生态索引采集器 —— 纯脚本，全程不调用模型。
 
 用法：--once 跑一次；--watch/--loop 常驻；--from-store 改规则后离线重建（不联网）。
-产出：data/mesh.json（前端契约）、data/snapshots/*.json（留 48 份）、data/last-crawl.json（溯源）。
+产出：data/mesh.json（前端契约）、data/snapshots/*.json（只留最近 KEEP_SNAPSHOTS 份）、data/last-crawl.json（溯源）。
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 from dsh_mesh import admin_config
 from dsh_mesh import snapshot as snap
-from dsh_mesh.build import build_mesh, limit_for_frontend, normalize_repo, utcnow
+from dsh_mesh.build import build_mesh, limit_for_frontend, load_aliases, normalize_repo, utcnow
 from dsh_mesh.config import (
     DEFAULT_BUDGET,
     DEFAULT_INTERVAL,
@@ -72,6 +75,31 @@ def _write_status(**fields) -> None:
     write_status(STATUS_FILE, **fields)
 
 
+@contextmanager
+def _heartbeat(interval: float = 60.0, **fields):
+    """长耗时阶段的心跳：定时刷新 status.updatedAt，避免后台把「正在预计算/市场索引」误判成「采集器没在跑」。
+
+    只写 updatedAt 与给定的 phase（如 phase="precompute"）；写失败绝不打断采集。
+    主线程在子进程/网络调用期间是阻塞的，所以这里用后台线程写，两者不会同时写同一份状态。
+    """
+    stop = threading.Event()
+
+    def beat() -> None:
+        while not stop.wait(interval):
+            try:
+                _write_status(**fields)
+            except Exception:  # noqa: BLE001 - 心跳失败不能影响主流程
+                pass
+
+    thread = threading.Thread(target=beat, name="collector-heartbeat", daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        thread.join(timeout=2)
+
+
 def _report_progress(store, fetched: int, added: int, client, args, **extra) -> None:
     """进度写入 data/status.json（前端"状态"圆环读它）；dry-run 不写。"""
     if getattr(args, "dry_run", False):
@@ -109,6 +137,10 @@ def fetch_live(args, log, blacklist=None):
     seeded = store.ensure_seeded(args.tags)
     if seeded:
         log("分段队列初始化：新增 " + str(seeded) + " 个待抓分段")
+    pruned = store.prune_topics(args.tags)
+    if pruned:
+        log("白名单已变更：清理 " + str(pruned) + " 个不再抓取的旧标签分段")
+        store.save()
     store.requeue_truncated(log=log)
     before = store.coverage()
     log("累积索引 " + str(before["repos"]) + " 个仓库 | 分段 " + str(before["segments"]))
@@ -193,6 +225,61 @@ def load_from_raw(log):
             totals[tag] = max(totals.get(tag) or 0, meta["totalCount"])
     log(f"离线模式：读入 {len(raws)} 条本地原始记录（零网络请求）")
     return raws, totals, None, {"token": False, "mode": "from-raw"}
+
+
+def load_mesh_file(path: Path | None = None) -> dict | None:
+    """读现有 mesh.json（缩水保护要拿上一份节点做对照）；缺失/损坏一律返回 None。"""
+    target = Path(path) if path is not None else MESH_JSON
+    try:
+        data = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def count_explained_missing(
+    previous_mesh: dict | None,
+    current_mesh: dict,
+    *,
+    blacklist: set | None = None,
+    blacklist_repos: set | None = None,
+    whitelist_tags: list[str] | None = None,
+    aliases: dict | None = None,
+) -> int:
+    """上一份 mesh 里消失、且能说出原因的节点数（缩水保护的分母）。
+
+    只有三类原因算「说得出」：① 作者级/单仓库级黑名单；② 改名（旧名→现名）；
+    ③ 白名单标签被删后不再命中。说不出的不算 —— 真正的数据故障仍然会被缩水保护拦住。
+    不做这一步的话，后台删掉一个白名单标签会让节点数下降 >20%，重建永远被拒。
+    """
+    prev_nodes = (previous_mesh or {}).get("nodes")
+    if not isinstance(prev_nodes, list) or not prev_nodes:
+        return 0
+    current_ids = {str(n.get("id")) for n in (current_mesh.get("nodes") or []) if isinstance(n, dict)}
+    owners = {str(x) for x in (blacklist or set())}
+    repos = {str(x) for x in (blacklist_repos or set())}
+    alias_map = aliases or {}
+    tags = {str(t).strip().lower() for t in (whitelist_tags or []) if str(t).strip()}
+    explained = 0
+    for node in prev_nodes:
+        if not isinstance(node, dict):
+            continue
+        rid = str(node.get("id") or "")
+        if not rid or rid in current_ids:
+            continue
+        owner = rid.split("/")[0] if "/" in rid else ""
+        if owner in owners or rid in repos:
+            explained += 1
+            continue
+        target = alias_map.get(rid)
+        if target and target in current_ids:
+            explained += 1
+            continue
+        topics = {str(t).strip().lower() for t in (node.get("topics") or [])}
+        name = rid.split("/")[-1]
+        if tags and not (topics & tags) and not re.search(r"dsh[-_]", name, re.I):
+            explained += 1
+    return explained
 
 
 def previous_index_size() -> int:
@@ -821,6 +908,8 @@ def run_once(args, log) -> dict:
         blacklist=blacklist,
         blacklist_repos=blacklist_repos,
         whitelist_aliases=admin_config.whitelist_aliases(),
+        # 抓取与构图必须同一份白名单：后台改标签后，下一轮真实采集/离线重建都按新口径收录。
+        whitelist_tags=args.tags,
     )
     noise_now = mesh["meta"].get("noiseBlacklist") or {}
     new_noise = {owner: info for owner, info in noise_now.items() if owner not in blacklist}
@@ -892,7 +981,19 @@ def run_once(args, log) -> dict:
 
     # 缩水保护：预热期累积索引很小，不能拿它覆盖已有完整索引；被黑名单剔除的不算缩水，
     # 否则第一次拉黑会被这道保护挡住。
-    explained = total_indexed + int(mesh["meta"].get("noiseNodesRemoved") or 0) + int(env.get("noisePurged") or 0)
+    # 缩水保护的分母：本轮索引 + 所有「有明确原因」的减少量。
+    # 黑名单（作者级/单仓库级）、改名、白名单删标签都会让节点变少，不能把它们误判成数据故障；
+    # 只认「上一份 mesh 里有、这一份没有，且能说出原因」的节点，说不出的仍然拦。
+    detected_noise = mesh["meta"].get("noiseBlacklist") or {}
+    detected_repos = mesh["meta"].get("noiseBlacklistRepos") or {}
+    explained = total_indexed + count_explained_missing(
+        load_mesh_file(),
+        mesh,
+        blacklist=set(blacklist) | set(detected_noise),
+        blacklist_repos=set(blacklist_repos) | set(detected_repos),
+        whitelist_tags=args.tags,
+        aliases=load_aliases(),
+    )
     previous = previous_index_size()
     if previous and explained < previous * args.min_ratio:
         log(
@@ -914,7 +1015,7 @@ def run_once(args, log) -> dict:
     summary["snapshotSkipped"] = path is None
     summary["diff"] = diff
 
-    # 星标历史环按天记一点（快照只留 48 份，攒不出"周"窗口）；「周 star 热榜」= 与约 7 天前
+    # 星标历史环按天记一点（快照只留最近 KEEP_SNAPSHOTS 份，攒不出"周"窗口）；「周 star 热榜」= 与约 7 天前
     # 那个点的星标差，真实观测值。
     history = snap.update_star_history(mesh, STAR_HISTORY)
     summary["starHistory"] = {
@@ -948,48 +1049,60 @@ def run_once(args, log) -> dict:
     update_log = snap.update_update_log(mesh, UPDATE_LOG)
     summary["updateLog"] = {"days": len(update_log["days"]), "counted": update_log["lastRound"]["counted"]}
 
-    # 版本（releases）：搜索接口不返回，只能按仓库单独取（1 个仓库 = 1 次 core 配额）
-    summary["releases"] = fetch_releases_safe(args, mesh, log)
+    # 可选采集阶段（releases / npm / 反查 / 子目录包）可能跑十几分钟：期间要有心跳，
+    # 否则后台按「状态 10 分钟没更新」判定采集器已死，可能放行并发的「应用变更」。
+    with _heartbeat(phase="optional"):
+        # 版本（releases）：搜索接口不返回，只能按仓库单独取（1 个仓库 = 1 次 core 配额）
+        summary["releases"] = fetch_releases_safe(args, mesh, log)
 
-    # npm 周下载量：可选列；写 data/cache/npm-downloads.json，失败不阻塞前端数据
-    summary["npmDownloads"] = fetch_npm_safe(args, mesh, log)
+        # npm 周下载量：可选列；写 data/cache/npm-downloads.json，失败不阻塞前端数据
+        summary["npmDownloads"] = fetch_npm_safe(args, mesh, log)
 
-    # npm 反查发现：只写 data/cache/npm-search.json（包 → 仓库），给「插件住在仓库子目录」兜底；
-    # 消费端（市场索引 / npm 榜）在后面阶段接入，本轮只攒数据。
-    summary["npmSearch"] = fetch_npm_search_safe(args, log)
+        # npm 反查发现：只写 data/cache/npm-search.json（包 → 仓库），给「插件住在仓库子目录」兜底；
+        # 消费端（市场索引 / npm 榜）在后面阶段接入，本轮只攒数据。
+        summary["npmSearch"] = fetch_npm_search_safe(args, log)
 
-    # 子目录包下载量：反查发现里「仓库根 package.json 认不出」的那批，单独查（按包名存）
-    summary["npmPackages"] = fetch_npm_packages_safe(args, mesh, log)
+        # 子目录包下载量：反查发现里「仓库根 package.json 认不出」的那批，单独查（按包名存）
+        summary["npmPackages"] = fetch_npm_packages_safe(args, mesh, log)
 
     limit_for_frontend(mesh, args.frontend_limit)
     mesh["meta"]["note"] = (
-        f"每小时自动更新一次的快照（{utcnow()}）。"
+        f"按小时采集的快照（{utcnow()}）。"
         + (f"完整索引 {total_indexed} 个仓库，前端展示星标前 {args.frontend_limit} 个。" if mesh["meta"].get("frontendLimit") else f"本次索引 {total_indexed} 个仓库。")
     )
     summary["frontendNodes"] = len(mesh["nodes"])
     summary["frontendEdges"] = len(mesh["edges"])
-    _write_status(
-        state="idle",
-        phase=None,
-        error=None,
-        nextRunAt=next_run_at(time.time(), args.interval),
-        lastRound={
-            "startedAt": summary["roundStartedAt"] if "roundStartedAt" in summary else None,
-            "finishedAt": utcnow(),
-            "seconds": round(time.time() - started, 1),
-            "state": "ok",
-            "indexed": total_indexed,
-        },
-        segments=None,
-        fetched=None,
-        added=None,
-    )
     snap.write_mesh(mesh, MESH_JSON)
     snap.write_last_crawl(summary, LAST_CRAWL)
 
     log(f"索引 {total_indexed} 个仓库 · 前端 {len(mesh['nodes'])} 个节点 / {len(mesh['edges'])} 条连线")
-    run_precompute(log, len(mesh["nodes"]))
-    run_market_index(log)
+    # 预计算与市场索引都是长耗时子进程（本机实测约 1 秒 + 39 秒，线上更久）。
+    # 这两个阶段必须报 precomputing：否则状态是 idle，后台「采集器忙」判定放行，会并发重写同一批文件。
+    # 心跳兜住「单阶段超过 10 分钟」的情况；finally 保证异常时也落回 idle。
+    try:
+        _write_status(state="precomputing", phase="precompute", error=None)
+        with _heartbeat(phase="precompute"):
+            run_precompute(log, len(mesh["nodes"]))
+        _write_status(state="precomputing", phase="market-index")
+        with _heartbeat(phase="market-index"):
+            run_market_index(log)
+    finally:
+        _write_status(
+            state="idle",
+            phase=None,
+            error=None,
+            nextRunAt=next_run_at(time.time(), args.interval),
+            lastRound={
+                "startedAt": summary["roundStartedAt"] if "roundStartedAt" in summary else None,
+                "finishedAt": utcnow(),
+                "seconds": round(time.time() - started, 1),
+                "state": "ok",
+                "indexed": total_indexed,
+            },
+            segments=None,
+            fetched=None,
+            added=None,
+        )
     if path is None:
         log("索引与上一份快照一致，本次不生成新快照")
     else:
