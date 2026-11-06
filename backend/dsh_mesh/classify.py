@@ -74,11 +74,11 @@ _PET_SELF = re.compile(r"(\bpet\b|\bpets\b|桌宠|宠物|养成|pokemon|live2d|m
 
 CATEGORY_RULES = [
     {"id": "skin", "label": "皮肤美化", "priority": 1, "terms": [
-        ("skin", 3), ("theme", 2), ("wallpaper", 3), ("皮肤", 3), ("主题", 2), ("壁纸", 3),
+        ("skin", 3), ("theme", 2), ("wallpaper", 3), ("background", 2), ("皮肤", 3), ("主题", 2), ("壁纸", 3), ("背景", 2),
         ("美化", 3), ("外观", 2), ("配色", 2), ("appearance", 2), ("style", 1)]},
     {"id": "notify", "label": "语音提醒", "priority": 2, "terms": [
-        ("voice", 2), ("tts", 3), ("speech", 2), ("sound", 2), ("audio", 2), ("notification", 3),
-        ("语音", 3), ("提醒", 3), ("通知", 2), ("音乐", 2), ("mp3", 3), ("播报", 3), ("提示音", 3)]},
+        ("voice", 2), ("tts", 3), ("speech", 2), ("sound", 2), ("notification", 3),
+        ("语音", 3), ("提醒", 3), ("通知", 2), ("mp3", 3), ("播报", 3), ("提示音", 3)]},
     {
         "id": "market", "label": "插件市场", "priority": 3,
         # 只有"自述是汇集插件的汇总"才算市场：名字末段/首段就是汇总词，或描述明确说收录、汇集。
@@ -132,11 +132,12 @@ CATEGORY_RULES = [
         ("memory", 3), ("knowledge", 2), ("rag", 3), ("记忆", 3), ("上下文", 2), ("知识库", 3), ("长期记忆", 3)]},
     {"id": "model", "label": "模型接入", "priority": 6, "terms": [
         ("llm", 2), ("provider", 3), ("openai", 3), ("claude", 2), ("gemini", 2), ("ollama", 3),
-        ("endpoint", 2), ("proxy", 2), ("模型", 3), ("接入", 2), ("多模态", 2), ("视觉", 2),
-        ("vision", 2), ("api", 1), ("推理", 2)]},
+        ("endpoint", 2), ("proxy", 2), ("reasoning", 2), ("thinking", 2), ("effort", 2), ("route", 1),
+        ("模型", 3), ("接入", 2), ("多模态", 2), ("视觉", 2), ("vision", 2), ("api", 1), ("推理", 2), ("思考", 2)]},
     {"id": "panel", "label": "界面面板", "priority": 7, "terms": [
         ("panel", 2), ("sidebar", 3), ("editor", 2), ("canvas", 2), ("dashboard", 2), ("widget", 2),
-        ("toolbar", 2), ("面板", 3), ("侧边", 3), ("工作台", 3), ("编辑器", 3), ("界面", 2), ("ui", 1)]},
+        ("toolbar", 2), ("settings", 2), ("button", 2), ("menu", 1), ("hud", 2), ("面板", 3), ("侧边", 3),
+        ("工作台", 3), ("编辑器", 3), ("界面", 2), ("设置", 2), ("按钮", 2), ("菜单", 2), ("ui", 1)]},
     {"id": "session", "label": "会话交互", "priority": 8, "terms": [
         ("session", 2), ("chat", 1), ("prompt", 1), ("conversation", 2), ("会话", 3), ("对话", 3),
         ("提示词", 3), ("消息", 2)]},
@@ -145,7 +146,8 @@ CATEGORY_RULES = [
         ("智能体", 3), ("技能", 3), ("自动化", 2), ("工作流", 3), ("编排", 2), ("多智能体", 3), ("子代理", 3)]},
     {"id": "tools", "label": "工具命令", "priority": 10, "terms": [
         ("cli", 2), ("tool", 1), ("command", 1), ("ssh", 2), ("setup", 1), ("generator", 2),
-        ("工具", 3), ("命令", 2), ("一键", 2), ("安装", 2), ("脚本", 2), ("批量", 2), ("命令行", 3)]},
+        ("retry", 3), ("restart", 2), ("explorer", 2), ("工具", 3), ("命令", 2), ("一键", 2),
+        ("安装", 2), ("脚本", 2), ("批量", 2), ("命令行", 3), ("重试", 3), ("重启", 3)]},
     {"id": "dev", "label": "开发调试", "priority": 11, "terms": [
         ("debug", 2), ("review", 2), ("lint", 2), ("verify", 2), ("调试", 3), ("测试", 2),
         ("审查", 3), ("日志", 2), ("验证", 2)]},
@@ -163,13 +165,14 @@ CATEGORY_RULES = [
         ("对接", 3), ("桥接", 3), ("适配", 3), ("互通", 3), ("中转", 2), ("网关", 2)]},
     {"id": "usage", "label": "用量额度", "priority": 16, "terms": [
         ("usage", 3), ("balance", 3), ("quota", 3), ("billing", 3), ("cost", 2), ("credit", 2),
-        ("用量", 3), ("额度", 3), ("余额", 3), ("计费", 3), ("消耗", 2), ("统计", 1), ("监控", 1)]},
+        ("token", 1), ("gauge", 2), ("wallet", 2), ("用量", 3), ("额度", 3), ("余额", 3),
+        ("计费", 3), ("消耗", 2), ("统计", 1), ("监控", 1), ("令牌", 2), ("钱包", 2)]},
     {"id": "doc", "label": "阅读文档", "priority": 17, "terms": [
         ("reader", 3), ("markdown", 3), ("pdf", 3), ("translate", 3), ("translation", 3), ("wiki", 2),
         ("阅读", 3), ("翻译", 3), ("笔记", 3), ("字幕", 3), ("摘要", 2), ("文档", 1)]},
     {"id": "file", "label": "文件管理", "priority": 18, "terms": [
-        ("folder", 3), ("drag", 2), ("drop", 1), ("file", 1), ("文件", 1), ("目录", 1),
-        ("拖拽", 3), ("网盘", 3), ("附件", 1), ("备份", 2)]},
+        ("folder", 3), ("drag", 2), ("drop", 1), ("file", 1), ("explorer", 2), ("picker", 2),
+        ("文件", 1), ("目录", 1), ("拖拽", 3), ("网盘", 3), ("附件", 1), ("备份", 2)]},
     # "鲸鱼娘/小鲸鱼/看板娘"是 DSH 桌宠的通用说法（官方吉祥物是鲸鱼），这里的「娘」指"角色"；
     # 但这些词只说明长相：自述皮肤/主题的仓库先排除，只有自述宠物/陪伴玩法才由 override 救回。
     {"id": "pet", "label": "桌宠娱乐", "priority": 19,
@@ -196,6 +199,19 @@ CATEGORY_RULES = [
         ("protocol", 1), ("standard", 1), ("rfc", 1), ("manifest", 1), ("接口定义", 3), ("插件规范", 3), ("插件标准", 3),
         ("基座", 4), ("底座", 4), ("脚手架", 3), ("基础设施", 3), ("框架", 3), ("中间件", 2), ("内核", 2),
         ("foundation", 3), ("framework", 2), ("scaffold", 3), ("infrastructure", 2)]},
+    {"id": "media", "label": "媒体内容", "priority": 21,
+     "gate": {"name": re.compile(r"(^|[-_ ])(image|video|audio|music|player|render|screenshot|draw|cad|media)([-_ ]|$)|图像|图片|视频|音频|音乐|播放|绘图|截图|渲染|媒体|动画")},
+     "terms": [
+        ("image", 3), ("video", 3), ("audio", 3), ("music", 2), ("player", 2), ("render", 2),
+        ("screenshot", 2), ("draw", 2), ("drawing", 2), ("cad", 2), ("media", 3), ("animation", 2),
+        ("图像", 3), ("图片", 2), ("视频", 3), ("音频", 3), ("音乐", 2), ("播放", 2), ("播放器", 2),
+        ("绘图", 2), ("截图", 2), ("渲染", 2), ("剪辑", 2), ("媒体", 3), ("动画", 2), ("白板", 2)]},
+    {"id": "data", "label": "数据工具", "priority": 22,
+     "gate": {"name": re.compile(r"(^|[-_ ])(data|table|csv|sql|database|analytics|chart|finance|stock|quant)([-_ ]|$)|数据|表格|数据库|分析|图表|行情|股票|量化")},
+     "terms": [
+        ("data", 2), ("table", 2), ("csv", 2), ("sql", 3), ("database", 2), ("analytics", 2),
+        ("chart", 2), ("finance", 2), ("stock", 2), ("quant", 2), ("数据", 2), ("表格", 3),
+        ("数据库", 2), ("分析", 2), ("图表", 2), ("行情", 2), ("股票", 2), ("量化", 2)]},
 ]
 
 # 细枝分类：与大分类同一套词边界规则，用于「选中扇区后铺满整圆」的二级扇区。
@@ -320,6 +336,18 @@ SUBCATEGORY_RULES: dict[str, list[dict]] = {
         {"id": "pet-avatar", "label": "虚拟形象", "terms": [("live2d", 3), ("avatar", 2), ("虚拟形象", 3), ("形象", 2)]},
         {"id": "pet-game", "label": "游戏娱乐", "terms": [("game", 3), ("pokemon", 3), ("游戏", 3), ("娱乐", 2)]},
     ],
+    "media": [
+        {"id": "media-image", "label": "图像截图", "terms": [("image", 3), ("screenshot", 3), ("draw", 2), ("drawing", 2), ("cad", 3), ("图像", 3), ("图片", 3), ("截图", 3), ("绘图", 3), ("白板", 3)]},
+        {"id": "media-video", "label": "视频剪辑", "terms": [("video", 3), ("animation", 2), ("视频", 3), ("剪辑", 3), ("动画", 2)]},
+        {"id": "media-audio", "label": "音频音乐", "terms": [("audio", 3), ("music", 3), ("player", 2), ("音频", 3), ("音乐", 3), ("播放器", 3)]},
+        {"id": "media-render", "label": "渲染导出", "terms": [("render", 3), ("export", 2), ("渲染", 3), ("导出", 2)]},
+    ],
+    "data": [
+        {"id": "data-table", "label": "表格数据", "terms": [("table", 3), ("csv", 3), ("excel", 3), ("表格", 3), ("数据", 2)]},
+        {"id": "data-db", "label": "数据库", "terms": [("sql", 3), ("database", 3), ("数据库", 3)]},
+        {"id": "data-analytics", "label": "分析图表", "terms": [("analytics", 3), ("chart", 3), ("分析", 3), ("图表", 3)]},
+        {"id": "data-finance", "label": "行情金融", "terms": [("finance", 3), ("stock", 3), ("quant", 2), ("行情", 3), ("股票", 3), ("量化", 3)]},
+    ],
 }
 
 RULE_BY_PRIORITY = sorted(CATEGORY_RULES, key=lambda r: r["priority"])
@@ -429,6 +457,35 @@ def classify_node(node: dict, whitelist_tags=None) -> dict:
     if best is not None and best["score"] < MIN_SCORE:
         blocked = blocked or {"id": best["id"], "label": best["label"], "reason": "置信分不足"}
         best = None
+    # 细枝提父级：父级完全没分，但某个细枝有足够强的名字证据时，用细枝的父扇区兜底。
+    # 只在候选唯一时生效，避免两个细枝同分时硬猜。
+    if best is None:
+        promoted = []
+        for parent, rules in SUBCATEGORY_RULES.items():
+            if parent == "market":
+                continue
+            parent_rule = next((r for r in CATEGORY_RULES if r["id"] == parent), None)
+            if parent_rule is None or not _passes_gate(parent_rule, sig) or _is_excluded(parent_rule, sig):
+                continue
+            for rule in rules:
+                score = 0.0
+                name_score = 0
+                hits: list[str] = []
+                for term, weight in rule["terms"]:
+                    fn = make_counter(term)
+                    s = _score_of(fn, sig, weight)
+                    if s > 0:
+                        score += s
+                        hits.append(term)
+                        name_score += fn(sig["name"]) + fn(sig["last"])
+                if score > 0:
+                    promoted.append((score, name_score, parent, hits))
+        promoted.sort(key=lambda x: (-x[0], -x[1]))
+        if promoted:
+            top = promoted[0]
+            second = promoted[1] if len(promoted) > 1 else None
+            if top[0] >= 3 and top[1] > 0 and (second is None or top[0] > second[0]):
+                best = {"id": top[2], "label": LABELS.get(top[2], top[2]), "score": top[0], "hits": top[3][:4], "promoted": True}
     if best is None:
         return {"id": OTHER["id"], "label": OTHER["label"], "score": 0, "hits": [], "sub": None, "blocked": blocked}
 
@@ -451,6 +508,8 @@ def classify_node(node: dict, whitelist_tags=None) -> dict:
             sub = {"id": rule["id"], "label": rule["label"], "score": sub_score, "nameScore": name_score, "hits": sub_hits[:3]}
     if sub is not None and sub["score"] < MIN_SUB_SCORE:
         sub = None
+    if sub is None and best["id"] != OTHER["id"]:
+        sub = {"id": best["id"] + "-general", "label": "综合", "score": 0, "nameScore": 0, "hits": []}
     return {**best, "sub": sub}
 
 
@@ -461,7 +520,7 @@ KEEP_ALWAYS = ("spec",)
 def apply_categories(
     nodes: list[dict],
     min_count: int = 10,
-    max_sectors: int = 20,
+    max_sectors: int = 24,
     keep_ids=KEEP_ALWAYS,
     base_ids=(),
     whitelist_tags=None,

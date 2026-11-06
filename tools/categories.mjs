@@ -95,13 +95,13 @@ export const CATEGORY_RULES = [
     id: "skin",
     label: "皮肤美化",
     priority: 1,
-    terms: [["skin", 3], ["theme", 2], ["wallpaper", 3], ["皮肤", 3], ["主题", 2], ["壁纸", 3], ["美化", 3], ["外观", 2], ["配色", 2], ["appearance", 2], ["style", 1]],
+    terms: [["skin", 3], ["theme", 2], ["wallpaper", 3], ["background", 2], ["皮肤", 3], ["主题", 2], ["壁纸", 3], ["背景", 2], ["美化", 3], ["外观", 2], ["配色", 2], ["appearance", 2], ["style", 1]],
   },
   {
     id: "notify",
     label: "语音提醒",
     priority: 2,
-    terms: [["voice", 2], ["tts", 3], ["speech", 2], ["sound", 2], ["audio", 2], ["notification", 3], ["语音", 3], ["提醒", 3], ["通知", 2], ["音乐", 2], ["mp3", 3], ["播报", 3], ["提示音", 3]],
+    terms: [["voice", 2], ["tts", 3], ["speech", 2], ["sound", 2], ["notification", 3], ["语音", 3], ["提醒", 3], ["通知", 2], ["mp3", 3], ["播报", 3], ["提示音", 3]],
   },
   {
     id: "market",
@@ -140,13 +140,13 @@ export const CATEGORY_RULES = [
     id: "model",
     label: "模型接入",
     priority: 6,
-    terms: [["llm", 2], ["provider", 3], ["openai", 3], ["claude", 2], ["gemini", 2], ["ollama", 3], ["endpoint", 2], ["proxy", 2], ["模型", 3], ["接入", 2], ["多模态", 2], ["视觉", 2], ["vision", 2], ["api", 1], ["推理", 2]],
+    terms: [["llm", 2], ["provider", 3], ["openai", 3], ["claude", 2], ["gemini", 2], ["ollama", 3], ["endpoint", 2], ["proxy", 2], ["reasoning", 2], ["thinking", 2], ["effort", 2], ["route", 1], ["模型", 3], ["接入", 2], ["多模态", 2], ["视觉", 2], ["vision", 2], ["api", 1], ["推理", 2], ["思考", 2]],
   },
   {
     id: "panel",
     label: "界面面板",
     priority: 7,
-    terms: [["panel", 2], ["sidebar", 3], ["editor", 2], ["canvas", 2], ["dashboard", 2], ["widget", 2], ["toolbar", 2], ["面板", 3], ["侧边", 3], ["工作台", 3], ["编辑器", 3], ["界面", 2], ["ui", 1]],
+    terms: [["panel", 2], ["sidebar", 3], ["editor", 2], ["canvas", 2], ["dashboard", 2], ["widget", 2], ["toolbar", 2], ["settings", 2], ["button", 2], ["menu", 1], ["hud", 2], ["面板", 3], ["侧边", 3], ["工作台", 3], ["编辑器", 3], ["界面", 2], ["设置", 2], ["按钮", 2], ["菜单", 2], ["ui", 1]],
   },
   {
     id: "session",
@@ -164,7 +164,7 @@ export const CATEGORY_RULES = [
     id: "tools",
     label: "工具命令",
     priority: 10,
-    terms: [["cli", 2], ["tool", 1], ["command", 1], ["ssh", 2], ["setup", 1], ["generator", 2], ["工具", 3], ["命令", 2], ["一键", 2], ["安装", 2], ["脚本", 2], ["批量", 2], ["命令行", 3]],
+    terms: [["cli", 2], ["tool", 1], ["command", 1], ["ssh", 2], ["setup", 1], ["generator", 2], ["retry", 3], ["restart", 2], ["explorer", 2], ["工具", 3], ["命令", 2], ["一键", 2], ["安装", 2], ["脚本", 2], ["批量", 2], ["命令行", 3], ["重试", 3], ["重启", 3]],
   },
   {
     id: "dev",
@@ -200,7 +200,7 @@ export const CATEGORY_RULES = [
     id: "usage",
     label: "用量额度",
     priority: 16,
-    terms: [["usage", 3], ["balance", 3], ["quota", 3], ["billing", 3], ["cost", 2], ["credit", 2], ["用量", 3], ["额度", 3], ["余额", 3], ["计费", 3], ["消耗", 2], ["统计", 1], ["监控", 1]],
+    terms: [["usage", 3], ["balance", 3], ["quota", 3], ["billing", 3], ["cost", 2], ["credit", 2], ["token", 1], ["gauge", 2], ["wallet", 2], ["用量", 3], ["额度", 3], ["余额", 3], ["计费", 3], ["消耗", 2], ["统计", 1], ["监控", 1], ["令牌", 2], ["钱包", 2]],
   },
   {
     id: "doc",
@@ -212,7 +212,7 @@ export const CATEGORY_RULES = [
     id: "file",
     label: "文件管理",
     priority: 18,
-    terms: [["folder", 3], ["drag", 2], ["drop", 1], ["file", 1], ["文件", 1], ["目录", 1], ["拖拽", 3], ["网盘", 3], ["附件", 1], ["备份", 2]],
+    terms: [["folder", 3], ["drag", 2], ["drop", 1], ["file", 1], ["explorer", 2], ["picker", 2], ["文件", 1], ["目录", 1], ["拖拽", 3], ["网盘", 3], ["附件", 1], ["备份", 2]],
   },
   {
     id: "pet",
@@ -247,6 +247,33 @@ export const CATEGORY_RULES = [
       ["protocol", 1], ["standard", 1], ["rfc", 1], ["manifest", 1], ["接口定义", 3], ["插件规范", 3], ["插件标准", 3],
       ["基座", 4], ["底座", 4], ["脚手架", 3], ["基础设施", 3], ["框架", 3], ["中间件", 2], ["内核", 2],
       ["foundation", 3], ["framework", 2], ["scaffold", 3], ["infrastructure", 2],
+    ],
+  },
+  {
+    id: "media",
+    label: "媒体内容",
+    priority: 21,
+    gate: {
+      name: /(^|[-_ ])(image|video|audio|music|player|render|screenshot|draw|cad|media)([-_ ]|$)|图像|图片|视频|音频|音乐|播放|绘图|截图|渲染|媒体|动画/,
+    },
+    terms: [
+      ["image", 3], ["video", 3], ["audio", 3], ["music", 2], ["player", 2], ["render", 2],
+      ["screenshot", 2], ["draw", 2], ["drawing", 2], ["cad", 2], ["media", 3], ["animation", 2],
+      ["图像", 3], ["图片", 2], ["视频", 3], ["音频", 3], ["音乐", 2], ["播放", 2], ["播放器", 2],
+      ["绘图", 2], ["截图", 2], ["渲染", 2], ["剪辑", 2], ["媒体", 3], ["动画", 2], ["白板", 2],
+    ],
+  },
+  {
+    id: "data",
+    label: "数据工具",
+    priority: 22,
+    gate: {
+      name: /(^|[-_ ])(data|table|csv|sql|database|analytics|chart|finance|stock|quant)([-_ ]|$)|数据|表格|数据库|分析|图表|行情|股票|量化/,
+    },
+    terms: [
+      ["data", 2], ["table", 2], ["csv", 2], ["sql", 3], ["database", 2], ["analytics", 2],
+      ["chart", 2], ["finance", 2], ["stock", 2], ["quant", 2], ["数据", 2], ["表格", 3],
+      ["数据库", 2], ["分析", 2], ["图表", 2], ["行情", 2], ["股票", 2], ["量化", 2],
     ],
   },
 ];
@@ -372,6 +399,18 @@ export const SUBCATEGORY_RULES = {
     { id: "pet-avatar", label: "虚拟形象", terms: [["live2d", 3], ["avatar", 2], ["虚拟形象", 3], ["形象", 2]] },
     { id: "pet-game", label: "游戏娱乐", terms: [["game", 3], ["pokemon", 3], ["游戏", 3], ["娱乐", 2]] },
   ],
+  media: [
+    { id: "media-image", label: "图像截图", terms: [["image", 3], ["screenshot", 3], ["draw", 2], ["drawing", 2], ["cad", 3], ["图像", 3], ["图片", 3], ["截图", 3], ["绘图", 3], ["白板", 3]] },
+    { id: "media-video", label: "视频剪辑", terms: [["video", 3], ["animation", 2], ["视频", 3], ["剪辑", 3], ["动画", 2]] },
+    { id: "media-audio", label: "音频音乐", terms: [["audio", 3], ["music", 3], ["player", 2], ["音频", 3], ["音乐", 3], ["播放器", 3]] },
+    { id: "media-render", label: "渲染导出", terms: [["render", 3], ["export", 2], ["渲染", 3], ["导出", 2]] },
+  ],
+  data: [
+    { id: "data-table", label: "表格数据", terms: [["table", 3], ["csv", 3], ["excel", 3], ["表格", 3], ["数据", 2]] },
+    { id: "data-db", label: "数据库", terms: [["sql", 3], ["database", 3], ["数据库", 3]] },
+    { id: "data-analytics", label: "分析图表", terms: [["analytics", 3], ["chart", 3], ["分析", 3], ["图表", 3]] },
+    { id: "data-finance", label: "行情金融", terms: [["finance", 3], ["stock", 3], ["quant", 2], ["行情", 3], ["股票", 3], ["量化", 3]] },
+  ],
 };
 
 /**
@@ -379,22 +418,23 @@ export const SUBCATEGORY_RULES = {
  * keepIds 是不因样本少被并掉的分类：「公约协议」天然是小样本（定规矩的仓库就那么几个），
  * 但它回答的是「这个生态的规则由谁定」，不该沉进「其他」。
  */
-export const DEFAULT_OPTIONS = { minCount: 10, maxSectors: 20, keepIds: ["spec"] };
+export const DEFAULT_OPTIONS = { minCount: 10, maxSectors: 24, keepIds: ["spec"] };
 
-const RULE_BY_PRIORITY = [...CATEGORY_RULES].sort((a, b) => a.priority - b.priority);
+export const RULE_BY_PRIORITY = [...CATEGORY_RULES].sort((a, b) => a.priority - b.priority);
+const LABEL = new Map(CATEGORY_RULES.map((r) => [r.id, r.label]));
 
 /** 最低置信分：低于它判为「其他」/「未细分」，避免单个弱词决定分类 */
 export const MIN_SCORE = 1;
 export const MIN_SUB_SCORE = 1;
 
 /** 名称最后一段：dsh-plugin-skin 里的 skin 通常是这个仓库的关键词 */
-function lastSegment(name) {
+export function lastSegment(name) {
   const parts = String(name ?? "").split(/[-_\s]+/).filter(Boolean);
   return parts.length ? parts[parts.length - 1] : "";
 }
 
 /** 统一算分：名称 ×2、名称末段额外 +1（末段命中即 ×3）、描述 ×1、topic ×1.5 —— topic 是作者自己标的，比描述里的客套话可信。 */
-function scoreOf(counter, sig, weight) {
+export function scoreOf(counter, sig, weight) {
   const inName = counter(sig.name);
   const inLast = counter(sig.last);
   const inDesc = counter(sig.desc);
@@ -403,7 +443,7 @@ function scoreOf(counter, sig, weight) {
   return (inName * 2 + inLast + inDesc + inTopics * 1.5) * weight;
 }
 
-function textSignals(node) {
+export function textSignals(node) {
   const topics = (node.topics ?? []).filter((t) => !SIGNAL_TAGS.has(t)).join(" ");
   const name = (node.name ?? node.id ?? "").toLowerCase();
   return {
@@ -415,7 +455,7 @@ function textSignals(node) {
 }
 
 /** 门槛：声明了 gate 的分类，必须至少有一路命中才有资格 */
-function passesGate(rule, sig) {
+export function passesGate(rule, sig) {
   const gate = rule.gate;
   if (!gate) return true;
   if (gate.name && gate.name.test(sig.name)) return true;
@@ -425,7 +465,7 @@ function passesGate(rule, sig) {
 }
 
 /** 排除：命中即失去资格，除非 name/desc/topics 里有强自述把它救回来 */
-function isExcluded(rule, sig) {
+export function isExcluded(rule, sig) {
   const exclude = rule.exclude;
   if (!exclude) return false;
   const hit = (exclude.name && exclude.name.test(sig.name)) || (exclude.desc && exclude.desc.test(sig.desc));
@@ -447,7 +487,7 @@ function isExcluded(rule, sig) {
  * 强命中：规则可声明 strong（name/desc/topics 三个正则），命中即【直接胜出】、不再比分数。
  * 只给语义无歧义的「自述」用（如「侧边栏底座」「皮肤框架」），否则会被正文里的 sidebar/皮肤 分流去界面面板或皮肤美化。
  */
-function strongHit(rule, sig) {
+export function strongHit(rule, sig) {
   const strong = rule.strong;
   if (!strong) return false;
   return Boolean(
@@ -492,6 +532,44 @@ export function classifyNode(node) {
     blocked = blocked ?? { id: best.id, label: best.label, reason: "置信分不足" };
     best = null;
   }
+  // 细枝提父级：父级完全没分，但某个细枝有足够强的名字证据时，用细枝的父扇区兜底。
+  // 只在前三档候选唯一时生效，避免两个细枝同分时硬猜。
+  if (!best) {
+    const promoted = [];
+    for (const [parent, rules] of Object.entries(SUBCATEGORY_RULES)) {
+      // 市场必须由“汇总自述”本身决定，不能只靠 index 这类细枝词提升，否则普通 index 插件会混进市场。
+      if (parent === "market") continue;
+      const parentRule = CATEGORY_RULES.find((r) => r.id === parent);
+      if (!parentRule || !passesGate(parentRule, sig) || isExcluded(parentRule, sig)) continue;
+      for (const rule of rules) {
+        let score = 0;
+        let nameScore = 0;
+        const hits = [];
+        for (const [term, weight] of rule.terms) {
+          const counter = makeCounter(term);
+          const s = scoreOf(counter, sig, weight);
+          if (s > 0) {
+            score += s;
+            hits.push(term);
+            nameScore += counter(sig.name) + counter(sig.last);
+          }
+        }
+        if (score > 0) promoted.push({ parent, parentLabel: LABEL.get(parent) ?? parent, score, nameScore, hits });
+      }
+    }
+    promoted.sort((a, b) => b.score - a.score || b.nameScore - a.nameScore);
+    const top = promoted[0];
+    const second = promoted[1];
+    if (top && top.score >= 3 && top.nameScore > 0 && (!second || top.score > second.score)) {
+      best = {
+        id: top.parent,
+        label: top.parentLabel,
+        score: top.score,
+        hits: top.hits.slice(0, 4),
+        promoted: true,
+      };
+    }
+  }
   if (!best) return { id: OTHER.id, label: OTHER.label, score: 0, hits: [], sub: null, blocked };
 
   const subs = SUBCATEGORY_RULES[best.id];
@@ -517,6 +595,8 @@ export function classifyNode(node) {
     }
   }
   if (sub && sub.score < MIN_SUB_SCORE) sub = null; // 细枝同理：太弱的归入「未细分」
+  // 子分类覆盖：父级已确认但细枝证据不足时，归入「综合」，避免大量节点显示未细分。
+  if (!sub && best.id !== OTHER.id) sub = { id: best.id + "-general", label: "综合", score: 0, nameScore: 0, hits: [] };
   return { ...best, sub };
 }
 

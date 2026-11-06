@@ -3,7 +3,7 @@
   "version": "0.5.4",
   "private": true,
   "type": "module",
-  "description": "插件生态图：把带 dsh 系列 GitHub 标签的仓库按功能铺成可交互的生态网络，含 21 个功能扇区与细枝、单扇区放大、双击聚焦、生态榜单；自带 Python 采集后端与只读查询 API，独立站点（非 DSH 插件）。",
+  "description": "插件生态图：把带 dsh 系列 GitHub 标签的仓库按功能铺成可交互的生态网络，含 23 个功能扇区与细枝、单扇区放大、双击聚焦、生态榜单；自带 Python 采集后端与只读查询 API，独立站点（非 DSH 插件）。",
   "scripts": {
     "serve": "node tools/serve.mjs",
     "serve:lan": "HOST=0.0.0.0 node tools/serve.mjs",
@@ -13,7 +13,15 @@
     "test:py": "python3 backend/tests/test_collector.py",
     "seed:fixture": "node tools/seed-fixture.mjs",
     "seed": "node tools/seed-sample.mjs",
-    "precompute": "node tools/precompute-layout.mjs"
+    "precompute": "node tools/precompute-layout.mjs",
+    "build:plugins": "node tools/build-plugin-graph.mjs",
+    "scan:manifests": "node tools/scan-manifests.mjs",
+    "scan:tree": "node tools/scan-manifests-tree.mjs",
+    "crawl:evidence": "node tools/crawl-plugin-evidence.mjs",
+    "verify:plugins": "node tools/plugin-verifier/cli.mjs",
+    "verify:market": "node tools/verify-market.mjs",
+    "eval:classify": "node tools/classify-eval.mjs",
+    "test:verifier": "npm --prefix tools/plugin-verifier test"
   },
   "engines": { "node": ">=22" }
 }

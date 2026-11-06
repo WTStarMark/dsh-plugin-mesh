@@ -583,6 +583,9 @@ class RunOnceOrderTest(unittest.TestCase):
         ), mock.patch.object(snap, "utcnow", lambda: frozen), mock.patch.object(
             collect, "MESH_JSON", TMP / "mesh.json"
         ), mock.patch.object(
+            collect, "NOISE_BLACKLIST", TMP / "no-blacklist.json"
+        ), mock.patch.object(collect.admin_config, "CONFIG_FILE", TMP / "no-admin-config.json"
+        ), mock.patch.object(
             collect, "SNAPSHOT_DIR", TMP / "snapshots"
         ), mock.patch.object(collect, "LAST_CRAWL", TMP / "last-crawl.json"), mock.patch.object(
             collect, "STATUS_FILE", TMP / "status.json"

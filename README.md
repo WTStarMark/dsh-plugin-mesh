@@ -1,9 +1,9 @@
 # 插件生态图
 
-插件生态图是一个网页：把 GitHub 上带 `dsh` 系列标签的仓库，按功能画成一张可交互的关系图。圆心固定是官方仓库 `deepseek-ai/deepseek-harness`，往外分成 21 个功能扇区。数据按小时采集，一轮通常几十分钟；没有令牌或网络慢时会拉长。
+插件生态图是一个网页：把 GitHub 上带 `dsh` 系列标签的仓库，按功能画成一张可交互的关系图。圆心固定是官方仓库 `deepseek-ai/deepseek-harness`，往外分成 23 个功能扇区。数据按小时采集，一轮通常几十分钟；没有令牌或网络慢时会拉长。
 
 [![在线访问](https://img.shields.io/badge/在线访问-node.moc--chen.cn-2f7df6?style=flat-square)](https://node.moc-chen.cn/)
-[![测试](https://img.shields.io/badge/tests-388%20JS%20%2B%20182%20Python-3fb8a8?style=flat-square)](#测试与-ci)
+[![测试](https://img.shields.io/badge/tests-393%20JS%20%2B%20182%20Python-3fb8a8?style=flat-square)](#测试与-ci)
 [![依赖](https://img.shields.io/badge/dependencies-0-57b894?style=flat-square)](#技术选型)
 [![版本](https://img.shields.io/badge/version-v0.5.4-9b8cf0?style=flat-square)]()
 
@@ -30,7 +30,7 @@
 
 | 能力 | 说明 |
 |---|---|
-| 生态全景 | 21 个功能扇区按星标从内到外排布；坐标由可播种随机数生成，同一 seed 可复现 |
+| 生态全景 | 23 个功能扇区按星标从内到外排布；坐标由可播种随机数生成，同一 seed 可复现 |
 | 单扇区放大 | 点扇区，它铺满整圆，圆内按细枝（更细的功能分组）重新分区；`Esc` 或左栏「返回全景」退出 |
 | 双击聚焦 | 双击一个仓库，以它为中心重建扇形图；双击官方仓库直接回全景 |
 | 生态榜单 | 顶栏奖杯弹窗两个榜，各最多 50 行：周更新热榜（本周真发过 release 的项目）与周 star 热榜 |
@@ -72,6 +72,24 @@ python3 backend/collect.py --from-store             # 改完规则后离线重�
 ```
 
 运行数据（`data/mesh.json`、`data/mesh-core.*`、`data/cache/` 等）体积大，且每轮都变，所以不入库。它们由部署机上的采集器生成。干净克隆先跑一次 `--from-raw`，就有一份可看可测的数据。
+
+### 插件图 / 生态图
+
+默认页面是**插件图**：npm 已确证声明 `dsh.bundle` 的插件 + 仓库 manifest 扫描确认 + README 明确提到 `dsh.bundle`/`cordis.patch.yml` 的未发 npm 插件 + 官方主仓库和策展基座；扫描可用 `npm run scan:manifests` 增量运行，当前只覆盖根 package.json，monorepo 子目录待补。**市场只收 npm 包**。点顶栏「插件图 / 生态图」或加 `?view=ecosystem` 可切到完整生态图。
+
+插件图与严格市场索引由离线构建生成；市场可再用 V2 验证器过滤：
+
+```bash
+node tools/build-plugin-graph.mjs --apply-market
+node tools/verify-market.mjs --limit 20   # 可选：对市场包跑 V2 验证
+node tools/build-plugin-graph.mjs --verification dist/market/verification.json --allow-partial --apply-market
+node tools/classify-eval.mjs --sample 120 --out docs/classification-labels.csv  # 分类标注表
+node tools/scan-manifests.mjs --concurrency 16 --token-file .tmp/github-token  # 扫描仓库 manifest（需要 GitHub token）
+# 产出 data/plugins/*（插件图预计算产物）
+# 产出 dist/market/index.strict.json；--apply-market 同时替换本地 index.json（备份 index.ecosystem.json）
+```
+
+插件判定标准、验证器与安全边界见 [docs/plugin-verification.md](docs/plugin-verification.md)。
 
 两点注意：
 
@@ -148,7 +166,7 @@ npm run serve                       # 然后访问 http://127.0.0.1:8788/<ADMIN_
 
 本项目只监听一个端口（线上 80），服务端按最小暴露面加固：
 
-- 路径白名单：只提供 `/`、`/index.html`、`/styles.css`、`/src/*.js`、`/llms.txt` 与前端必需的预计算产物（`/data/mesh-core.json`、`/data/mesh-core.bin`、`/data/mesh-core.head.bin`、`/data/details/*.json`）；明文契约 `/data/mesh.json` 属于服务端数据，不再公开；`backend/`、`tests/`、`docs/`、`data/cache/`、`data/admin/`、`.env` 一律 403。
+- 路径白名单：只提供 `/`、`/index.html`、`/styles.css`、`/src/*.js`、`/llms.txt` 与前端必需的预计算产物（`/data/mesh-core.*`、`/data/details/*.json`，以及插件图的 `/data/plugins/mesh-core.*`、`/data/plugins/details/*.json`）；明文契约 `/data/mesh.json` 属于服务端数据，不再公开；`backend/`、`tests/`、`docs/`、`data/cache/`、`data/admin/`、`.env` 一律 403。
 - 方法白名单：只允许 `GET` / `HEAD`。写方法只有一个 `POST /api/ping`（前端上报一次访问）。
 - Host 白名单：只接受本机地址，挡掉 DNS rebinding 型伪造 Host。
 - 安全响应头：CSP（script/style/connect 限 self，图片放行 GitHub 头像域）、`nosniff`、`no-referrer`、`CORP: same-origin`、`frame-ancestors 'none'`。
@@ -158,7 +176,7 @@ npm run serve                       # 然后访问 http://127.0.0.1:8788/<ADMIN_
 ## 测试与 CI
 
 ```bash
-npm test                           # 前端 + 后端（本机实测：前端 388 项、后端 182 项）
+npm test                           # 前端 + 后端（本机实测：前端 393 项、后端 182 项）
 npm run test:js                    # 只跑前端（node:test）
 npm run test:py                    # 只跑后端（unittest）
 npm run seed:fixture               # 用 data/sample-raw.json 生成夹具数据集（npm test 会自动调用）
