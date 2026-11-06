@@ -11,7 +11,7 @@
 
 import { createServer, request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
-import { createReadStream, readFileSync, writeFileSync, renameSync } from "node:fs";
+import { createReadStream, existsSync, readFileSync, writeFileSync, renameSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { extname, join, normalize, resolve, sep, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -51,6 +51,11 @@ function siteFrom(url) {
   }
 }
 const api = createApi({ root: ROOT });
+/** 插件图专用 API：同一份缓存/数据目录，只换 mesh 文件；?scope=plugins 时使用。 */
+const pluginApi = existsSync(join(ROOT, "data", "plugins", "mesh.json"))
+  ? createApi({ root: ROOT, meshPath: "data/plugins/mesh.json" })
+  : null;
+const apiFor = (url) => (pluginApi && url.searchParams.get("scope") === "plugins" ? pluginApi : api);
 const PORT = Number(process.env.PORT ?? 8788);
 const HOST = process.env.HOST ?? "127.0.0.1";
 /** 本节点在多节点集群里的 id（每台机器各自配一个 NODE_ID；没配就退回配置里的 currentId/第一个节点） */
@@ -136,6 +141,12 @@ const ALLOW = [
   { pattern: /^\/data\/mesh-core\.bin$/, file: "data/mesh-core.bin" },
   { pattern: /^\/data\/mesh-core\.head\.bin$/, file: "data/mesh-core.head.bin" },
   { pattern: /^\/data\/details\/[0-9]+\.json$/, file: null },
+  // 插件图（npm 确认 + manifest/tree 扫描 + README 证据）：默认视图；生态图仍走上面那套
+  { pattern: /^\/data\/plugins\/mesh\.json$/, file: "data/plugins/mesh.json" },
+  { pattern: /^\/data\/plugins\/mesh-core\.json$/, file: "data/plugins/mesh-core.json" },
+  { pattern: /^\/data\/plugins\/mesh-core\.bin$/, file: "data/plugins/mesh-core.bin" },
+  { pattern: /^\/data\/plugins\/mesh-core\.head\.bin$/, file: "data/plugins/mesh-core.head.bin" },
+  { pattern: /^\/data\/plugins\/details\/[0-9]+\.json$/, file: null },
 ];
 
 /** Host 白名单：本机回环 + 本机各网卡地址 + 显式声明的额外域名/IP（ALLOW_HOSTS，逗号分隔）*/
@@ -753,6 +764,7 @@ async function handleApi(req, res, method, pathname, url) {
   }
   if (pathname === "/api/health") {
     const cats = await api.categories();
+    const pluginCats = pluginApi ? await pluginApi.categories().catch(() => null) : null;
     // readme 字段让"README 索引堆了多少"一眼可见（indexed 篇 / diskKB 磁盘 / memoryBytes 检索时的内存）
     const readme = await api.readmeStats().catch(() => null);
     // starDaily 字段让「逐日星标这几天齐不齐」一眼可见（coveredDays / missingDays / spans / lastRound）；没有它，「7 天有没有」只能点开榜单去猜。
@@ -766,6 +778,7 @@ async function handleApi(req, res, method, pathname, url) {
         version: VERSION,
         nodes: cats.total,
         generatedAt: cats.generatedAt,
+        pluginGraph: pluginCats ? { nodes: pluginCats.total, generatedAt: pluginCats.generatedAt } : null,
         readme,
         starDaily,
         identity,
@@ -780,12 +793,12 @@ async function handleApi(req, res, method, pathname, url) {
   }
   // 采集状态接口已随「公开页状态圆环」一起迁进管理后台（/{ADMIN_PATH}/api/status），公开端口不再提供 —— 采集进度属于运营信息，不该对外暴露。
   if (pathname === "/api/categories") {
-    sendJson(res, await api.categories(), 200, { ...API_CACHE, ...CORS });
+    sendJson(res, await apiFor(url).categories(), 200, { ...API_CACHE, ...CORS });
     return;
   }
   if (pathname === "/api/ranking") {
     // 榜单：周更新热榜 + 周 star 热榜。数据变了才变，跟着其它数据接口走 5 分钟公共缓存
-    sendJson(res, await api.ranking(url.searchParams), 200, { ...API_CACHE, ...CORS });
+    sendJson(res, await apiFor(url).ranking(url.searchParams), 200, { ...API_CACHE, ...CORS });
     return;
   }
   if (pathname === "/api/npm-nodes") {
@@ -800,12 +813,12 @@ async function handleApi(req, res, method, pathname, url) {
     return;
   }
   if (pathname === "/api/search") {
-    const result = await api.searchIds(url.searchParams);
+    const result = await apiFor(url).searchIds(url.searchParams);
     sendJson(res, result, 200, { ...API_CACHE, ...CORS });
     return;
   }
   if (pathname === "/api/repos") {
-    sendJson(res, await api.search(url.searchParams), 200, { ...API_CACHE, ...CORS });
+    sendJson(res, await apiFor(url).search(url.searchParams), 200, { ...API_CACHE, ...CORS });
     return;
   }
   const repoMatch = /^\/api\/repos\/([^/]+)\/([^/]+)$/.exec(pathname);
@@ -815,7 +828,7 @@ async function handleApi(req, res, method, pathname, url) {
       sendJson(res, { error: "仓库名不合法" }, 400, CORS);
       return;
     }
-    const found = await api.one(owner, name);
+    const found = await apiFor(url).one(owner, name);
     if (!found) {
       sendJson(res, { error: "未收录该仓库", id: owner + "/" + name }, 404, CORS);
       return;

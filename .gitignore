@@ -21,6 +21,7 @@ data/mesh-core.bin
 data/mesh-core.head.bin
 data/last-crawl.json
 data/details/
+data/plugins/
 data/snapshots/
 data/cache/
 data/stats.json

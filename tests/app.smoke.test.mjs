@@ -1047,8 +1047,20 @@ test("v0.4.6 搜索：命中超过 100 个只做高亮、不画放射线（避�
   assert.match(hintWide, /超过 100 个只做高亮/, "泛搜索应在状态栏说明不画放射线，实际：" + hintWide);
   assert.equal(drawCalls.lineTo - before, 0, "命中过多时不该再画放射线，实际新增 " + (drawCalls.lineTo - before));
 
-  // 窄查询：直接拿一个真实仓库 id，命中数必然是 1 → 照常画射线
-  const target = coreJson.nodes.find((n) => n.id !== "deepseek-ai/deepseek-harness");
+  // 窄查询：找一个命中数确实为 1 的仓库 id（数据里可能有镜像/复刻，id 子串会命中多行，不能盲取第一个）
+  let target = null;
+  for (const candidate of coreJson.nodes) {
+    if (candidate.id === "deepseek-ai/deepseek-harness") continue;
+    let count = 0;
+    for (const other of coreJson.nodes) {
+      if (matches(other, candidate.id)) {
+        count += 1;
+        if (count > 1) break;
+      }
+    }
+    if (count === 1) { target = candidate; break; }
+  }
+  assert.ok(target, "当前数据集里应能找到一个命中数恰为 1 的仓库 id");
   const before2 = drawCalls.lineTo;
   search.value = target.id;
   search.fire("input");

@@ -13,13 +13,14 @@ function idle(callback) {
 
 export function createDetailStore(meta = {}) {
   const chunks = Math.max(1, Number(meta.chunks ?? 8));
+  const base = String(meta.detailBase ?? "./data/details/").replace(/\/?$/, "/");
   let pending = null;
 
   async function loadChunk(index) {
     if (cache.has(index)) return cache.get(index);
     if (!pending) pending = new Map();
     if (pending.has(index)) return pending.get(index);
-    const task = fetch("./data/details/" + index + ".json", { cache: "no-store" })
+    const task = fetch(base + index + ".json", { cache: "no-store" })
       .then((res) => (res.ok ? res.json() : {}))
       .catch(() => ({}))
       .then((data) => {

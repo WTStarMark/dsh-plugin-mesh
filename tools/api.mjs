@@ -6,7 +6,7 @@
 
 import { readFile, readdir, stat } from "node:fs/promises";
 import { gunzipSync } from "node:zlib";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { stripNoiseOwners } from "../src/mesh-data.js";
 /* 每日界限：按该时区（UTC 偏移小时数）的 00:00 切天，必须与 backend/dsh_mesh/config.py 的 DAY_TZ_OFFSET_HOURS 一致（默认 +8 = 北京时间 00:00 换日，而不是 UTC 00:00 = 北京 08:00）。 */
 export const DAY_TZ_OFFSET_HOURS = Number(process.env.DAY_TZ_OFFSET_HOURS ?? 8);
@@ -258,7 +258,7 @@ async function fetchAvatarDataUri(owner, fetchImpl = globalThis.fetch) {
   }
 }
 
-export function createApi({ root }) {
+export function createApi({ root, meshPath = null }) {
   let cache = { at: 0, mesh: null };
   /* 别名派生缓存：随 mesh 对象（load() 按 mtime 换新）一起失效。
      idsOf = 现名 → [现名, 旧名...]（用于把 full_name 键的台账并集起来）；
@@ -296,7 +296,7 @@ export function createApi({ root }) {
   async function load() {
     // 按【文件 mtime】缓存，而不是固定 5 分钟 TTL：mesh.json 有 21MB，JSON.parse 要 ~1 秒，而且会阻塞整个
 // 事件循环；每 5 分钟重解析一次 = 所有并发请求（含前端每 15 秒一次的 /api/status 轮询）被卡一下。
-    const file = join(root, "data", "mesh.json");
+    const file = meshPath ? resolve(root, meshPath) : join(root, "data", "mesh.json");
     const info = await stat(file).catch(() => null);
     if (cache.mesh && info && cache.mtimeMs === info.mtimeMs) return cache.mesh;
     const raw = await readFile(file, "utf8");

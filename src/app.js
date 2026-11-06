@@ -16,6 +16,9 @@ import { createIndexSource } from "./index-source.js";
 import { createNodeSwitcher } from "./nodes.js";
 
 
+/** 当前数据视图（plugins / ecosystem）；API 请求按它带上 ?scope=plugins，避免榜单/搜索混进另一套数据。 */
+let activeScope = "";
+
 const dom = {
   rail: document.getElementById("rail"),
   inspector: document.getElementById("inspector"),
@@ -35,6 +38,7 @@ const dom = {
   manifestoTabLetter: document.getElementById("manifesto-tab-letter"),
   manifestoTabAi: document.getElementById("manifesto-tab-ai"),
   palette: document.getElementById("palette"),
+  viewMode: document.getElementById("view-mode"),
   deck: document.querySelector(".deck"),
   toggleRail: document.getElementById("toggle-rail"),
   toggleDossier: document.getElementById("toggle-dossier"),
@@ -99,7 +103,7 @@ const rankingBoard = createRankingBoard({
   npmLabel: dom.rankingNpmLabel,
   fetcher:
     typeof fetch === "function"
-      ? () => fetch("/api/ranking?limit=50").then((res) => (res.ok ? res.json() : null))
+      ? () => fetch("/api/ranking?limit=50" + (activeScope ? "&scope=" + activeScope : "")).then((res) => (res.ok ? res.json() : null))
       : null,
   onPick: (id) => actions.openRelated(id),
 });
@@ -752,7 +756,7 @@ function scheduleReadmeSearch(q) {
     if (typeof fetch !== "function" || typeof AbortController === "undefined") return;
     readmeAbort = new AbortController();
     try {
-      const res = await fetch("/api/search?limit=800&q=" + encodeURIComponent(q), { signal: readmeAbort.signal });
+      const res = await fetch("/api/search?limit=800&q=" + encodeURIComponent(q) + (activeScope ? "&scope=" + activeScope : ""), { signal: readmeAbort.signal });
       if (!res.ok) return;
       const data = await res.json();
       if (state.query !== q) return; // 期间又改了输入，丢弃这次结果
@@ -1113,6 +1117,24 @@ function viewHooks() {
 }
 
 async function main() {
+  // 默认插件图；?view=ecosystem 切到完整生态图。两套预计算产物分开，切换走整页刷新，布局/统计不会混。
+  const viewMode = new URLSearchParams(location.search).get("view") === "ecosystem" ? "ecosystem" : "plugins";
+  activeScope = viewMode === "plugins" ? "plugins" : "";
+  const dataBase = viewMode === "plugins" ? "./data/plugins/" : "./data/";
+  if (dom.viewMode) {
+    dom.viewMode.textContent = viewMode === "plugins" ? "插件图" : "生态图";
+    dom.viewMode.title =
+      viewMode === "plugins"
+        ? "当前：插件图（npm 确认 + manifest/tree 扫描 + README 证据）。点击切换完整生态图"
+        : "当前：完整生态图。点击切换插件图";
+    dom.viewMode.dataset.mode = viewMode;
+    dom.viewMode.addEventListener("click", () => {
+      const url = new URL(location.href);
+      if (viewMode === "plugins") url.searchParams.set("view", "ecosystem");
+      else url.searchParams.delete("view");
+      location.href = url.toString();
+    });
+  }
   const savedPalette = (() => {
     try {
       return localStorage.getItem("mesh-palette");
@@ -1167,7 +1189,28 @@ async function main() {
   });
 
   const store = await createStore();
-  const { mesh, core, fromCache, revalidate } = await loadMeshBest("./data/mesh.json", { store });
+  const loadView = (base) => loadMeshBest(base + "mesh.json", {
+    store,
+    coreUrl: base + "mesh-core.json",
+    binUrl: base + "mesh-core.bin",
+    headUrl: base + "mesh-core.head.bin",
+  });
+  let loaded;
+  try {
+    loaded = await loadView(dataBase);
+    if (!loaded?.mesh?.nodes?.length) throw new Error("空数据");
+  } catch (err) {
+    if (viewMode !== "plugins") throw err;
+    // 插件图数据还没生成（干净克隆 / 尚未跑 build:plugins）：回退完整生态图，别白屏
+    activeScope = "";
+    loaded = await loadView("./data/");
+    if (dom.viewMode) {
+      dom.viewMode.textContent = "生态图";
+      dom.viewMode.title = "插件图数据尚未生成（运行 node tools/build-plugin-graph.mjs），当前回退到生态图";
+    }
+    dom.hint.title = "插件图数据尚未生成（运行 node tools/build-plugin-graph.mjs），已回退生态图";
+  }
+  const { mesh, core, fromCache, revalidate } = loaded;
   await bootMesh(mesh, { resetFilters: true, core });
   loadPanels();
 
