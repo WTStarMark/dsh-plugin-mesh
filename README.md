@@ -3,7 +3,7 @@
 插件生态图是一个网页：把 GitHub 上带 `dsh` 系列标签的仓库，按功能画成一张可交互的关系图。圆心固定是官方仓库 `deepseek-ai/deepseek-harness`，往外分成 21 个功能扇区。数据按小时采集，一轮通常几十分钟；没有令牌或网络慢时会拉长。
 
 [![在线访问](https://img.shields.io/badge/在线访问-node.moc--chen.cn-2f7df6?style=flat-square)](https://node.moc-chen.cn/)
-[![测试](https://img.shields.io/badge/tests-379%20JS%20%2B%20182%20Python-3fb8a8?style=flat-square)](#测试与-ci)
+[![测试](https://img.shields.io/badge/tests-388%20JS%20%2B%20182%20Python-3fb8a8?style=flat-square)](#测试与-ci)
 [![依赖](https://img.shields.io/badge/dependencies-0-57b894?style=flat-square)](#技术选型)
 [![版本](https://img.shields.io/badge/version-v0.5.4-9b8cf0?style=flat-square)]()
 
@@ -148,7 +148,7 @@ npm run serve                       # 然后访问 http://127.0.0.1:8788/<ADMIN_
 
 本项目只监听一个端口（线上 80），服务端按最小暴露面加固：
 
-- 路径白名单：只提供 `/`、`/index.html`、`/styles.css`、`/src/*.js`、`/data/mesh.json` 等前端必需文件；`backend/`、`tests/`、`docs/`、`data/cache/`、`data/admin/`、`.env` 一律 403。
+- 路径白名单：只提供 `/`、`/index.html`、`/styles.css`、`/src/*.js`、`/llms.txt` 与前端必需的预计算产物（`/data/mesh-core.json`、`/data/mesh-core.bin`、`/data/mesh-core.head.bin`、`/data/details/*.json`）；明文契约 `/data/mesh.json` 属于服务端数据，不再公开；`backend/`、`tests/`、`docs/`、`data/cache/`、`data/admin/`、`.env` 一律 403。
 - 方法白名单：只允许 `GET` / `HEAD`。写方法只有一个 `POST /api/ping`（前端上报一次访问）。
 - Host 白名单：只接受本机地址，挡掉 DNS rebinding 型伪造 Host。
 - 安全响应头：CSP（script/style/connect 限 self，图片放行 GitHub 头像域）、`nosniff`、`no-referrer`、`CORP: same-origin`、`frame-ancestors 'none'`。
@@ -158,7 +158,7 @@ npm run serve                       # 然后访问 http://127.0.0.1:8788/<ADMIN_
 ## 测试与 CI
 
 ```bash
-npm test                           # 前端 + 后端（本机实测：前端 379 项、后端 182 项）
+npm test                           # 前端 + 后端（本机实测：前端 388 项、后端 182 项）
 npm run test:js                    # 只跑前端（node:test）
 npm run test:py                    # 只跑后端（unittest）
 npm run seed:fixture               # 用 data/sample-raw.json 生成夹具数据集（npm test 会自动调用）

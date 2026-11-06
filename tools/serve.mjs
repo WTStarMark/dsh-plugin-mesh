@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 /**
  * 静态预览服务（加固版）—— 只暴露「前端跑起来真正需要的东西」。安全策略：
- *   ① 【路径白名单】只提供 /、/index.html、/styles.css、/src/*.js、/data/mesh.json、/llms.txt；
- *      backend/、tests/、docs/、data/cache/、data/snapshots/、README、package.json 一律 403；
+ *   ① 【路径白名单】只提供 /、/index.html、/styles.css、/src/*.js、/llms.txt、
+ *      以及前端必需的 data 产物（mesh-core.json / mesh-core.bin / mesh-core.head.bin / details/*.json）；
+ *      mesh.json 属于服务端契约，不再对外提供；backend/、tests/、docs/、data/cache/、data/snapshots/、README、package.json 一律 403；
  *   ② 【方法白名单】只允许 GET / HEAD，其余 405；③ 【Host 白名单】只接受本机地址，挡掉 DNS rebinding；
  *   ④ 【安全响应头】CSP / nosniff / frame-ancestors none / CORP same-origin / no-referrer；
  *   ⑤ 隐藏文件（.env 等）与路径穿越双重拦截；⑥ 协商缓存：ETag + 304，并对 JSON/JS/CSS 开 gzip。
@@ -10,22 +11,26 @@
 
 import { createServer, request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
-import { readFileSync, writeFileSync, renameSync } from "node:fs";
+import { createReadStream, readFileSync, writeFileSync, renameSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { extname, join, normalize, resolve, sep, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
-import { gzipSync, brotliCompress, constants } from "node:zlib";
+import { gzipSync, gzip, brotliCompress, constants } from "node:zlib";
 import { promisify } from "node:util";
+import { pipeline } from "node:stream/promises";
 
 // 同步压缩会把单线程服务整个卡住（details 分片 250KB 用 q11 要 ~0.5-1s，期间连 /api/status 都在排队，表现就是「页面卡一下」）；改用异步版，压缩跑在 libuv 线程池里。
 const brotliAsync = promisify(brotliCompress);
+const gzipAsync = promisify(gzip);
 import { networkInterfaces } from "node:os";
 import { createApi, apiIndex, CARD_PAGE_STYLE, validNamePart } from "./api.mjs";
 import { renderPreviewSvg, sceneFromCore } from "./preview-svg.mjs";
 import { createAdmin } from "./admin.mjs";
 import { loadAdminConfig, loadManifesto, clusterPublic, selfNodeId, readEnv } from "./admin-config.mjs";
 import { createReviewSource } from "./review-source.mjs";
+import { bucketIp } from "./ip-bucket.mjs";
+import { createLargeFileGuard } from "./large-file-guard.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const VERSION = "0.5.4";
@@ -127,7 +132,6 @@ const ALLOW = [
   // 给 AI / 爬虫的机器可读摘要：不是前端资源，但和页面同源、同样是只读文本，故意公开
   { pattern: /^\/llms\.txt$/, file: "llms.txt" },
   { pattern: /^\/src\/[A-Za-z0-9_.-]+\.js$/, file: null },
-  { pattern: /^\/data\/mesh\.json$/, file: "data/mesh.json" },
   { pattern: /^\/data\/mesh-core\.json$/, file: "data/mesh-core.json" },
   { pattern: /^\/data\/mesh-core\.bin$/, file: "data/mesh-core.bin" },
   { pattern: /^\/data\/mesh-core\.head\.bin$/, file: "data/mesh-core.head.bin" },
@@ -184,6 +188,20 @@ function apiCost(pathname) {
   if (pathname === "/api/repos" || pathname === "/api/categories") return 2;
   return 1;
 }
+
+/** 静态大文件按体积分档扣令牌：52MB 的 mesh.json 和 2MB 的详情分片不该都只值 3 个令牌。 */
+function staticFileCost(size) {
+  if (size >= 16 * 1024 * 1024) return 20;
+  if (size >= 4 * 1024 * 1024) return 6;
+  if (size >= 1024 * 1024) return 3;
+  return 1;
+}
+
+/** 大文件并发闸门：全局与单 IP 都有上限，避免慢客户端把单进程的缓冲打满。 */
+const LARGE_GET = createLargeFileGuard({
+  globalMax: Math.max(1, Number(process.env.STATIC_LARGE_CONCURRENCY ?? 8) || 8),
+  perIpMax: Math.max(1, Number(process.env.STATIC_LARGE_PER_IP ?? 4) || 4),
+});
 
 function loadStats() {
   try {
@@ -374,11 +392,12 @@ function overlayLocal(payload, now) {
 
 function clientIp(req) {
   // 默认只信 socket 地址：X-Forwarded-For 客户端可以随便伪造，除非明确挂了反向代理（TRUST_PROXY=1）
+  // IPv6 收敛到 /64 再分桶：否则一个 /64 网段里换地址就能无限绕开限流（见 tools/ip-bucket.mjs）。
   if (process.env.TRUST_PROXY === "1") {
     const xff = String(req.headers["x-forwarded-for"] ?? "").split(",")[0].trim();
-    if (xff) return xff;
+    if (xff) return bucketIp(xff);
   }
-  return String(req.socket.remoteAddress ?? "?");
+  return bucketIp(String(req.socket.remoteAddress ?? "?"));
 }
 
 /** 内存护栏：先丢"已回满且闲置一分钟"的桶；仍超上限就丢最旧的一批（绝不清空整表） */
@@ -393,8 +412,8 @@ function sweepBuckets(now) {
   for (const [ip] of oldest) RATE.buckets.delete(ip);
 }
 
-/** 取令牌：返回 { ok, headers }，成本按接口权重扣。 */
-function takeToken(req, pathname) {
+/** 取令牌：返回 { ok, headers }，成本按接口权重扣；costOverride 供静态大文件按体积计费。 */
+function takeToken(req, pathname, costOverride = null) {
   const now = Date.now();
   const ip = clientIp(req);
   let bucket = RATE.buckets.get(ip);
@@ -404,7 +423,7 @@ function takeToken(req, pathname) {
   }
   bucket.tokens = Math.min(RATE.capacity, bucket.tokens + ((now - bucket.at) / 1000) * RATE.refillPerSec);
   bucket.at = now;
-  const cost = apiCost(pathname);
+  const cost = costOverride ?? apiCost(pathname);
   const ok = bucket.tokens >= cost;
   if (ok) bucket.tokens -= cost;
   if (RATE.buckets.size > RATE.maxBuckets) sweepBuckets(now);
@@ -429,6 +448,57 @@ function compressCachePut(pathname, etag, encoding, payload) {
   compressCache.set(pathname + "|" + etag + "|" + encoding, payload);
   while (compressCache.size > COMPRESS_CACHE_MAX) compressCache.delete(compressCache.keys().next().value);
   return payload;
+}
+
+/** 静态文件 ETag：用 inode + size + mtime 生成，不读文件、不算全量 sha1（52MB 每请求 sha1 一次就是纯浪费）。 */
+const statEtagCache = new Map();
+function statEtag(filePath, info) {
+  const key = Math.floor(info.mtimeMs) + ":" + info.size + ":" + String(info.ino ?? 0);
+  const hit = statEtagCache.get(filePath);
+  if (hit && hit.key === key) return hit.etag;
+  const etag = '"' + Number(info.ino ?? 0).toString(36) + "-" + Number(info.size).toString(36) + "-" + Math.floor(info.mtimeMs).toString(36) + '"';
+  statEtagCache.set(filePath, { key, etag });
+  if (statEtagCache.size > 64) statEtagCache.delete(statEtagCache.keys().next().value);
+  return etag;
+}
+
+/** 同一份文件并发压缩时只算一次；结果仍然进 compressCache，按「路径 + ETag + 编码」失效。 */
+const compressInflight = new Map();
+async function compressStatic(filePath, pathname, etag, encoding, size) {
+  const cached = compressCacheGet(pathname, etag, encoding);
+  if (cached) return cached;
+  const key = pathname + "|" + etag + "|" + encoding;
+  const pending = compressInflight.get(key);
+  if (pending) return pending;
+  const task = (async () => {
+    const raw = await readFile(filePath);
+    if (encoding === "br") {
+      const quality = size < 512 * 1024 ? 11 : size < 2 * 1024 * 1024 ? 9 : 5;
+      return compressCachePut(
+        pathname,
+        etag,
+        "br",
+        await brotliAsync(raw, {
+          params: { [constants.BROTLI_PARAM_QUALITY]: quality, [constants.BROTLI_PARAM_SIZE_HINT]: raw.length },
+        }),
+      );
+    }
+    return compressCachePut(pathname, etag, "gzip", await gzipAsync(raw, { level: 6 }));
+  })().finally(() => compressInflight.delete(key));
+  compressInflight.set(key, task);
+  return task;
+}
+
+/** 响应结束（正常 finish 或客户端断开 close）时释放大文件槽位，且只释放一次。 */
+function releaseOnDone(res, release) {
+  let done = false;
+  const once = () => {
+    if (done) return;
+    done = true;
+    release();
+  };
+  res.once("finish", once);
+  res.once("close", once);
 }
 
 /** 市场索引预压缩文件缓存：构建时已生成 index.json.gz/.br，运行时直发文件；按 index.json 的 mtime 失效。 */
@@ -1096,9 +1166,15 @@ async function handleRequest(req, res) {
       deny(res, 403, "403 只提供文件");
       return;
     }
-    // 大文件也吃限流：mesh.json 33MB、mesh-core.bin 2.2MB，被反复拉就是免费带宽放大；正常访客一次首屏只碰一个大文件（3 个令牌），不受影响。
-    if (info.size >= 1024 * 1024) {
-      const gate = takeToken(req, "/api/static-large");
+    const type = MIME[extname(filePath)] ?? "application/octet-stream";
+    const cacheControl = "public, max-age=300, must-revalidate";
+    // ETag 只看 stat，不读文件：52MB 的 mesh.json 每请求 sha1 一次是纯浪费，也让 HEAD 变成重操作。
+    const etag = statEtag(filePath, info);
+    const isHead = method === "HEAD";
+    const large = info.size >= 1024 * 1024;
+    // 大文件按体积扣令牌（HEAD 很便宜，只按 1 个令牌计）；小文件维持原来的免费行为。
+    if (large) {
+      const gate = takeToken(req, isHead ? "/api/static-head" : "/api/static-large", isHead ? 1 : staticFileCost(info.size));
       for (const [key, value] of Object.entries(gate.headers)) res.setHeader(key, value);
       if (!gate.ok) {
         deny(res, 429, "429 请求过于频繁，请按 Retry-After 退避");
@@ -1106,65 +1182,64 @@ async function handleRequest(req, res) {
         return;
       }
     }
-    const body = await readFile(filePath);
-    const type = MIME[extname(filePath)] ?? "application/octet-stream";
-    // 缓存分两层：数据（mesh.json）永远实时；代码与样式走浏览器缓存 + 304 校验
-    const cacheControl = pathname === "/data/mesh.json" ? "no-store" : "public, max-age=300, must-revalidate";
-    const etag = '"' + createHash("sha1").update(body).digest("hex").slice(0, 20) + '"';
+    const commonHeaders = {
+      "content-type": type,
+      etag,
+      "cache-control": cacheControl,
+      vary: "accept-encoding",
+      ...SECURITY_HEADERS,
+    };
     if (req.headers["if-none-match"] === etag) {
-      res.writeHead(304, { etag, "cache-control": cacheControl, ...SECURITY_HEADERS });
+      res.writeHead(304, commonHeaders);
       res.end();
       console.log("304 " + sanitizeForLog(pathname));
       return;
     }
-    // 二进制契约（.bin）本身已经很紧凑，但 Brotli 仍能再省一点，一并压
+    // HEAD 只回元数据：不读正文、不压缩、不算哈希。identity 的 content-length 是文件真实大小；
+    // GET 若协商了压缩，响应里会带 content-encoding，HEAD 与 GET 的 ETag 仍然一致。
+    if (isHead) {
+      res.writeHead(200, { ...commonHeaders, "content-length": String(info.size) });
+      res.end();
+      console.log("200 " + sanitizeForLog(pathname) + " (HEAD " + info.size + "B)");
+      return;
+    }
+    // 二进制契约（.bin）本身已经很紧凑，但 Brotli 仍能再省一点，一并压，压缩结果按 ETag 缓存。
     const compressible = /^(text\/|application\/(json|javascript|octet-stream))/.test(type) || /mesh-core.*\.bin$/.test(pathname);
     const accept = String(req.headers["accept-encoding"] ?? "");
-    let payload = body;
-    let encoding;
-    if (compressible && body.length > 1024) {
-      // 优先 Brotli（JSON 比 gzip 再省 15~20%），不支持的客户端回落 gzip
-      if (/\bbr\b/.test(accept)) {
-        // Brotli 是同步压缩（11MB 的 JSON 用 q11 要 21 秒），所以按体积分档：<512KB 用 q11、<2MB 用 q9、更大直接 gzip；
-        const quality = body.length < 512 * 1024 ? 11 : body.length < 2 * 1024 * 1024 ? 9 : 5;
-        const cached = quality ? compressCacheGet(pathname, etag, "br") : null;
-        if (quality) {
-          payload =
-            cached ??
-            compressCachePut(
-              pathname,
-              etag,
-              "br",
-              await brotliAsync(body, {
-                params: { [constants.BROTLI_PARAM_QUALITY]: quality, [constants.BROTLI_PARAM_SIZE_HINT]: body.length },
-              }),
-            );
-          encoding = "br";
-        } else if (/\bgzip\b/.test(accept)) {
-          payload = gzipSync(body);
-          encoding = "gzip";
-        }
-      } else if (/\bgzip\b/.test(accept)) {
-        payload = gzipSync(body);
-        encoding = "gzip";
+    let encoding = null;
+    if (compressible && info.size > 1024) {
+      if (/\bbr\b/.test(accept)) encoding = "br";
+      else if (/\bgzip\b/.test(accept)) encoding = "gzip";
+    }
+    const slot = large ? LARGE_GET.acquire(clientIp(req)) : { ok: true, release() {} };
+    if (!slot.ok) {
+      res.writeHead(429, { "retry-after": "1", "content-type": "text/plain; charset=utf-8", ...SECURITY_HEADERS }).end("429 大文件并发过多，请稍后重试");
+      console.log("429 " + sanitizeForLog(pathname) + " (large static concurrent)");
+      return;
+    }
+    releaseOnDone(res, slot.release);
+    if (encoding) {
+      const payload = await compressStatic(filePath, pathname, etag, encoding, info.size);
+      res.writeHead(200, { ...commonHeaders, "content-encoding": encoding, "content-length": String(payload.length) });
+      res.end(payload);
+      console.log("200 " + sanitizeForLog(pathname) + " (" + payload.length + "B " + encoding + ")");
+      return;
+    }
+    res.writeHead(200, { ...commonHeaders, "content-length": String(info.size) });
+    await pipeline(createReadStream(filePath), res);
+    console.log("200 " + sanitizeForLog(pathname) + " (" + info.size + "B stream)");
+  } catch (err) {
+    if (!res.headersSent) {
+      deny(res, 404, "404 " + sanitizeForLog(pathname));
+      console.log("404 " + sanitizeForLog(pathname));
+    } else {
+      console.log("静态读取中断 " + sanitizeForLog(pathname) + "：" + sanitizeForLog(err && err.message ? err.message : err));
+      try {
+        res.destroy();
+      } catch {
+        /* 连接已经断了 */
       }
     }
-    const headers = {
-      "content-type": type,
-      etag,
-      "cache-control": cacheControl,
-      "content-length": payload.length,
-      vary: "accept-encoding",
-      ...SECURITY_HEADERS,
-    };
-    if (encoding) headers["content-encoding"] = encoding;
-    res.writeHead(200, headers);
-    if (method === "HEAD") res.end();
-    else res.end(payload);
-    console.log("200 " + sanitizeForLog(pathname) + " (" + payload.length + "B" + (encoding ? " " + encoding : "") + ")");
-  } catch {
-    deny(res, 404, "404 " + sanitizeForLog(pathname));
-    console.log("404 " + sanitizeForLog(pathname));
   }
 }
 
@@ -1190,7 +1265,7 @@ const server = createServer({ keepAliveTimeout: 65_000, headersTimeout: 20_000, 
 server.listen(PORT, HOST, () => {
   const actual = server.address().port;
   console.log("dsh-plugin-mesh 前端原型: http://" + HOST + ":" + actual + "/");
-  console.log("白名单路径: /  /index.html  /styles.css  /src/*.js  /data/mesh.json");
+  console.log("白名单路径: /  /index.html  /styles.css  /src/*.js  /data/mesh-core.*  /data/details/*.json  /llms.txt");
   console.log("接口: GET /api · /api/health · /api/categories · /api/repos · /api/repos/:owner/:name · /api/ranking");
   console.log(
     "限流: " + RATE.capacity + " 令牌/分钟/IP（回填 " + RATE.refillPerSec + "/秒；/api/ranking 记 " + apiCost("/api/ranking") + " 个，卡片记 " + apiCost("/api/card/x/y.svg") + " 个）",

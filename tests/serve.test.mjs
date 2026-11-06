@@ -5,8 +5,9 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { request, createServer } from "node:http";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
+import { gunzipSync } from "node:zlib";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -23,6 +24,18 @@ const rawStatus = (path, headers) =>
     const req = request({ host: "127.0.0.1", port, path, method: "GET", headers }, (res) => {
       res.resume();
       resolvePromise(res.statusCode);
+    });
+    req.on("error", reject);
+    req.end();
+  });
+
+/** 原始请求：不做自动解压，方便断言 content-encoding 与响应字节。 */
+const rawGet = (path, method = "GET", headers = {}) =>
+  new Promise((resolvePromise, reject) => {
+    const req = request({ host: "127.0.0.1", port, path, method, headers }, (res) => {
+      const chunks = [];
+      res.on("data", (chunk) => chunks.push(chunk));
+      res.on("end", () => resolvePromise({ statusCode: res.statusCode, headers: res.headers, body: Buffer.concat(chunks) }));
     });
     req.on("error", reject);
     req.end();
@@ -61,7 +74,7 @@ after(() => {
 const status = async (path, options = {}) => (await fetch(base + path, options)).status;
 
 test("前端真正需要的资源可访问", async () => {
-  for (const path of ["/", "/index.html", "/styles.css", "/src/app.js", "/src/cache.js", "/src/ranking.js", "/data/mesh.json"]) {
+  for (const path of ["/", "/index.html", "/styles.css", "/src/app.js", "/src/cache.js", "/src/ranking.js", "/data/mesh-core.bin"]) {
     assert.equal(await status(path), 200, path + " 应可访问");
   }
 });
@@ -81,6 +94,7 @@ test("源码、数据缓存、文档、配置一律 403（不在白名单）", a
     "/data/last-crawl.json",
     "/data/sample-raw.json",
     "/data/sample-mesh.json",
+    "/data/mesh.json",
     "/tools/serve.mjs",
   ]) {
     assert.equal(await status(path), 403, path + " 不应对外提供");
@@ -218,15 +232,43 @@ test("统计文件本身绝不对外提供", async () => {
   }
 });
 
-test("缓存分层：数据永远实时，代码与样式走浏览器缓存", async () => {
-  const data = await fetch(base + "/data/mesh.json");
-  assert.equal(data.headers.get("cache-control"), "no-store", "mesh.json 必须每次取新的");
+test("代码与样式走浏览器缓存；明文 mesh.json 不再对外提供", async () => {
+  assert.equal(await status("/data/mesh.json"), 403, "mesh.json 属于服务端契约，不应公开（大文件 DoS 面）");
 
-  for (const path of ["/src/app.js", "/styles.css", "/index.html"]) {
+  for (const path of ["/src/app.js", "/styles.css", "/index.html", "/data/mesh-core.bin"]) {
     const res = await fetch(base + path);
     assert.match(res.headers.get("cache-control") ?? "", /max-age=300/, path + " 应走浏览器缓存");
     assert.ok(res.headers.get("etag"), path + " 应带 ETag 以便 304 校验");
   }
+});
+
+test("HEAD 静态文件只回元数据：不压缩、content-length 是文件真实大小", async () => {
+  const file = join(ROOT, "data/mesh-core.bin");
+  const info = statSync(file);
+  const res = await rawGet("/data/mesh-core.bin", "HEAD", { "accept-encoding": "gzip, br" });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.headers["content-encoding"], undefined, "HEAD 不应触压缩（否则等于每次 HEAD 都白算一遍）");
+  assert.equal(Number(res.headers["content-length"]), info.size, "HEAD 的 content-length 应是文件真实大小");
+  assert.ok(res.headers.etag, "HEAD 也要给 ETag，客户端才能用 304");
+  assert.equal(res.body.length, 0, "HEAD 不应有响应体");
+});
+
+test("GET 二进制契约按协商压缩，解压后与磁盘文件逐字节一致", async () => {
+  const raw = readFileSync(join(ROOT, "data/mesh-core.bin"));
+  const res = await rawGet("/data/mesh-core.bin", "GET", { "accept-encoding": "gzip" });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.headers["content-encoding"], "gzip");
+  assert.deepEqual(gunzipSync(res.body), raw, "压缩后的响应必须能还原出原文件");
+});
+
+test("静态 ETag 由 stat 生成：HEAD 与 GET 一致，304 可用", async () => {
+  const head = await rawGet("/data/mesh-core.bin", "HEAD");
+  const get = await rawGet("/data/mesh-core.bin", "GET", { "accept-encoding": "identity" });
+  assert.ok(head.headers.etag);
+  assert.equal(head.headers.etag, get.headers.etag, "同一份文件的 HEAD/GET ETag 应一致");
+  const cached = await rawGet("/data/mesh-core.bin", "GET", { "if-none-match": head.headers.etag });
+  assert.equal(cached.statusCode, 304);
+  assert.equal(cached.body.length, 0);
 });
 
 test("预览图不带参数时落默认档位 1400，而不是最小档 600", async () => {
