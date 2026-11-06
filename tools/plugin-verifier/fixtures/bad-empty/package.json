@@ -1,0 +1,9 @@
+{
+  "name": "dsh-empty",
+  "version": "1.0.0",
+  "dsh": {
+    "bundle": {
+      "patch": "./empty.yml"
+    }
+  }
+}

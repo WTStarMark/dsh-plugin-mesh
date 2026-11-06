@@ -1,0 +1,18 @@
+{
+  "name": "dsh-hello",
+  "version": "1.0.0",
+  "description": "fixture",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/example/dsh-hello.git"
+  },
+  "dsh": {
+    "manifestVersion": 1,
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "engines": {
+    "dsh": ">=0.2.0"
+  }
+}

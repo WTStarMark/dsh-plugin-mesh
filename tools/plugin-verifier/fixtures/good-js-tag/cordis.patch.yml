@@ -1,0 +1,4 @@
+- insert:
+    - id: x
+      name: '@example/x'
+      disabled: !!js "!ctx.get('profileContext')"

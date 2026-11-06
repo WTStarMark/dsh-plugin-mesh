@@ -1,0 +1,9 @@
+{
+  "name": "dsh-noinsert",
+  "version": "1.0.0",
+  "dsh": {
+    "bundle": {
+      "patch": "./noinsert.yml"
+    }
+  }
+}

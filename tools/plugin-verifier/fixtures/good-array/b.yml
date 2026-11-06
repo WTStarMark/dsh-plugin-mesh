@@ -1,0 +1,3 @@
+- insert:
+    - id: b
+      name: '@example/b'

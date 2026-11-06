@@ -1,0 +1,9 @@
+{
+  "name": "dsh-badyaml",
+  "version": "1.0.0",
+  "dsh": {
+    "bundle": {
+      "patch": "./bad.yml"
+    }
+  }
+}

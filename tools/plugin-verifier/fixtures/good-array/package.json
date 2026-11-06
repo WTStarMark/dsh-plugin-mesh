@@ -1,0 +1,13 @@
+{
+  "name": "dsh-array",
+  "version": "1.0.0",
+  "repository": "https://github.com/example/dsh-array",
+  "dsh": {
+    "bundle": {
+      "patch": [
+        "./a.yml",
+        "./b.yml"
+      ]
+    }
+  }
+}

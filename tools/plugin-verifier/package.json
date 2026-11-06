@@ -1,0 +1,15 @@
+{
+  "name": "dsh-plugin-verifier",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "DSH 插件安装前验证器：提取官方安装判定的声明性检查，不安装 DSH、不执行插件代码。",
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "js-yaml": "4.1.0",
+    "semver": "7.6.3"
+  },
+  "engines": { "node": ">=22" }
+}

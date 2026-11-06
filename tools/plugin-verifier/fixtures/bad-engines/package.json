@@ -1,0 +1,13 @@
+{
+  "name": "dsh-engines",
+  "version": "1.0.0",
+  "repository": "https://github.com/example/dsh-engines",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "engines": {
+    "dsh": ">=999.0.0"
+  }
+}
