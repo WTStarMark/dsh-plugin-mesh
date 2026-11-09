@@ -25,10 +25,12 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const TMP = mkdtempSync(join(tmpdir(), "dsh-mesh-admin-"));
 const ADMIN_DIR = join(TMP, "admin");
 const BLACKLIST_FILE = join(TMP, "noise-blacklist.json");
+const REVIEW_TEST_FILE = join(TMP, "review-verdicts.json");
 // 累积索引也指向临时目录：影响预估必须用可控的假数据测，不能跟着真实采集结果漂
 const CACHE_DIR = join(TMP, "cache");
 process.env.ADMIN_DIR = ADMIN_DIR;
 process.env.BLACKLIST_FILE = BLACKLIST_FILE;
+process.env.REVIEW_FILE = REVIEW_TEST_FILE;
 process.env.CACHE_DIR = CACHE_DIR;
 
 // 假累积索引：spam-owner 2 个仓库共 7 星（影响预估 = 点应用后会被剔出图的数）
@@ -99,6 +101,7 @@ before(async () => {
       ADMIN_PASSWORD_HASH: await hashPassword(PASSWORD),
       ADMIN_DIR,
       BLACKLIST_FILE,
+      REVIEW_FILE: REVIEW_TEST_FILE,
       CACHE_DIR,
       STATS_FILE: join(TMP, "stats.json"),
     },
@@ -192,7 +195,7 @@ test("前后端不漂移：后台脚本引用的元素 id 与接口都必须真�
     "session", "login", "logout", "status", "overview", "repos", "workflow",
     "lists", "lists/blacklist", "lists/whitelist", "settings", "manifesto", "cluster",
     "resonance", "resonance/base", "resonance/child",
-    "apply", "audit", "logs", "log",
+    "apply", "audit", "logs", "log", "review",
   ]);
   const used = [...new Set([...js.matchAll(/api(?:Get|Post)\("api\/([^"?]+)/g)].map((m) => m[1]))];
   assert.ok(used.length > 5, "应该能从后台脚本里找到接口调用");
@@ -287,8 +290,8 @@ test("状态 / 数据 / 工作流：形状齐、字段可缺", async () => {
   assert.ok(!JSON.stringify(overview.files).includes(ROOT), "不许把本机绝对路径暴露出去");
 
   const workflow = await json(await call("workflow"));
-  assert.equal(workflow.phases.length, 5, "工作流五段固定");
-  assert.deepEqual(workflow.phases.map((p) => p.id), ["segments", "readme", "build", "write", "precompute"]);
+  assert.equal(workflow.phases.length, 6, "工作流六段固定");
+  assert.deepEqual(workflow.phases.map((p) => p.id), ["segments", "readme", "build", "write", "precompute", "plugin-graph"]);
 
   const repos = await json(await call("repos?limit=3"));
   assert.ok(repos.items.length <= 3 && repos.total > 0);
@@ -842,4 +845,96 @@ test("manifesto：默认内容可读；保存后可读回，且字段被规范�
   assert.equal(back.pages.length, 1);
   assert.equal(back.pages[0].html, "<p>hi</p>");
   assert.ok(back.updatedAt, "保存时写入时间戳");
+});
+
+// ---------- 复核页：待人工复核 + 人工结论（与黑名单同一套会话/CSRF/审计纪律） ----------
+
+test("复核：GET 能列出待人工队列与实时判定计数", async () => {
+  const data = await json(await call("review"));
+  assert.equal(data.error, undefined, "GET 不应报错：" + JSON.stringify(data).slice(0, 200));
+  assert.ok(Array.isArray(data.queue), "queue 必须是数组：" + JSON.stringify(data).slice(0, 400));
+  assert.ok(data.queue.length > 0, "队列不该是空：counts=" + JSON.stringify(data.counts) + " verdictCounts=" + JSON.stringify(data.verdictCounts));
+  const first = data.queue[0];
+  for (const key of ["id", "name", "stars", "reason", "topics", "tags", "override"]) {
+    assert.ok(key in first, "队列行缺字段 " + key);
+  }
+  assert.equal(first.override, null, "还没复核过的条目 override 应是 null");
+  assert.ok(first.evidence && typeof first.evidence === "object", "行内要带证据速览（清单/npm/README 片段）");
+  assert.ok(!JSON.stringify(first.evidence).includes(ROOT), "证据速览不暴露本机绝对路径");
+  assert.ok(data.verdictCounts && typeof data.verdictCounts.related === "number", "verdictCounts 要回计数");
+  assert.ok(typeof data.filePath === "string" && data.filePath.endsWith("review-verdicts.json"), "要如实说结论存哪：" + data.filePath);
+  assert.equal(Object.keys(data.stale ?? {}).length === data.counts.stale, true, "counts.stale 与 stale 列表要一致");
+});
+
+test("复核：写操作不带 CSRF 会被拒", async () => {
+  const res = await call("review", { method: "POST", body: { action: "set", repoId: "a/b", verdict: "related" } });
+  assert.notEqual(res.status, 200, "不带 CSRF 的写操作必须失败");
+});
+
+test("复核：确认噪声落盘 + 撤回回空（覆盖前留 .bak），假参数 400", async () => {
+  // 1) 往确实在 manual 队列里的仓库下结论
+  const before = await json(await call("review"));
+  const target = before.queue[0];
+  const setRes = await call("review", { method: "POST", body: { action: "set", repoId: target.id, verdict: "noise", note: "看过了，蹭标签" }, csrfToken: csrf });
+  assert.equal(setRes.status, 200, "set 应成功");
+  const setData = await json(setRes);
+  const entry = setData.review.reviews[target.id];
+  assert.equal(entry.verdict, "noise", "结论要落盘");
+  assert.equal(entry.note, "看过了，蹭标签");
+  const disk = JSON.parse(readFileSync(REVIEW_TEST_FILE, "utf8"));
+  assert.equal(disk.reviews[target.id].verdict, "noise", "文件里要有同一结论");
+  // 首次写入没有旧文件可备份；再写一次才有 .bak（与黑名单同口径）
+  const set2 = await call("review", { method: "POST", body: { action: "set", repoId: target.id, verdict: "related", note: "改判相关" }, csrfToken: csrf });
+  assert.equal(set2.status, 200);
+  assert.ok(existsSync(REVIEW_TEST_FILE + ".bak"), "覆盖现有结论前要留 .bak");
+  assert.equal((await json(set2)).review.reviews[target.id].verdict, "related");
+
+  // 2) 回到队列：同一行已标出已存结论
+  const mid = await json(await call("review"));
+  const midRow = mid.queue.find((r) => r.id === target.id);
+  assert.ok(midRow.override && midRow.override.verdict === "related", "队列行要实时标出最新结论");
+
+  // 3) 撤回：条目清空
+  const rm = await json(await call("review", { method: "POST", body: { action: "remove", repoId: target.id }, csrfToken: csrf }));
+  assert.equal(rm.ok, true);
+  assert.equal(rm.review.reviews[target.id], undefined, "撤回后条目消失");
+
+  // 再撤一次：404，如实报没有
+  const again = await call("review", { method: "POST", body: { action: "remove", repoId: target.id }, csrfToken: csrf });
+  assert.equal(again.status, 404, "重复撤回应 404");
+
+  // 4) 参数校验：manual 不能手工下 / 假 id / 假 action
+  const bad1 = await call("review", { method: "POST", body: { action: "set", repoId: "a/b", verdict: "manual" }, csrfToken: csrf });
+  assert.equal(bad1.status, 400, "manual 不能手工下");
+  const bad2 = await call("review", { method: "POST", body: { action: "set", repoId: "not-a-repo", verdict: "related" }, csrfToken: csrf });
+  assert.equal(bad2.status, 400);
+  const bad3 = await call("review", { method: "POST", body: { action: "wat" }, csrfToken: csrf });
+  assert.equal(bad3.status, 400);
+});
+
+test("复核：purge-stale 清掉不在图里的条目，图里的不动", async () => {
+  const before = await json(await call("review"));
+  const inMeshTarget = before.queue[0];
+  await call("review", { method: "POST", body: { action: "set", repoId: inMeshTarget.id, verdict: "related" }, csrfToken: csrf });
+  await call("review", { method: "POST", body: { action: "set", repoId: "tmp-owner/never-in-mesh", verdict: "noise" }, csrfToken: csrf });
+  const mid = await json(await call("review"));
+  assert.ok(mid.counts.stale >= 1, "刚塞的失效条目应该标 stale");
+  const purge = await json(await call("review", { method: "POST", body: { action: "purge-stale" }, csrfToken: csrf }));
+  assert.equal(purge.ok, true);
+  assert.ok(purge.purged.includes("tmp-owner/never-in-mesh"), "失效条目要被清掉：" + JSON.stringify(purge.purged));
+  assert.ok(!purge.review.reviews["tmp-owner/never-in-mesh"], "purge 后复核表里不该再有它");
+  const disk = JSON.parse(readFileSync(REVIEW_TEST_FILE, "utf8"));
+  assert.ok(!disk.reviews["tmp-owner/never-in-mesh"]);
+  // 收尾：把图内条目的结论撤掉，别污染其他用例
+  await call("review", { method: "POST", body: { action: "remove", repoId: inMeshTarget.id }, csrfToken: csrf });
+});
+
+test("复核：status.pending 带 review 标志（改了复核没点应用要提示）", async () => {
+  const before = await json(await call("review"));
+  const target = before.queue[0];
+  const setRes = await call("review", { method: "POST", body: { action: "set", repoId: target.id, verdict: "noise" }, csrfToken: csrf });
+  assert.equal(setRes.status, 200);
+  const status = await json(await call("status"));
+  assert.equal(status.pending.review, true, "复核文件比 mesh 新时 pending.review 必须为真：" + JSON.stringify(status.pending));
+    await call("review", { method: "POST", body: { action: "remove", repoId: target.id }, csrfToken: csrf });
 });

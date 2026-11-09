@@ -9,6 +9,7 @@
  */
 
 import { closeSync, existsSync, openSync, readFileSync, statSync } from "node:fs";
+import { gunzipSync } from "node:zlib";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { COOKIE_NAME, createAuth, parseCookies } from "./admin-auth.mjs";
@@ -62,6 +63,7 @@ import {
   writeEcosystem,
 } from "./admin-config.mjs";
 import { CONTEXT_IDS, CONTEXT_RULES, DEFAULT_CONTEXT, builtinBase } from "./ecosystem-bases.mjs";
+import { REVIEW_FILE, VERDICT_REVIEW_NOTE, readVerdictReviews, removeVerdictReview, setVerdictReview, npmOkSet } from "./review-verdicts.mjs";
 import { createMarketAdmin } from "./market-admin.mjs";
 
 const BODY_LIMIT = 256 * 1024;
@@ -79,6 +81,7 @@ const PHASES = [
   { id: "build", label: "构建索引", desc: "噪声判定 → 分类 → 相关性三档 → 生态共鸣边" },
   { id: "write", label: "写快照", desc: "写 mesh.json / 快照 / 星标历史 / 更新日志" },
   { id: "precompute", label: "预计算布局", desc: "生成 mesh-core.* 与详情分片（前端首屏读它）" },
+  { id: "plugin-graph", label: "生成插件图", desc: "数据/plugins 生态图与严格市场索引离线重建（2026-11-07 补进管线，消除与全量图的判定漂移）" },
 ];
 
 const nowIso = () => new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
@@ -391,16 +394,25 @@ export function createAdmin({ version, api, securityHeaders }) {
     return newest > 0 && newest > meshMtime ? new Date(newest).toISOString() : null;
   }
 
+  /** 复核结论文件与 mesh.json 比新鲜度（与名单同款近似）：改了复核没点应用，就该提示 */
+  function pendingReview() {
+    const meshMtime = fileMtimeMs(join(ROOT, "data", "mesh.json"));
+    const newest = fileMtimeMs(REVIEW_FILE);
+    return newest > 0 && newest > meshMtime ? new Date(newest).toISOString() : null;
+  }
+
   async function resonancePending() {
     return resonanceIsPending(readEcosystem(), await api.load().catch(() => null));
   }
 
   async function pendingPayload() {
     const listsAt = pendingLists();
+    const reviewAt = pendingReview();
     return {
       lists: !!listsAt,
+      review: !!reviewAt,
       resonance: await resonancePending(),
-      since: listsAt,
+      since: [listsAt, reviewAt].filter(Boolean).sort().pop() ?? null,
     };
   }
 
@@ -548,6 +560,87 @@ export function createAdmin({ version, api, securityHeaders }) {
       whitelistNeedsCrawl: true,
       note: "黑名单/共鸣改动点『应用变更』（离线重算）即可生效；白名单标签改的是抓取口径，要等下一轮真实采集才会改口径。",
       settings: settingsPayload(),
+    };
+  }
+
+  /** 复核队列：生态图三档判定里的 manual（待人工），加人工结论（压过规则与证据）。 */
+  async function reviewPayload() {
+    const mesh = await api.load().catch(() => null);
+    const doc = readVerdictReviews();
+    const nodes = (mesh && mesh.nodes) || [];
+    const byId = new Map(nodes.map((n) => [n.id, n]));
+    const repos = manRepos();
+    const npmEvidence = await adminNpmEvidence();
+    /** 疑点 related（2026-11-07 体检）：弱信号低星（描述<20 字&&星≤1，或无描述 0 星）+"高星无证"（星≥50&&描述<40）。
+     *  仅作复核候选，不改判定；清单校验 confirmed 的不算疑点（它已经是准插件）。 */
+    const isSuspectNode = (n) => {
+      if (n.verdict !== "related") return null;
+      const mr = repos[n.id];
+      if (mr && mr.verdict === "confirmed") return null;
+      const desc = String(n.description || "").trim();
+      if ((desc.length < 20 && (n.stars || 0) <= 1) || (!desc && (n.stars || 0) === 0)) return "弱信号低星";
+      if ((n.stars || 0) >= 50 && desc.length < 40) return "高星无证";
+      return null;
+    };
+    const suspectPool = nodes.filter((n) => isSuspectNode(n) !== null)
+      .sort((a, b) => (b.stars || 0) - (a.stars || 0) || String(a.id).localeCompare(String(b.id)))
+      .slice(0, 150);
+    const snips = readmeSnips();
+    const rowOf = (n, kind, why) => {
+      const mr = repos[n.id];
+      return {
+      id: n.id,
+      name: String(n.name || n.id),
+      kind,
+      suspectWhy: why || null,
+      stars: n.stars ?? 0,
+      description: String(n.description || "").slice(0, 240),
+      topics: Array.isArray(n.topics) ? n.topics.slice(0, 10) : [],
+      tags: Array.isArray(n.matchedTags) ? n.matchedTags.slice(0, 8) : [],
+      reason: typeof n.reason === "string" ? n.reason : null,
+      relevance: Number.isFinite(n.relevance) ? n.relevance : null,
+      override: doc.reviews[n.id] ?? null,
+      // 证据速览：清单/npm/README 摘要片段（复核不用离场开标签页）
+      evidence: {
+        manifestVerdict: mr ? mr.verdict ?? null : null,
+        manifestPackages: mr && Array.isArray(mr.packages) ? mr.packages.slice(0, 3) : [],
+        npmOk: npmEvidence.has(n.id),
+        readmeSnip: snips[n.id] ?? null,
+      },
+      };
+    };
+    const queue = [
+      ...nodes.filter((n) => n.verdict === "manual")
+        .sort((a, b) => (b.stars || 0) - (a.stars || 0) || String(a.id).localeCompare(String(b.id)))
+        .map((n) => rowOf(n, "manual", null)),
+      ...suspectPool.map((n) => rowOf(n, "suspect", isSuspectNode(n))),
+    ];
+    const overrides = Object.entries(doc.reviews)
+      .map(([id, rec]) => {
+        const node = byId.get(id);
+        return {
+          id,
+          verdict: rec.verdict,
+          note: rec.note,
+          addedAt: rec.addedAt,
+          // 在图里吗 / 现在规则判成什么：改名或删库后条目还在文件里，如实标 stale
+          inMesh: !!node,
+          meshVerdict: node ? node.verdict ?? null : null,
+          stale: !node,
+        };
+      })
+      .sort((a, b) => (a.stale === b.stale ? String(a.id).localeCompare(String(b.id)) : a.stale ? 1 : -1));
+    const stale = overrides.filter((o) => o.stale);
+    return {
+      note: VERDICT_REVIEW_NOTE,
+      reviews: { ...doc.reviews },
+      filePath: relFromRoot(REVIEW_FILE),
+      fileUpdatedAt: doc.updatedAt,
+      counts: { queue: queue.length, manual: queue.filter((r) => r.kind === "manual").length, suspect: queue.filter((r) => r.kind === "suspect").length, overrides: overrides.length, stale: stale.length },
+      verdictCounts: (mesh && mesh.meta && mesh.meta.verdictCounts) || null,
+      queue,
+      overrides,
+      stale,
     };
   }
 
@@ -879,6 +972,45 @@ export function createAdmin({ version, api, securityHeaders }) {
         backedUp: written.backedUp,
       });
     }
+    if (name === "review") {
+      if (!isWrite) return sendJson(res, 200, await reviewPayload());
+      const parsed = await readJsonBody(req);
+      if (parsed.error) return sendJson(res, 400, { error: parsed.error });
+      const action = String(parsed.value.action ?? "");
+      if (action === "set") {
+        const repoId = String(parsed.value.repoId ?? parsed.value.id ?? "").trim();
+        if (!validRepoId(repoId)) return sendJson(res, 400, { error: "仓库要写成 owner/repo" });
+        const verdict = String(parsed.value.verdict ?? "");
+        if (verdict !== "related" && verdict !== "noise") return sendJson(res, 400, { error: "verdict 只能是 related / noise" });
+        setVerdictReview(repoId, verdict, String(parsed.value.note ?? "").slice(0, 200) || null);
+        write("review-set", repoId + " -> " + verdict);
+        return sendJson(res, 200, { ok: true, repoId, review: await reviewPayload() });
+      }
+      if (action === "remove") {
+        const repoId = String(parsed.value.repoId ?? parsed.value.id ?? "").trim();
+        if (!validRepoId(repoId)) return sendJson(res, 400, { error: "仓库要写成 owner/repo" });
+        const removed = removeVerdictReview(repoId);
+        if (!removed.existed) return sendJson(res, 404, { error: "复核表里没有这个仓库：" + repoId });
+        write("review-remove", repoId);
+        return sendJson(res, 200, { ok: true, repoId, review: await reviewPayload() });
+      }
+      if (action === "purge-stale") {
+        // 清理改名/删库后失效的条目：复核表不该变成永远清不掉的孤儿堆。逐条重读磁盘，
+        // 免得拿这一轮循环里刚写入/刚删掉的状态把别的条目连带误删。
+        const purged = [];
+        for (const id of Object.keys(readVerdictReviews().reviews)) {
+          const cur = readVerdictReviews();
+          if (!cur.reviews[id]) continue;
+          if (!(await hasMeshNode(id))) {
+            removeVerdictReview(id);
+            purged.push(id);
+          }
+        }
+        write("review-purge-stale", String(purged.length));
+        return sendJson(res, 200, { ok: true, purged, review: await reviewPayload() });
+      }
+      return sendJson(res, 400, { error: "action 只能是 set / remove / purge-stale" });
+    }
     if (name === "settings") {
       if (!isWrite) return sendJson(res, 200, settingsPayload());
       const parsed = await readJsonBody(req);
@@ -973,6 +1105,58 @@ export function createAdmin({ version, api, securityHeaders }) {
       return await marketAdmin.handle(name, { req, res, method, url, isWrite, write, sendJson, readJsonBody });
     }
     return sendJson(res, 404, { error: "未知后台接口：" + name });
+  }
+
+  let readmeSnipsCache = null;
+  /** README 摘要速览（复核页行内证据）：readmes.json.gz + noise-evidence 两源合一，mtime 命中缓存；每条只留前 240 字。 */
+  function readmeSnips() {
+    const files = [join(ROOT, "data", "cache", "readmes.json.gz"), join(ROOT, "data", "cache", "readmes.json"), join(ROOT, "data", "cache", "noise-evidence.json")];
+    let newest = 0;
+    for (const f of files) {
+      try { newest = Math.max(newest, statSync(f).mtimeMs); } catch { /* 缺席不管 */ }
+    }
+    if (readmeSnipsCache && readmeSnipsCache.time === newest) return readmeSnipsCache.map;
+    const out = {};
+    for (const f of files) {
+      if (!existsSync(f)) continue;
+      try {
+        const buf = readFileSync(f);
+        const raw = String(f).endsWith(".gz") ? gunzipSync(buf).toString("utf8") : buf.toString("utf8");
+        const docs = JSON.parse(raw).docs ?? raw.docs ?? {};
+        for (const [rid, doc] of Object.entries(docs)) {
+          const t = String((doc && doc.t) || "");
+          if (t && !out[rid]) out[rid] = t.slice(0, 240);
+        }
+      } catch { /* 坏文件跳过 */ }
+    }
+    readmeSnipsCache = { time: newest, map: out };
+    return out;
+  }
+
+  let manifestCache = null;
+  /** repo-manifests 按 mtime 命中缓存（复核疑点判定每次 GET 都要读；16M 文件慢）。 */
+  function manRepos() {
+    try {
+      const file = join(ROOT, "data", "cache", "repo-manifests.json");
+      const mtime = statSync(file).mtimeMs;
+      if (!manifestCache || manifestCache.mtime !== mtime) {
+        manifestCache = { mtime, repos: JSON.parse(readFileSync(file, "utf8")).repos ?? {} };
+      }
+      return manifestCache.repos;
+    } catch {
+      return {};
+    }
+  }
+
+  let adminNpmCache = null;
+  async function adminNpmEvidence() {
+    if (!adminNpmCache) adminNpmCache = await npmOkSet();
+    return adminNpmCache;
+  }
+
+  async function hasMeshNode(id) {
+    const mesh = await api.load().catch(() => null);
+    return !!(mesh && mesh.nodes && mesh.nodes.some((n) => n.id === id));
   }
 
   async function handle(req, res, method, pathname, url) {

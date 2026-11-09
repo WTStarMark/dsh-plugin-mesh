@@ -63,7 +63,7 @@ const state = {
 };
 
 /** 已挂载视图的 DOM 引用；null = 还没建过 */
-const V = { status: null, data: null, workflow: null, lists: null, settings: null, resonance: null, audit: null };
+const V = { status: null, data: null, workflow: null, lists: null, review: null, settings: null, resonance: null, audit: null };
 
 let widget = null;
 let tickTimer = null;
@@ -872,7 +872,7 @@ async function switchTab(name) {
     stopStatusAuto();
     // 名单 / 共鸣页的"未应用改动"提示来自 api/status：切过来时强制补一次，
     // 免得要等顶栏圆环那 15 秒；一次切页最多一个请求
-    if (name === "lists" || name === "settings" || name === "resonance") refreshStatusQuiet(true).catch(() => {});
+    if (name === "lists" || name === "review" || name === "settings" || name === "resonance") refreshStatusQuiet(true).catch(() => {});
   }
   const tabs = $("tabs");
   if (tabs) {
@@ -890,6 +890,7 @@ async function switchTab(name) {
   else if (name === "data") await loadDataView();
   else if (name === "workflow") await loadWorkflowView();
   else if (name === "lists") await loadListsView();
+  else if (name === "review") await loadReviewView();
   else if (name === "settings") await loadSettingsView();
   else if (name === "resonance") await loadResonanceView();
   else if (name === "market") await loadMarketView();
@@ -1189,10 +1190,12 @@ function pendingOf(data) {
   const parts = [];
   if (p && p.lists === true) parts.push("名单");
   if (p && p.resonance === true) parts.push("共鸣");
+  if (p && p.review === true) parts.push("复核");
   if (!parts.length && data && data.pending === true) parts.push("名单/共鸣");
   return {
     lists: !!(p && p.lists === true),
     resonance: !!(p && p.resonance === true),
+    review: !!(p && p.review === true),
     since: p ? p.since ?? null : null,
     parts,
     any: parts.length > 0,
@@ -1602,6 +1605,7 @@ function renderApplyAll() {
   renderStatusApply();
   renderResonanceApply();
   renderListsApply();
+  renderReviewApply();
 }
 
 function renderStatusApply() {
@@ -2441,6 +2445,305 @@ async function reloadLists() {
   state.whitelistDraft = null;
   renderLists();
 }
+
+/* ===================== 复核页：待人工队列 + 人工结论（压过规则与证据） ===================== */
+
+let reviewFilter = "";
+
+function buildReviewView(root) {
+  clear(root);
+  const refs = {};
+  refs.notice = noticeEl();
+  root.append(refs.notice);
+  refs.applyNote = noticeEl();
+  root.append(refs.applyNote);
+
+  refs.refreshBtn = btn("刷新", null, () => loadReviewView());
+  const sec1 = card("待人工复核队列", [refs.refreshBtn]);
+  refs.qInfo = el("div", "sec-sub", "");
+  sec1.append(refs.qInfo);
+  refs.filter = el("input", "input owner");
+  refs.filter.type = "text";
+  refs.filter.value = reviewFilter;
+  refs.filter.placeholder = "按 id / 描述 / 主题过滤（输入即刷，无需回车）";
+  refs.filter.addEventListener("input", () => {
+    reviewFilter = refs.filter.value;
+    renderReview();
+  });
+  sec1.append(refs.filter);
+
+  refs.qBody = el("tbody");
+  const qWrap = tableWrap();
+  qWrap.append(
+    buildTable(
+      [
+        { text: "仓库" },
+        { text: "型" },
+        { text: "星标", cls: "num" },
+        { text: "判定原因 / 描述" },
+        { text: "已存结论" },
+        { text: "操作", cls: "cell-actions" },
+      ],
+      refs.qBody,
+    ),
+  );
+  sec1.append(qWrap);
+  root.append(sec1);
+
+  refs.purgeBtn = btn("清理失效条目", null, onPurgeStaleReviews);
+  const sec2 = card("已存人工结论", [refs.purgeBtn]);
+  refs.oInfo = el("div", "sec-sub", "");
+  sec2.append(refs.oInfo);
+  refs.oBody = el("tbody");
+  const oWrap = tableWrap();
+  oWrap.append(
+    buildTable(
+      [
+        { text: "仓库" },
+        { text: "结论" },
+        { text: "备注" },
+        { text: "图中现状" },
+        { text: "操作", cls: "cell-actions" },
+      ],
+      refs.oBody,
+    ),
+  );
+  sec2.append(oWrap);
+  root.append(sec2);
+  return refs;
+}
+
+function mountReviewView() {
+  if (!V.review) V.review = buildReviewView($("view-review"));
+  return V.review;
+}
+
+async function loadReviewView() {
+  const refs = mountReviewView();
+  const restore = busyStart(refs.refreshBtn, "刷新中…");
+  try {
+    state.review = await apiGet("api/review");
+    hideNotice(refs.notice);
+  } catch (e) {
+    if (!e || e.status !== 401) setNotice(refs.notice, (e && e.message) || "读取复核队列失败", "err");
+  } finally {
+    restore();
+  }
+  renderReview();
+  renderReviewApply();
+}
+
+/** 人工结论写/撤回共用：保存后跟着 reloadLists 的同款口径提示『应用变更』。 */
+async function reviewAction(payload, busyBtn, okText) {
+  if (busyBtn) {
+    busyBtn.disabled = true;
+    const old = busyBtn.textContent;
+    busyBtn.textContent = "保存中…";
+    try {
+      const data = await apiPost("api/review", payload);
+      state.review = data.review;
+      applyHintNotice();
+      renderReview();
+      renderApplyAll();
+      toast(okText, "ok");
+    } catch (e) {
+      reportError(e);
+      toast((e && e.message) || "保存失败", "err");
+      if (busyBtn) {
+        busyBtn.disabled = false;
+        busyBtn.textContent = old;
+      }
+    }
+  }
+}
+
+function reviewSetButton(repoId, verdict, label) {
+  const b = btn(label, "small" + (verdict === "noise" ? " danger" : " primary"));
+  b.type = "button";
+  b.addEventListener("click", () => reviewAction({ action: "set", repoId, verdict }, b, "已人工复核 " + repoId + "：" + label));
+  return b;
+}
+
+function removeReviewButton(repoId) {
+  const b = btn("撤回", "small danger");
+  let armed = false;
+  let timer = null;
+  const reset = () => {
+    armed = false;
+    b.textContent = "撤回";
+    b.classList.remove("armed");
+    b.disabled = false;
+  };
+  b.addEventListener("click", async () => {
+    if (!armed) {
+      armed = true;
+      b.textContent = "确认撤回";
+      b.classList.add("armed");
+      timer = setTimeout(reset, 3000);
+      return;
+    }
+    if (timer) clearTimeout(timer);
+    try {
+      const data = await apiPost("api/review", { action: "remove", repoId });
+      state.review = data.review;
+      applyHintNotice();
+      renderReview();
+      renderApplyAll();
+      toast("已撤回 " + repoId + " 的人工结论", "ok");
+    } catch (e) {
+      reportError(e);
+      toast((e && e.message) || "撤回失败", "err");
+      reset();
+    }
+  });
+  return b;
+}
+
+async function onPurgeStaleReviews(ev) {
+  const b = ev && ev.currentTarget;
+  if (b) {
+    b.disabled = true;
+    b.textContent = "清理中…";
+  }
+  try {
+    const data = await apiPost("api/review", { action: "purge-stale" });
+    state.review = data.review;
+    renderReview();
+    toast(data.purged && data.purged.length ? "已清理 " + data.purged.length + " 条失效条目：" + data.purged.slice(0, 5).join("、") : "没有失效条目", "ok");
+  } catch (e) {
+    reportError(e);
+    toast((e && e.message) || "清理失败", "err");
+  } finally {
+    if (b) {
+      b.disabled = false;
+      b.textContent = "清理失效条目";
+    }
+  }
+}
+
+function reviewOverrideCellText(entry) {
+  const t = String((entry && entry.verdict) || "");
+  if (!t) return "";
+  return t === "related" ? "确认相关" : "确认噪声";
+}
+
+function renderReview() {
+  const refs = V.review;
+  if (!refs) return;
+  const data = state.review && typeof state.review === "object" ? state.review : {};
+  const queue = Array.isArray(data.queue) ? data.queue : [];
+  const overrides = Array.isArray(data.overrides) ? data.overrides : [];
+  const counts = data.counts && typeof data.counts === "object" ? data.counts : {};
+  const filter = reviewFilter.trim().toLowerCase();
+
+  refs.qInfo.textContent =
+    "待人工 " + fmtNum(counts.manual ?? counts.queue ?? queue.length) + " 个 · 疑点候选 " + fmtNum(counts.suspect ?? 0) +
+    " 个（只进复核，不改判定）" +
+    " · 已存人工结论 " + fmtNum(counts.overrides ?? overrides.length) +
+    " 个 · 判定结论集（related/noise/manual）：" + (() => {
+      const vc = data.verdictCounts || {};
+      return "related " + fmtNum(vc.related ?? 0) + " / noise " + fmtNum(vc.noise ?? 0) + " / manual " + fmtNum(vc.manual ?? 0);
+    })() +
+    (data.fileUpdatedAt ? " · 表更新于 " + fmtDateTime(data.fileUpdatedAt) : "");
+
+  const shown = filter
+    ? queue.filter((n) =>
+        [n.id, n.name, n.reason, n.description, ...(n.topics || []), ...(n.tags || [])]
+          .map((x) => String(x || "").toLowerCase())
+          .some((s) => s.includes(filter)),
+      )
+    : queue;
+  clear(refs.qBody);
+  if (!queue.length) {
+    emptyRow(refs.qBody, 6, "队列是空的：现在所有待人工插件都复核完了（或规则消化掉了）。");
+  } else if (!shown.length) {
+    emptyRow(refs.qBody, 6, "没有匹配 " + JSON.stringify(filter) + " 的条目。");
+  } else {
+    for (const item of shown) {
+      const tr = el("tr");
+      tr.append(el("td", "mono", item.id));
+      if (item.kind === "suspect") {
+        const mark = el("td");
+        const b = el("span", "badge warn", "疑点");
+        b.title = "疑点候选（" + (item.suspectWhy || "弱信号") + "）：确认相关/确认噪声都可用，结论压过规则判定";
+        mark.append(b);
+        tr.append(mark);
+      } else {
+        tr.append(el("td", null, ""));
+      }
+      tr.append(el("td", "num", fmtNum(item.stars)));
+      const why = el("td", "wrap");
+      const reason = item.reason ? "待复核：" + item.reason : "待复核";
+      why.append(el("div", null, reason));
+      if (item.description) why.append(el("div", "hint", item.description));
+      const extra = [].concat(item.tags || [], item.topics || []).filter(Boolean).join(" · ");
+      const ev = item.evidence;
+      if (ev) {
+        const parts = [];
+        if (ev.manifestVerdict) parts.push("清单:" + ev.manifestVerdict);
+        if (ev.manifestPackages && ev.manifestPackages.length) parts.push("清单包:" + ev.manifestPackages.map((x) => x.name).filter(Boolean).join(","));
+        if (ev.npmOk) parts.push("npm:确证(dsh.client)");
+        if (ev.readmeSnip) parts.push("README摘要:「" + ev.readmeSnip.slice(0, 120) + "」");
+        if (parts.length) why.append(el("div", "hint", parts.join(" · ")));
+      }
+      if (extra) why.append(el("div", "hint", extra));
+      tr.append(why);
+      const ov = item.override;
+      const ovTd = el("td");
+      if (ov) {
+        const badge = el("span", "badge hot", reviewOverrideCellText(ov));
+        badge.title = "已存结论（保存/撤回后要点『应用变更』才在站点生效）";
+        ovTd.append(badge);
+        if (ov.note) ovTd.append(el("div", "hint", String(ov.note)));
+      } else {
+        ovTd.append(el("span", "badge", "—"));
+      }
+      tr.append(ovTd);
+      const actTd = el("td", "cell-actions");
+      if (ov && ov.verdict === "related") actTd.append(reviewSetButton(item.id, "noise", "确认噪声"));
+      else actTd.append(reviewSetButton(item.id, "related", "确认相关"));
+      if (ov) actTd.append(removeReviewButton(item.id));
+      tr.append(actTd);
+      refs.qBody.append(tr);
+    }
+  }
+
+  refs.oInfo.textContent =
+    "共 " + fmtNum(overrides.length) + " 条人工结论" +
+    (counts.stale ? "，其中 " + counts.stale + " 条已不在图里（仓库改名/删库/不再收录）" : "") +
+    "。结论压过规则判定；改动要点『应用变更』离线重算才生效。";
+  clear(refs.oBody);
+  if (!overrides.length) {
+    emptyRow(refs.oBody, 5, "还没有人工结论。在上面的队列里点『确认相关 / 确认噪声』。");
+  } else {
+    for (const o of overrides) {
+      const tr = el("tr");
+      if (o.stale) tr.classList.add("mark");
+      tr.append(el("td", "mono", o.id));
+      tr.append(el("td", "wrap", reviewOverrideCellText(o)));
+      tr.append(el("td", "wrap", o.note ? String(o.note) : "—"));
+      const now = el("td", "wrap");
+      now.append(el("div", null, o.inMesh ? "图中规则判定：" + (o.meshVerdict || "—") : "不在图里（失效）"));
+      if (o.addedAt) now.append(el("div", "hint", fmtDateTime(o.addedAt)));
+      tr.append(now);
+      const actTd = el("td", "cell-actions");
+      actTd.append(removeReviewButton(o.id));
+      tr.append(actTd);
+      refs.oBody.append(tr);
+    }
+  }
+
+  renderReviewApply();
+}
+
+function renderReviewApply() {
+  const refs = V.review;
+  if (!refs) return;
+  const pend = pendingOf(state.status).review;
+  const text = pend ? "复核结论有改动尚未应用，点『立即应用』离线重算一次才会生效。" : "";
+  renderNotice(refs.applyNote, applyBannerModel(text));
+}
+
 
 /**
  * 就地把响应里的名单挂上（不再多打一次 api/lists）。

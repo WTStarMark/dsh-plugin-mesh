@@ -208,6 +208,112 @@ class BuildTest(unittest.TestCase):
                 self.assertEqual(got["review"], expect == "manual")
                 self.assertTrue(got["reason"])
 
+    def test_analyze_relevance_evidence_layer(self):
+        """证据层：manifest/README 正证据 → related；README 反证且非插件形态 → noise；
+        冻结参照物（无证据字段）走老口径，一律不回退。与 tests/noise-evidence.test.mjs 同镜像。"""
+        from dsh_mesh.build import analyze_relevance
+
+        def repo(**over):
+            base = {"name": "x", "description": "", "topics": [], "matchedTags": ["dsh"], "stars": 0}
+            base.update(over)
+            return base
+
+        # 正证据压过启发式：就算铺了其他生态标签，清单校验确认是真插件也算 related
+        self.assertEqual(analyze_relevance(repo(manifestOk=True, topics=["claude-plugin", "cursor-plugin"]))["verdict"], "related")
+        self.assertEqual(analyze_relevance(repo(readmeHit=True))["verdict"], "related")
+        # README 反证 + 非插件形态 → noise；像插件但没提 DSH 仍留人工
+        # matchedTags 留空：躲开「只挂 1 个宽泛标签」这条老规则，专测 README 证据这条新规则
+        noise = analyze_relevance(repo(readmeHit=False, name="nice-tool", stars=3, description="工具", matchedTags=[]))
+        self.assertEqual((noise["verdict"], noise["reason"].find("README") >= 0), ("noise", True))
+        self.assertEqual(analyze_relevance(repo(readmeHit=False, description="一个漂亮的小工具插件"))["verdict"], "manual")
+        # readmeHit=None（README 抓不到）= 没有证据，老口径
+        self.assertEqual(analyze_relevance(repo(readmeHit=None, description="一个漂亮的小工具插件"))["verdict"], "manual")
+        # 无证据字段（冻结参照物）：与老口径逐字一致
+        self.assertEqual(analyze_relevance(repo())["verdict"], "noise")
+
+        # 其他生态文证（README 摘要）：只讲别家平台且无 DSH 线索 → noise；manifest 确认压过它
+        other = analyze_relevance(repo(url="nice-tool", stars=3, readmeHit=False, readmeDigest="fe claude-code 的插件安装与 smithery 市集"))
+        self.assertEqual(other["verdict"], "noise")
+        self.assertIn("README 证据", other["reason"])
+        resc = analyze_relevance(repo(manifestOk=True, readmeHit=False, readmeDigest="claude-code 插件但清单确认过"))
+        self.assertEqual(resc["verdict"], "related")
+
+    def test_non_plugin_excludes_mems_lis3dsh(self):
+        """LIS3DSH 是意法半导体加速度计型号，名字撞车 —— 由排除层拦，不进图（JS 同镜像）。"""
+        from dsh_mesh.classify import non_plugin_reason
+        self.assertTrue(non_plugin_reason({"name": "mfrknycl/LIS3DSH-accelerometer", "description": "", "topics": []}))
+        self.assertTrue(non_plugin_reason({"name": "embalbe/lis3dsh-c", "description": "driver demo", "topics": []}))
+        self.assertIsNone(non_plugin_reason({"name": "mengnanxyyyy/dsh-markdown-xyy", "description": "markdown 主题插件", "topics": []}))
+
+    def test_load_noise_evidence_reads_caches_and_is_optional(self):
+        """证据表三份缓存都可缺省；能读到时字段只透 manifestOk / readmeHit。"""
+        import json, gzip
+        from pathlib import Path
+        from dsh_mesh import build
+
+        ev = build.load_noise_evidence()
+        for rid, rec in ev.items():
+            self.assertEqual(set(rec.keys()), {"manifestOk", "npmOk", "readmeHit", "readmeDigest"}, "字段只透四键：" + rid)
+            self.assertIsInstance(rec["manifestOk"], bool)
+            self.assertIn(rec["readmeHit"], (True, False, None))
+        # 缺省路径可当成空表（极少数机器没有这些缓存）：loader 是纯读，绝不抛错
+        # （这里只验真实缓存路径存在时的基本面：confirmed 清单至少就位一条或整表为空都合法）
+        man = Path(build.MANIFESTS_JSON)
+        if man.exists():
+            data = json.loads(man.read_text(encoding="utf-8"))
+            confirmed = [r for r in (data.get("repos") or {}).values() if isinstance(r, dict) and r.get("verdict") == "confirmed"]
+            if confirmed:
+                some_id = next(rid for rid, r in (data.get("repos") or {}).items() if isinstance(r, dict) and r.get("verdict") == "confirmed")
+                self.assertTrue(ev[some_id]["manifestOk"])
+        # build_mesh 接受 evidence 且判定后不留证据字段
+        spam = fake_repo("alice", "dsh-skin", stars=1, topics=("dsh-plugin",))
+        ev_map = {"alice/dsh-skin": {"manifestOk": True, "npmOk": False, "readmeHit": None, "readmeDigest": ""}}
+        mesh = build_mesh([dict(spam)], {}, evidence=ev_map)
+        node = mesh["nodes"][0]
+        self.assertEqual(node["verdict"], "related")
+        self.assertNotIn("manifestOk", node, "证据字段不能落进前端契约")
+        self.assertNotIn("readmeHit", node)
+        self.assertNotIn('readmeDigest', node)
+
+    def test_verdict_review_overrides(self):
+        """人工复核结论压过规则与证据：apply_verdict_override 改三字段；loader 过滤非法 verdict；
+        不在图里的条目（改名/删除）如实忽略；meta 计数不受 species 影响（override 也计入 verdictCounts）。与
+        tools/review-verdicts.mjs 同镜像（tests/review-verdicts.test.mjs 钉住）。"""
+        import json
+        import tempfile
+        from pathlib import Path as P
+        from dsh_mesh.build import apply_verdict_override, load_verdict_reviews, build_mesh
+
+        repo = {"verdict": "manual", "review": True, "reason": "正文像插件，但没提 DSH"}
+        self.assertTrue(apply_verdict_override(repo, {"verdict": "noise", "reason": "人工复核：蹭标签", "review": False}))
+        self.assertEqual((repo["verdict"], repo["review"], repo["reason"]), ("noise", False, "人工复核：蹭标签"))
+
+        with tempfile.TemporaryDirectory() as d:
+            file = P(d) / "review-verdicts.json"
+            file.write_text(json.dumps({
+                "updatedAt": "2026-11-07T10:00:00Z",
+                "note": "测试",
+                "count": 3,
+                "reviews": {
+                    "a/good": {"verdict": "related", "note": "看过了，是 dsh 插件", "addedAt": "2026-11-07T10:00:00Z"},
+                    "b/junk": {"verdict": "noise", "note": None, "addedAt": "2026-11-07T10:01:00Z"},
+                    "c/bad": {"verdict": "manual", "note": None},
+                    "garbage": {"verdict": "noise"},
+                    "d/also-bad": {"verdict": "noise"},
+                },
+            }, ensure_ascii=False), encoding="utf-8")
+            reviews = load_verdict_reviews(file)
+            self.assertEqual(set(reviews.keys()), {"a/good", "b/junk", "d/also-bad"})
+            self.assertEqual(reviews["a/good"]["reason"], "人工复核：看过了，是 dsh 插件")
+            self.assertEqual(reviews["b/junk"]["reason"], "人工复核（后台）")
+            # build_mesh：override 生效，证据字段不落盘，counts 如实
+            spam = fake_repo("e", "dsh-skin", stars=1, topics=("dsh-plugin",))
+            mesh = build_mesh([dict(spam)], {}, verdict_reviews={"e/dsh-skin": {"verdict": "noise", "reason": "人工复核：蹭标签", "review": False}})
+            node = mesh["nodes"][0]
+            self.assertEqual(node["verdict"], "noise")
+            self.assertEqual(node["reason"], "人工复核：蹭标签")
+            self.assertEqual(mesh["meta"]["verdictCounts"]["noise"], 1)
+
     def test_build_mesh_records_verdict_counts(self):
         # 只挂最宽泛的 dsh 一个标签、正文与 DSH 无关 —— 正是线上那批蹭标签的流行项目
         spam = fake_repo("bob", "reactive-resume", stars=900, topics=("dsh",))

@@ -76,6 +76,7 @@ npm run serve                        # 本地：http://127.0.0.1:8788/<ADMIN_PAT
 | GET | `/api/log?name=` | 只读日志尾部（最多最后 512KB / 2000 行），白名单之外一律 404 |
 | GET/POST | `/api/apply` | 查应用作业 / 触发一次离线重建 |
 | GET | `/api/audit?limit=` | 审计日志 |
+| GET | `/api/review` | 复核队列（manual 全量 + 已存人工结论 + stale 清单 + 实时 verdictCounts） |
 
 ## 四项能力落在哪、怎么生效
 
@@ -85,6 +86,7 @@ npm run serve                        # 本地：http://127.0.0.1:8788/<ADMIN_PAT
 | **白名单标签 + 别名组** | `data/admin/config.json` 的 `whitelistTags` 与 `whitelistAliases` | JS 工具与 Python 采集器（**抓取 + 构图**）读同一份。新增标签：构图口径立刻生效，但新仓库要等下一轮真实采集抓回来；删除标签：点「应用变更」（离线重建）即可从图里移除。别名组只影响**匹配**，不影响抓取（见下） |
 | **生态共鸣清单 + 锚定条件** | `data/admin/ecosystem.json`（后台管理副本，可增删改查） | 点「应用变更」→ 离线重建时由 `build.load_ecosystem()` 读取；重跑 `tools/curate-ecosystem.mjs` 时也会**按后台改过的锚定条件**重新发现子节点 |
 | **状态 / 数据 / 工作流** | 只读 | 直接读 `data/cache/status.json`、`data/last-crawl.json` 等 |
+| **人工复核（生态图待人工队列）** | `data/review-verdicts.json`（外壳 `reviews/count/note`，人工条目只有 related / noise 两档） | 「复核」页里对着待人工逐条点「确认相关 / 确认噪声（可带备注）/ 撤回」，结论**压过规则与证据判定**；点「应用变更」→ 离线重建生效并计入 `meta.verdictCounts`。仓库改名/删库后条目自动标「失效」，一键「清理失效条目」即可收干净；撤回 = 回退为规则判定 |
 
 ⚠️ **共鸣清单刻意不写 `tools/ecosystem.json`**：那份是策展产物。部署时 `tools/deploy-remote.sh` 会把整个 `tools/` 同步到线上，复跑 `tools/curate-ecosystem.mjs` 也会整体重写它。写进去迟早被覆盖。
 
