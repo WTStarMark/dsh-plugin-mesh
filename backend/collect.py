@@ -458,6 +458,39 @@ def run_market_index(log) -> None:
         )
 
 
+
+def run_plugin_graph(log) -> None:
+    """生成插件图与严格市场索引（tools/build-plugin-graph.mjs，全离线：本地 mesh + 本地市场索引 + manifest 缓存）。
+    之前只靠手工跑，与全量图判定漂移 635 条（2026-11-07 体检）；挂进采集/离线重建管线后自动跟平。
+    跟市场索引同款护栏：退出码非 0 不代表失败 —— 线上老毛病 node 会在写完文件后崩在退出阶段，产物在就算过。"""
+    import subprocess
+    from dsh_mesh.config import ROOT
+    log = log or (lambda *a, **k: None)
+    started = time.time()
+    try:
+        result = subprocess.run(
+            ["node", "tools/build-plugin-graph.mjs"],
+            capture_output=True,
+            text=True,
+            timeout=300,
+            cwd=str(ROOT),
+        )
+    except Exception as exc:  # noqa: BLE001
+        log("⚠ 插件图生成失败（不阻塞前端数据）：" + str(exc)[:160])
+        return
+    detail = (result.stdout or result.stderr or "").strip().splitlines()
+    tail = detail[-1].strip() if detail else "无输出"
+    fresh = (Path("data/plugins/mesh.json").stat().st_mtime if Path("data/plugins/mesh.json").exists() else 0)
+    started_ts = started
+    if result.returncode == 0 or fresh >= started_ts - 1:
+        # 为对齐 market 的判断：产物 mtime 在本次启动之后（1 秒容差）即算写出来了
+        if fresh >= started_ts - 1:
+            log("插件图已刷新（用时 %.0f 秒）：%s" % (time.time() - started, tail))
+        else:
+            log("插件图已刷新（退出码 %d，但产物已完整写出）：%s" % (result.returncode, tail))
+    else:
+        log("插件图失败（退出码 %d）：%s | %s" % (result.returncode, tail, (result.stderr or "").strip()[:160]))
+
 def load_from_store(args, log):
     """离线重建：直接用累积索引（data/cache/repos.json）构图，不联网、不消耗配额。
     改完分类/噪声/相关性规则后立刻重算前端契约，不必等下一轮采集（仍走同一套 build_mesh + 预计算）。"""
@@ -1090,6 +1123,9 @@ def run_once(args, log) -> dict:
         _write_status(state="precomputing", phase="market-index")
         with _heartbeat(phase="market-index"):
             run_market_index(log)
+        _write_status(state="precomputing", phase="plugin-graph")
+        with _heartbeat(phase="plugin-graph"):
+            run_plugin_graph(log)
     finally:
         _write_status(
             state="idle",
