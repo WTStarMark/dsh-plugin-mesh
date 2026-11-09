@@ -58,6 +58,23 @@ export function analyzeRelevance(repo) {
   if (DSH_NAME.test(name) || DSH_DESC.test(desc) || topics.some((t) => SPEC_TOPICS.has(t))) {
     return { relevance, review: false, verdict: "related", reason: "名字/描述/主题里有 DSH 专有线索" };
   }
+  // ---- 证据层（离线扫描传入的 README/manifest 证据；冻结参照物没有这些字段，规则原样）----
+  // 证据强于启发式：根清单校验通过 / README 明确提 DSH 的仓库，就不再落到「堆标签」「只挂宽泛标签」判噪声。
+  if (repo.manifestOk) {
+    return { relevance, review: false, verdict: "related", reason: "清单扫描确认是 dsh 插件（repo-manifests 校验通过）" };
+  }
+  if (repo.npmOk) {
+    return { relevance, review: false, verdict: "related", reason: "npm 包声明 dsh.client 且入口真实存在（market 证据）" };
+  }
+  if (repo.readmeHit === true) {
+    return { relevance, review: false, verdict: "related", reason: "README 正文明确 DSH 生态线索（README 证据）" };
+  }
+  // README 文证「只讲别家生态」（与 build.py _OTHER_HOST_RE 同一正则，改一边要改两边）。
+  const OTHER_HOST = /\bclaude[- ]?(?:code|skills?)?\b|\bcodex\b|\bcursor\b|\bgemini[- ]cli\b|\bsmithery\b|\bmcpb\b|\bopenskills\b|\bvscode[- ]extensions?\b/i;
+  const digestOther = String(repo.readmeDigest || "");
+  if (digestOther && !DSH_NAME.test(digestOther) && OTHER_HOST.test(digestOther)) {
+    return { relevance, review: false, verdict: "noise", reason: "README 只讲其他插件平台（claude-code / codex 等），无任何 DSH 线索（README 证据）" };
+  }
   const loose = PLUGIN_SHAPED.test(name + " " + desc);
   const otherEco = topics.filter((t) => OTHER_ECOSYSTEM_TAGS.has(t)).length;
   if (otherEco >= 2) {
@@ -71,6 +88,10 @@ export function analyzeRelevance(repo) {
   }
   if (tags.length === 1 && !loose) {
     return { relevance, review: false, verdict: "noise", reason: "只挂 1 个最宽泛的 dsh 标签，正文与 DSH 无关" };
+  }
+  // README 实证「正文没提 DSH」且不以插件形态出现：定性噪声（像不透插件本体，仍留人工）。
+  if (repo.readmeHit === false && !loose) {
+    return { relevance, review: false, verdict: "noise", reason: "README 正文没有任何 DSH 线索，也不像插件（README 证据）" };
   }
   return {
     relevance,

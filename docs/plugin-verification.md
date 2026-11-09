@@ -189,6 +189,7 @@ npm --prefix tools/plugin-verifier test
 - 第一遍只扫**根** package.json；monorepo/根没有 package.json 的仓库会进 review。
 - 第二遍：`tools/scan-manifests-tree.mjs` 用 GitHub API tree 找子目录 `package.json`，再按同样规则校验；本轮抽样 389 个 no-root 仓库，115 个 confirmed（29.6%），完整扫描因 API 配额限制未跑完。
 - 并行轻量爬虫：`tools/crawl-plugin-evidence.mjs` 只读 raw README，默认并发 2 + 400ms 间隔，把根 package 存在但缺 dsh 的 review 仓库按 README 证据分桶；不写 manifest 缓存，不确认插件。
+- 噪声证据补扫：`tools/noise-evidence-scan.mjs`（`npm run noise:scan`）只读 raw README（默认并发 3 + 500ms，可断点续跑），对**待人工 manual + 疑点低信号 related**队列补齐 README 摘要（README 索引未覆盖的），写 `data/cache/noise-evidence.json` 供相关性判定引用（manifest `confirmed` 与 README 正证据 → related；README 实证没提 DSH 且不像插件 → noise）。首轮扫 2,636 条：2,337 命中 DSH 线索 / 68 无命中 / 231 抓不到；规则落地后 verdict 计数 related 46,249→47,010、noise 643→276、manual 595→201。
 - 复核细节见 [review-audit.md](review-audit.md)。
 - 首轮结果（47,487 仓库）：**31,441 confirmed / 16,046 review / 0 failed**；review 原因：根无 package 9,625、根无 dsh.bundle 6,109、YAML 270、patch 缺失 42。
 - 复核：修正 YAML 注释误判后 247 个重新 confirmed；根扫描重跑 15,799 个 review 仅新增 1 个 confirmed；monorepo tree 抽样 389 个 no-root 仓库，**115 confirmed**（29.6%）。当前缓存 **31,804 confirmed / 15,683 review**。详见 [review-audit.md](review-audit.md)。

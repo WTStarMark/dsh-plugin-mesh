@@ -20,7 +20,7 @@ from pathlib import Path
 
 from dsh_mesh import admin_config
 from dsh_mesh import snapshot as snap
-from dsh_mesh.build import build_mesh, limit_for_frontend, load_aliases, normalize_repo, utcnow
+from dsh_mesh.build import build_mesh, limit_for_frontend, load_aliases, load_noise_evidence, load_verdict_reviews, normalize_repo, utcnow
 from dsh_mesh.config import (
     DEFAULT_BUDGET,
     DEFAULT_INTERVAL,
@@ -910,6 +910,10 @@ def run_once(args, log) -> dict:
         whitelist_aliases=admin_config.whitelist_aliases(),
         # 抓取与构图必须同一份白名单：后台改标签后，下一轮真实采集/离线重建都按新口径收录。
         whitelist_tags=args.tags,
+        # 噪声判定证据（README/manifest 扫描缓存，可缺省）：manual/疑点队列靠它们定性，读取失败当空表。
+        evidence=load_noise_evidence(),
+        # 人工复核结论（后台「复核」页写）：压过规则与证据，撤回即回退。
+        verdict_reviews=load_verdict_reviews(),
     )
     noise_now = mesh["meta"].get("noiseBlacklist") or {}
     new_noise = {owner: info for owner, info in noise_now.items() if owner not in blacklist}

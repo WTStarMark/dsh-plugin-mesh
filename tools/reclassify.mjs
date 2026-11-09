@@ -11,6 +11,8 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyCategories, DEFAULT_OPTIONS, nonPluginReason } from "./categories.mjs";
 import { analyzeRelevance } from "./relevance.mjs";
+import { loadMeshEvidence, applyEvidence, stripEvidence } from "./noise-evidence.mjs";
+import { reviewOverrideMap } from "./review-verdicts.mjs";
 import { readEcosystem } from "./admin-config.mjs";
 
 // 与 Python 的 build.load_ecosystem 同规则：后台管理副本（data/admin/ecosystem.json）优先，没有才用策展产物 tools/ecosystem.json
@@ -39,7 +41,18 @@ if (excluded.length) {
 }
 const ids = new Set(mesh.nodes.map((n) => n.id));
 
+const evidence = await loadMeshEvidence();
+// P2：分类也吃 README 摘要（半权）——先借、分类后还，与 Python build_mesh 同生命周期
+const digestAttached = [];
+for (const node of mesh.nodes) {
+  const rec = evidence.get(node.id);
+  if (rec && rec.readmeDigest && !("readmeDigest" in node)) {
+    node.readmeDigest = rec.readmeDigest;
+    digestAttached.push(node);
+  }
+}
 const before = new Map(mesh.nodes.map((n) => [n.id, n.category]));
+for (const node of digestAttached) delete node.readmeDigest;
 const stats = applyCategories(mesh.nodes, {
   ...DEFAULT_OPTIONS,
   baseIds: (ecosystem.bases ?? []).map((b) => b.id),
@@ -55,13 +68,25 @@ for (const node of mesh.nodes) {
 }
 
 const verdicts = { related: 0, noise: 0, manual: 0 };
+// 证据只在判定这一步借给节点（README/manifest 扫描缓存），判完摘掉：mesh 落盘字段口径与采集器一致。
+// 人工复核结论（后台「复核」页写进 data/review-verdicts.json）压过规则与证据 —— 与 Python build_mesh 同口径。
+const reviewOverrides = reviewOverrideMap();
 for (const node of mesh.nodes) {
+  const added = applyEvidence(node, evidence.get(node.id));
   const v = analyzeRelevance(node);
+  stripEvidence(node, added);
   node.relevance = v.relevance;
-  node.review = v.review;
-  node.verdict = v.verdict;
-  node.reason = v.reason;
-  verdicts[v.verdict] += 1;
+  const override = reviewOverrides[node.id];
+  if (override) {
+    node.verdict = override.verdict;
+    node.review = false;
+    node.reason = override.reason;
+  } else {
+    node.review = v.review;
+    node.verdict = v.verdict;
+    node.reason = v.reason;
+  }
+  verdicts[node.verdict] += 1;
 }
 
 const edges = (mesh.edges ?? []).filter((e) => e.type !== "resonance");

@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import gzip
 import json
 import re
 from datetime import datetime, timezone
@@ -49,11 +50,16 @@ from .config import (
     DEGREE_CAP,
     HUB_DF,
     HUB_ID,
+    MANIFESTS_JSON,
+    NOISE_EVIDENCE_JSON,
     NOISE_OWNER_MAX_STARS,
     NOISE_OWNER_MIN_REPOS,
     NOISE_OWNER_STRICT_MIN_REPOS,
     NOISE_OWNER_ZERO_RATIO,
     OWNER_CLIQUE_MAX,
+    CACHE_DIR,
+    README_CACHE,
+    REVIEW_JSON,
     ROOT,
     WHITELIST_TAGS,
 )
@@ -132,6 +138,132 @@ def load_aliases(path=None) -> dict[str, str]:
         if k and cur and k != cur:
             out[str(k)] = cur
     return out
+
+
+def load_npm_plugin_evidence() -> dict[str, bool]:
+    """npm 侧独立确证：market-ui-evidence（dsh.client 声明 / ./client 入口真实存在）× 市场索引 repository 反查仓库。
+    清单校验之外的第二条「确认插件」通道（2026-11-07 体检：与 manifest confirmed 交叉 6,637 条一致、253 条可升级）。"""
+    import os
+    out: dict[str, bool] = {}
+    try:
+        ui = json.loads(Path(CACHE_DIR / "market-ui-evidence.json").read_text(encoding="utf-8"))
+        idx = json.loads(Path(ROOT / "dist" / "market" / "index.json").read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return out
+    def repo_of(pl: dict) -> str | None:
+        for key in ("repo", "repository", "source"):
+            v = pl.get(key)
+            if isinstance(v, str) and v:
+                return v.replace("https://github.com/", "").replace(".git", "")
+        repo = pl.get("repository")
+        if isinstance(repo, dict) and isinstance(repo.get("url"), str):
+            return repo["url"].replace("https://github.com/", "").replace(".git", "")
+        return None
+    for pkg in (ui.get("packages") or {}).values():
+        if not (pkg.get("ok") and (pkg.get("dshClient") or pkg.get("clientEntry"))):
+            continue
+        pl = idx_plugins_lookup(idx, pkg.get("name"))
+        rid = repo_of(pl) if pl else None
+        if rid:
+            out[str(rid)] = True
+    return out
+
+
+def idx_plugins_lookup(idx: dict, name) -> dict | None:
+    if not name:
+        return None
+    for pl in (idx.get("plugins") or []):
+        if pl.get("name") == name:
+            return pl
+    return None
+
+
+def load_noise_evidence() -> dict[str, dict]:
+    """噪声判定的离线证据表（可缺省）：README/manifest 扫描缓存 → {id: {manifestOk, readmeHit}}。
+
+    - MANIFESTS_JSON（tools/scan-manifests-tree.mjs）：verdict=confirmed 视为真 dsh 插件；
+    - README_CACHE（采集器 README 索引）+ NOISE_EVIDENCE_JSON（tools/noise-evidence-scan.mjs
+      补扫的 manual/疑点队列）：摘要非空且含 DSH 专有线索 → readmeHit=True；
+      摘要非空但没有线索 → False（README 实证「正文没提 DSH」）；空摘要/读不到 → None。
+
+    冻结参照物（sample-raw / seed-sample）不传 evidence，行为与老口径逐字一致。"""
+    evidence: dict[str, dict] = {}
+    try:
+        man = json.loads(MANIFESTS_JSON.read_text(encoding="utf-8"))
+        for rid, rec in (man.get("repos") or {}).items():
+            if isinstance(rec, dict) and rec.get("verdict") == "confirmed":
+                evidence.setdefault(str(rid), {"manifestOk": True, "npmOk": False, "readmeHit": None, "readmeDigest": ""})
+    except Exception:  # noqa: BLE001 - 证据是加分项，缓存没了/坏了就空表
+        pass
+
+    for path in (NOISE_EVIDENCE_JSON, README_CACHE):
+        try:
+            raw = Path(path).read_bytes()
+            if str(path).endswith(".gz"):
+                raw = gzip.decompress(raw)
+            docs = json.loads(raw.decode("utf-8")).get("docs")
+            if not isinstance(docs, dict):
+                continue
+            for rid, doc in docs.items():
+                if not isinstance(doc, dict):
+                    continue
+                digest = str(doc.get("t") or "")
+                ev = evidence.setdefault(str(rid), {"manifestOk": False, "npmOk": False, "readmeHit": None, "readmeDigest": ""})
+                if "readmeHit" in ev and ev["readmeHit"] is not None:
+                    continue  # 先到的证据优先，不回退
+                if not digest:
+                    continue  # README 不存在/抓不到 = 没有证据，留 None
+                ev["readmeHit"] = _DSH_NAME_RE.search(digest) is not None
+                ev["readmeDigest"] = digest
+        except Exception:  # noqa: BLE001
+            continue
+    npm = load_npm_plugin_evidence()
+    for rid in npm:
+        ev = evidence.setdefault(rid, {"manifestOk": False, "npmOk": False, "readmeHit": None, "readmeDigest": ""})
+        if not ev["manifestOk"]:
+            ev["npmOk"] = True
+    return evidence
+
+
+def load_verdict_reviews(path=None) -> dict[str, dict]:
+    """人工复核结论表（tools/review-verdicts.mjs 是同一份文件的镜像读写；缺/坏 → 空表）：
+    {repoId: {verdict: related|noise, note, addedAt}}。
+    没传参时读默认盘（后台『应用变更』的离线重建不联网，就靠这一份人工结论）；
+    跨语言一致性校验必须传 {} 不读盘，否则本机盘上的人工结论会混进冻结比对。"""
+    path = path or REVIEW_JSON
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 - 复核是加分项，文件没了/坏了就空表
+        return {}
+    raw = data.get("reviews") if isinstance(data, dict) else None
+    out: dict[str, dict] = {}
+    for rid, rec in (raw or {}).items():
+        # 只收 owner/repo 形状：复核页算 stale/清洗也靠这个前提（JS 同规则）。
+        if not str(rid).strip() or "/" not in str(rid) or not isinstance(rec, dict):
+            continue
+        verdict = rec.get("verdict")
+        if verdict not in ("related", "noise"):
+            continue
+        note = str(rec.get("note") or "").strip()
+        out[str(rid)] = {
+            "verdict": verdict,
+            "reason": ("人工复核：" + note) if note else "人工复核（后台）",
+            "review": False,
+        }
+    return out
+
+
+def apply_verdict_override(repo: dict, override: dict | None) -> bool:
+    """人工结论压过规则与证据判定（tools/review-verdicts.mjs:verdictReasonOf 的镜像文案）。True = verdict 已被改写。"""
+    if not override:
+        return False
+    verdict = override.get("verdict")
+    if verdict not in ("related", "noise"):
+        return False
+    repo["verdict"] = verdict
+    repo["review"] = False
+    repo["reason"] = override.get("reason") or "人工复核（后台）"
+    return True
 
 
 def owner_of(repo: dict) -> str:
@@ -224,6 +356,11 @@ OTHER_ECOSYSTEM_TAGS = {
     "claude-code-plugin", "claude-plugin", "codex-plugin", "cursor-plugin",
     "gemini-cli-extension", "openai-plugin", "vscode-extension", "jetbrains-plugin",
 }
+# README 里出现这些「别的 agent/插件平台」字样且全文无 DSH 线索：文证表明它是别家生态的货（2026-11-07 体检预估 54 条）。
+_OTHER_HOST_RE = re.compile(
+    r"\bclaude[- ]?(?:code|skills?)?\b|\bcodex\b|\bcursor\b|\bgemini[- ]cli\b|\bsmithery\b|\bmcpb\b|\bopenskills\b|\bvscode[- ]extensions?\b",
+    re.I,
+)
 
 
 def analyze_relevance(repo: dict, whitelist_tags=None) -> dict:
@@ -240,6 +377,19 @@ def analyze_relevance(repo: dict, whitelist_tags=None) -> dict:
 
     if _DSH_NAME_RE.search(name) or _DSH_DESC_RE.search(desc) or any(t in _SPEC_TOPICS for t in topics):
         return out("related", "名字/描述/主题里有 DSH 专有线索", False)
+    # ---- 证据层（离线扫描传入的 README/manifest 证据；冻结参照物没有这些字段，规则原样）----
+    # 证据强于启发式：根清单校验通过 / README 明确提 DSH 的仓库，就不再落到「堆标签」「只挂宽泛标签」判噪声。
+    if repo.get("manifestOk"):
+        return out("related", "清单扫描确认是 dsh 插件（repo-manifests 校验通过）", False)
+    if repo.get("npmOk"):
+        return out("related", "npm 包声明 dsh.client 且入口真实存在（market 证据）", False)
+    if repo.get("readmeHit") is True:
+        return out("related", "README 正文明确 DSH 生态线索（README 证据）", False)
+    # README 文证「只讲别家生态」：正文提 claude-code/codex/cursor 等且全文无 DSH 线索，清单校验也没救回的。
+    # 这条比「只挂宽泛标签」更硬，直接判噪声（复核页可撤回）。
+    digest_other = str(repo.get("readmeDigest") or "")
+    if digest_other and not _DSH_NAME_RE.search(digest_other) and _OTHER_HOST_RE.search(digest_other):
+        return out("noise", "README 只讲其他插件平台（claude-code / codex 等），无任何 DSH 线索（README 证据）", False)
     loose = bool(_PLUGIN_SHAPED_RE.search(name + " " + desc))
     other_eco = sum(1 for t in topics if t in OTHER_ECOSYSTEM_TAGS)
     if other_eco >= 2:
@@ -250,6 +400,9 @@ def analyze_relevance(repo: dict, whitelist_tags=None) -> dict:
         return out("noise", "空壳仓库：没有描述、0 星", False)
     if len(tags) == 1 and not loose:
         return out("noise", "只挂 1 个最宽泛的 dsh 标签，正文与 DSH 无关", False)
+    # README 实证「正文没提 DSH」且不以插件形态出现：定性噪声（像不透插件本体，仍留人工）。
+    if repo.get("readmeHit") is False and not loose:
+        return out("noise", "README 正文没有任何 DSH 线索，也不像插件（README 证据）", False)
     return out("manual", "正文像插件，但没提 DSH，需要人工确认" if loose else "线索不足，需要人工确认", True)
 
 
@@ -263,6 +416,8 @@ def build_mesh(
     aliases: dict | None = None,
     whitelist_aliases: list[dict] | None = None,
     whitelist_tags: list[str] | None = None,
+    evidence: dict[str, dict] | None = None,
+    verdict_reviews: dict[str, dict] | None = None,
 ) -> dict:
     """主构图流程：精确命中 -> 剔除黑名单/新识别的噪声作者 -> 去重 -> 分类 -> 连线 -> 裁剪。
     blacklist 是已判定的噪声作者，一旦判定长期生效（data/noise-blacklist.json）。
@@ -355,13 +510,27 @@ def build_mesh(
             continue
         repo["matchedTags"] = matched
         repo["primaryTag"] = matched[0] if matched else NAME_TAG
+        # 证据只借给判定这一步，判定完就摘掉，不进前端契约（node 字段落盘口径不变）。
+        # 只登记本分支新增的键：repo 原本就带这些字段时以原值为准，判定完也不摘（不是本分支写入的）。
+        ev = (evidence or {}).get(str(repo["id"]))
+        added: tuple[str, ...] = ()
+        if ev:
+            added = tuple(k for k in ("manifestOk", "npmOk", "readmeHit", "readmeDigest") if k not in repo and k in ev)
+            for k in added:
+                repo[k] = ev[k]
         verdict = analyze_relevance(repo, effective_tags)
+        for k in added:
+            repo.pop(k, None)
         rel = verdict["relevance"]
         repo["relevance"] = rel
         repo["noise"] = min(1.0, max(0.0, 1 - rel / 5))
         repo["review"] = verdict["review"]
         repo["verdict"] = verdict["verdict"]
         repo["reason"] = verdict["reason"]
+        # 人工结论（后台「复核」页写进 data/review-verdicts.json）最后落锤：压过规则与证据，
+        # 只改写 verdict / review / reason 三个字段，relevance/noise 两个参考分照旧。
+        if verdict_reviews:
+            apply_verdict_override(repo, verdict_reviews.get(str(repo["id"])))
         seen[key] = repo
         nodes.append(repo)
 
@@ -377,7 +546,17 @@ def build_mesh(
 
     # 策展认定的生态基座（tools/ecosystem.json）直接归入协议基座，下面建共鸣边时复用同一份清单
     ecosystem = load_ecosystem()
+    # P2：分类也吃 README 摘要（半权）——把证据层 digest 临时挂回节点，分类器算完立刻摘掉，不进前端契约
+    digest_attached = []
+    if evidence:
+        for node in nodes:
+            rec = evidence.get(str(node["id"]))
+            if rec and rec.get("readmeDigest") and "readmeDigest" not in node:
+                node["readmeDigest"] = rec["readmeDigest"]
+                digest_attached.append(node)
     categories = apply_categories(nodes, base_ids=set(ecosystem.keys()), whitelist_tags=effective_tags)
+    for node in digest_attached:
+        node.pop("readmeDigest", None)
 
     # ---------- 连线 ----------
     edge_map: dict[tuple, dict] = {}

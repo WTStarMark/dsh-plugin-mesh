@@ -68,6 +68,15 @@ NOISE_OWNER_STRICT_MIN_REPOS = 200   # 老判据：仓库数门槛
 NOISE_OWNER_MAX_STARS = 1            # 老判据：最高星标门槛
 NOISE_BLACKLIST = DATA_DIR / "noise-blacklist.json"  # 已判定的噪声作者（人工可编辑）
 
+# 噪声判定证据（可缺省，三个都读不到时规则回到老口径）：
+# - MANIFESTS_JSON：tools/scan-manifests-tree.mjs 的根清单校验，verdict=confirmed 视为真插件；
+# - NOISE_EVIDENCE_JSON：tools/noise-evidence-scan.mjs 的 README 摘要（README 索引未覆盖队列的补扫）；
+# - README_CACHE：采集器 README 索引（覆盖最全的一份，digest 里搜 DSH 专有线索）。
+MANIFESTS_JSON = CACHE_DIR / "repo-manifests.json"
+NOISE_EVIDENCE_JSON = CACHE_DIR / "noise-evidence.json"
+# 人工复核结论（后台「复核」页写，verdict_reviews 压过规则与证据判定）：admin 侧 tools/review-verdicts.mjs 是同一份文件的镜像读写。
+REVIEW_JSON = DATA_DIR / "review-verdicts.json"
+
 FRONTEND_LIMIT = 0      # 0 = 不限；配合 gzip + 浏览器缓存，全量进前端也不卡
 KEEP_SNAPSHOTS = 2
 DEFAULT_INTERVAL = 3600
