@@ -2,7 +2,7 @@
  * 分类评测用的可切换变体（只用于离线评测，不改变线上分类结果）。
  *
  * baseline：现有 classifyNode。
- * promotion：父级 0 分、但细枝命中足够强时，用细枝的父扇区兜底。
+ * promotion：父级 0 分、但细枝命中足够强时，用细枝的父扇区兜底（已内置在 classifyNode，以下实现与生产逐条对齐）。
  * weakGate：仅由一个泛词（agent/tool/ui/style/api/file/chat/prompt/command/collection）在描述里命中时，不硬塞扇区。
  */
 
@@ -57,6 +57,10 @@ export function classifyWithPromotion(node, { threshold = 3 } = {}) {
   const sig = textSignals(node);
   const subs = [];
   for (const [parent, rules] of Object.entries(SUBCATEGORY_RULES)) {
+    const parentRule = CATEGORY_RULES.find((r) => r.id === parent);
+    // 与生产一致：有 gate 的扇区不能靠细枝词提升；gate/exclude 不通过也不提升
+    if (!parentRule || parentRule.gate) continue;
+    if (!passesGate(parentRule, sig) || isExcluded(parentRule, sig)) continue;
     for (const rule of rules) {
       let score = 0;
       let nameScore = 0;

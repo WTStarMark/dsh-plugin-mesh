@@ -1,9 +1,9 @@
 # 插件生态图
 
-插件生态图是一个网页：把 GitHub 上带 `dsh` 系列标签的仓库，按功能画成一张可交互的关系图。圆心固定是官方仓库 `deepseek-ai/deepseek-harness`，往外分成 23 个功能扇区。数据按小时采集，一轮通常几十分钟；没有令牌或网络慢时会拉长。
+插件生态图是一个网页：把 GitHub 上带 `dsh` 系列标签的仓库，按功能画成一张可交互的关系图。圆心固定是官方仓库 `deepseek-ai/deepseek-harness`，往外分成 24 个功能扇区。数据按小时采集，一轮通常几十分钟；没有令牌或网络慢时会拉长。
 
 [![在线访问](https://img.shields.io/badge/在线访问-node.moc--chen.cn-2f7df6?style=flat-square)](https://node.moc-chen.cn/)
-[![测试](https://img.shields.io/badge/tests-393%20JS%20%2B%20182%20Python-3fb8a8?style=flat-square)](#测试与-ci)
+[![测试](https://img.shields.io/badge/tests-408%20JS%20%2B%20182%20Python-3fb8a8?style=flat-square)](#测试与-ci)
 [![依赖](https://img.shields.io/badge/dependencies-0-57b894?style=flat-square)](#技术选型)
 [![版本](https://img.shields.io/badge/version-v0.5.4-9b8cf0?style=flat-square)]()
 
@@ -30,7 +30,7 @@
 
 | 能力 | 说明 |
 |---|---|
-| 生态全景 | 23 个功能扇区按星标从内到外排布；坐标由可播种随机数生成，同一 seed 可复现 |
+| 生态全景 | 24 个功能扇区按星标从内到外排布；坐标由可播种随机数生成，同一 seed 可复现 |
 | 单扇区放大 | 点扇区，它铺满整圆，圆内按细枝（更细的功能分组）重新分区；`Esc` 或左栏「返回全景」退出 |
 | 双击聚焦 | 双击一个仓库，以它为中心重建扇形图；双击官方仓库直接回全景 |
 | 生态榜单 | 顶栏奖杯弹窗两个榜，各最多 50 行：周更新热榜（本周真发过 release 的项目）与周 star 热榜 |

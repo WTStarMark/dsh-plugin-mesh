@@ -1,6 +1,6 @@
 {
  "meta": {
-  "generatedAt": "2026-10-09T11:30:35.599Z",
+  "generatedAt": "2026-11-07T00:30:48.307Z",
   "kind": "sample-seed",
   "note": "临时取样（每标签按星标取头部若干页），非全量采集；全量索引见后端设计。",
   "source": "GitHub REST Search API",
@@ -20,40 +20,57 @@
    "T-Auto/dsh-ecosystem-spec",
    "WTStarMark/dsh-myskin"
   ],
-  "ecosystemDisabled": [],
+  "ecosystemDisabled": [
+   "T-Auto/dsh-ecosystem-spec"
+  ],
   "topicEdgesDroppedByCap": 104,
   "categories": {
-   "classified": 527,
-   "unclassified": 66,
+   "classified": 514,
+   "unclassified": 79,
    "minCount": 10,
-   "maxSectors": 20,
+   "maxSectors": 26,
    "keepIds": [
     "spec"
    ],
    "merged": [
+    {
+     "id": "media",
+     "count": 6,
+     "reason": "样本过少"
+    },
     {
      "id": "web",
      "count": 7,
      "reason": "样本过少"
     },
     {
+     "id": "doc",
+     "count": 6,
+     "reason": "样本过少"
+    },
+    {
      "id": "remote",
-     "count": 9,
+     "count": 7,
      "reason": "样本过少"
     },
     {
      "id": "file",
-     "count": 3,
+     "count": 5,
      "reason": "样本过少"
     },
     {
-     "id": "bridge",
-     "count": 9,
-     "reason": "样本过少"
-    },
-    {
-     "id": "doc",
+     "id": "efficiency",
      "count": 1,
+     "reason": "样本过少"
+    },
+    {
+     "id": "data",
+     "count": 6,
+     "reason": "样本过少"
+    },
+    {
+     "id": "notify",
+     "count": 7,
      "reason": "样本过少"
     }
    ],
@@ -61,42 +78,47 @@
     {
      "id": "agent",
      "label": "智能体技能",
-     "count": 118
-    },
-    {
-     "id": "desktop",
-     "label": "桌面客户端",
-     "count": 96
+     "count": 110
     },
     {
      "id": "other",
      "label": "其他",
-     "count": 66
+     "count": 79
+    },
+    {
+     "id": "desktop",
+     "label": "客户端应用",
+     "count": 78
     },
     {
      "id": "model",
      "label": "模型接入",
-     "count": 60
+     "count": 53
     },
     {
      "id": "panel",
      "label": "界面面板",
-     "count": 39
-    },
-    {
-     "id": "session",
-     "label": "会话交互",
-     "count": 32
-    },
-    {
-     "id": "skin",
-     "label": "皮肤美化",
-     "count": 30
+     "count": 47
     },
     {
      "id": "tools",
      "label": "工具命令",
+     "count": 39
+    },
+    {
+     "id": "skin",
+     "label": "皮肤美化",
+     "count": 31
+    },
+    {
+     "id": "session",
+     "label": "会话交互",
      "count": 26
+    },
+    {
+     "id": "usage",
+     "label": "用量计费",
+     "count": 25
     },
     {
      "id": "memory",
@@ -106,32 +128,27 @@
     {
      "id": "market",
      "label": "插件市场",
-     "count": 22
+     "count": 21
     },
     {
-     "id": "usage",
-     "label": "用量额度",
-     "count": 22
+     "id": "pet",
+     "label": "桌宠陪伴",
+     "count": 16
     },
     {
      "id": "secure",
      "label": "安全权限",
-     "count": 19
+     "count": 16
     },
     {
-     "id": "pet",
-     "label": "桌宠娱乐",
+     "id": "bridge",
+     "label": "集成桥接",
      "count": 14
     },
     {
      "id": "dev",
      "label": "开发调试",
-     "count": 12
-    },
-    {
-     "id": "notify",
-     "label": "语音提醒",
-     "count": 10
+     "count": 11
     },
     {
      "id": "spec",
@@ -301,47 +318,47 @@
   {
    "id": "agent",
    "label": "智能体技能",
-   "count": 116
-  },
-  {
-   "id": "desktop",
-   "label": "桌面客户端",
-   "count": 95
+   "count": 110
   },
   {
    "id": "other",
    "label": "其他",
-   "count": 71
+   "count": 79
+  },
+  {
+   "id": "desktop",
+   "label": "客户端应用",
+   "count": 78
   },
   {
    "id": "model",
    "label": "模型接入",
-   "count": 59
+   "count": 53
   },
   {
    "id": "panel",
    "label": "界面面板",
-   "count": 48
-  },
-  {
-   "id": "skin",
-   "label": "皮肤美化",
-   "count": 33
-  },
-  {
-   "id": "session",
-   "label": "会话交互",
-   "count": 29
-  },
-  {
-   "id": "usage",
-   "label": "用量额度",
-   "count": 26
+   "count": 47
   },
   {
    "id": "tools",
    "label": "工具命令",
-   "count": 24
+   "count": 39
+  },
+  {
+   "id": "skin",
+   "label": "皮肤美化",
+   "count": 31
+  },
+  {
+   "id": "session",
+   "label": "会话交互",
+   "count": 26
+  },
+  {
+   "id": "usage",
+   "label": "用量计费",
+   "count": 25
   },
   {
    "id": "memory",
@@ -354,19 +371,24 @@
    "count": 21
   },
   {
-   "id": "secure",
-   "label": "安全权限",
-   "count": 18
+   "id": "pet",
+   "label": "桌宠陪伴",
+   "count": 16
   },
   {
-   "id": "pet",
-   "label": "桌宠娱乐",
+   "id": "secure",
+   "label": "安全权限",
+   "count": 16
+  },
+  {
+   "id": "bridge",
+   "label": "集成桥接",
    "count": 14
   },
   {
    "id": "dev",
    "label": "开发调试",
-   "count": 12
+   "count": 11
   },
   {
    "id": "spec",
@@ -703,8 +725,8 @@
     "knowledge",
     "rag"
    ],
-   "subcategory": "memory-long",
-   "subcategoryLabel": "长期记忆"
+   "subcategory": "memory-rag",
+   "subcategoryLabel": "检索增强"
   },
   {
    "id": "esengine/DeepSeek-Reasonix",
@@ -921,11 +943,12 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 13,
+   "categoryLabel": "客户端应用",
+   "categoryScore": 15,
    "categoryHits": [
     "desktop",
-    "桌面"
+    "桌面",
+    "桌面端"
    ],
    "subcategory": "desktop-client",
    "subcategoryLabel": "客户端本体"
@@ -1320,8 +1343,8 @@
     "memory",
     "rag"
    ],
-   "subcategory": "memory-long",
-   "subcategoryLabel": "长期记忆"
+   "subcategory": "memory-rag",
+   "subcategoryLabel": "检索增强"
   },
   {
    "id": "MemTensor/MemOS",
@@ -1380,8 +1403,8 @@
     "memory",
     "rag"
    ],
-   "subcategory": "memory-long",
-   "subcategoryLabel": "长期记忆"
+   "subcategory": "memory-rag",
+   "subcategoryLabel": "检索增强"
   },
   {
    "id": "dataelement/dsh-desktop",
@@ -1428,11 +1451,13 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 1,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 16,
+   "categoryLabel": "客户端应用",
+   "categoryScore": 20.5,
    "categoryHits": [
     "desktop",
-    "桌面"
+    "app",
+    "桌面",
+    "桌面版"
    ],
    "subcategory": "desktop-client",
    "subcategoryLabel": "客户端本体"
@@ -1694,8 +1719,8 @@
     "memory",
     "rag"
    ],
-   "subcategory": "memory-long",
-   "subcategoryLabel": "长期记忆"
+   "subcategory": "memory-rag",
+   "subcategoryLabel": "检索增强"
   },
   {
    "id": "lingfengQAQ/webnovel-writer",
@@ -1782,12 +1807,14 @@
    "degree": 0,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 2,
+   "categoryScore": 14,
    "categoryHits": [
-    "reasoning"
+    "reasoning",
+    "router",
+    "routing"
    ],
-   "subcategory": "model-reasoning",
-   "subcategoryLabel": "推理思考"
+   "subcategory": "model-router",
+   "subcategoryLabel": "模型路由"
   },
   {
    "id": "Devin-AXIS/iPolloWork",
@@ -2120,7 +2147,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 2,
    "category": "pet",
-   "categoryLabel": "桌宠娱乐",
+   "categoryLabel": "桌宠陪伴",
    "categoryScore": 7.5,
    "categoryHits": [
     "pet",
@@ -2432,7 +2459,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "pet",
-   "categoryLabel": "桌宠娱乐",
+   "categoryLabel": "桌宠陪伴",
    "categoryScore": 14,
    "categoryHits": [
     "小鲸鱼",
@@ -2548,8 +2575,8 @@
     "memory",
     "rag"
    ],
-   "subcategory": "memory-long",
-   "subcategoryLabel": "长期记忆"
+   "subcategory": "memory-rag",
+   "subcategoryLabel": "检索增强"
   },
   {
    "id": "foryourhealth111-pixel/Vibe-Skills",
@@ -2718,10 +2745,11 @@
    "degree": 0,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 7,
+   "categoryScore": 9,
    "categoryHits": [
     "llm",
-    "claude"
+    "claude",
+    "routing"
    ],
    "subcategory": "model-provider",
    "subcategoryLabel": "模型供应商"
@@ -2813,14 +2841,13 @@
    "verdict": "noise",
    "reason": "只挂 1 个最宽泛的 dsh 标签，正文与 DSH 无关",
    "degree": 2,
-   "category": "agent",
-   "categoryLabel": "智能体技能",
-   "categoryScore": 1,
-   "categoryHits": [
-    "agent"
-   ],
-   "subcategory": "agent-teams",
-   "subcategoryLabel": "多代理协作"
+   "category": "other",
+   "categoryLabel": "其他",
+   "categoryScore": 0,
+   "categoryHits": [],
+   "subcategory": null,
+   "subcategoryLabel": null,
+   "categoryRaw": "other"
   },
   {
    "id": "Tiger3807861189/J-Space-Cognition-Suite",
@@ -2924,8 +2951,8 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 23.5,
+   "categoryLabel": "客户端应用",
+   "categoryScore": 26.5,
    "categoryHits": [
     "desktop",
     "tauri",
@@ -2974,15 +3001,17 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
-   "category": "model",
-   "categoryLabel": "模型接入",
-   "categoryScore": 9,
+   "category": "session",
+   "categoryLabel": "会话交互",
+   "categoryScore": 31.5,
    "categoryHits": [
-    "llm",
-    "模型"
+    "prompt",
+    "提示词",
+    "破甲",
+    "jailbreak"
    ],
-   "subcategory": "model-provider",
-   "subcategoryLabel": "模型供应商"
+   "subcategory": "session-jailbreak",
+   "subcategoryLabel": "破甲越狱"
   },
   {
    "id": "zilliztech/memsearch",
@@ -3043,8 +3072,8 @@
     "memory",
     "rag"
    ],
-   "subcategory": "memory-long",
-   "subcategoryLabel": "长期记忆"
+   "subcategory": "memory-rag",
+   "subcategoryLabel": "检索增强"
   },
   {
    "id": "GCWing/OpenBitFun",
@@ -3184,14 +3213,18 @@
    "verdict": "noise",
    "reason": "只挂 1 个最宽泛的 dsh 标签，正文与 DSH 无关",
    "degree": 9,
-   "category": "dev",
-   "categoryLabel": "开发调试",
-   "categoryScore": 2,
+   "category": "other",
+   "categoryLabel": "其他",
+   "categoryScore": 17,
    "categoryHits": [
-    "review"
+    "office",
+    "excel",
+    "pptx",
+    "docx"
    ],
-   "subcategory": "dev-review",
-   "subcategoryLabel": "代码审查"
+   "subcategory": null,
+   "subcategoryLabel": null,
+   "categoryRaw": "doc"
   },
   {
    "id": "Minglink/dsh-infinite-gen-4",
@@ -3352,8 +3385,8 @@
    "categoryHits": [
     "memory"
    ],
-   "subcategory": "memory-long",
-   "subcategoryLabel": "长期记忆"
+   "subcategory": "memory-general",
+   "subcategoryLabel": "综合"
   },
   {
    "id": "NanmiCoder/dsh-agent-teams",
@@ -3548,14 +3581,17 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 4,
-   "category": "secure",
-   "categoryLabel": "安全权限",
-   "categoryScore": 3,
+   "category": "bridge",
+   "categoryLabel": "集成桥接",
+   "categoryScore": 48,
    "categoryHits": [
-    "credential"
+    "connect",
+    "飞书",
+    "钉钉",
+    "企业微信"
    ],
-   "subcategory": "secure-cred",
-   "subcategoryLabel": "凭据密钥"
+   "subcategory": "bridge-im",
+   "subcategoryLabel": "IM 渠道"
   },
   {
    "id": "hyhmrright/brooks-lint",
@@ -3824,14 +3860,15 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 6,
-   "category": "panel",
-   "categoryLabel": "界面面板",
-   "categoryScore": 3,
+   "category": "other",
+   "categoryLabel": "其他",
+   "categoryScore": 10.5,
    "categoryHits": [
-    "editor"
+    "ppt"
    ],
-   "subcategory": "panel-workbench",
-   "subcategoryLabel": "创作工作台"
+   "subcategory": null,
+   "subcategoryLabel": null,
+   "categoryRaw": "doc"
   },
   {
    "id": "anywhere-labs/Agents-Anywhere",
@@ -3992,7 +4029,7 @@
    "reason": "正文像插件，但没提 DSH，需要人工确认",
    "degree": 13,
    "category": "pet",
-   "categoryLabel": "桌宠娱乐",
+   "categoryLabel": "桌宠陪伴",
    "categoryScore": 7.5,
    "categoryHits": [
     "pet"
@@ -4046,8 +4083,8 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 6,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 14.5,
+   "categoryLabel": "客户端应用",
+   "categoryScore": 18.5,
    "categoryHits": [
     "desktop",
     "electron",
@@ -4095,8 +4132,8 @@
    "categoryHits": [
     "memory"
    ],
-   "subcategory": "memory-long",
-   "subcategoryLabel": "长期记忆"
+   "subcategory": "memory-general",
+   "subcategoryLabel": "综合"
   },
   {
    "id": "Anionex/agent-vision-toolkit",
@@ -4145,7 +4182,7 @@
    "degree": 9,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 29,
+   "categoryScore": 28,
    "categoryHits": [
     "llm",
     "claude",
@@ -4476,12 +4513,13 @@
    "degree": 4,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 11,
+   "categoryScore": 20,
    "categoryHits": [
+    "router",
     "vision"
    ],
-   "subcategory": "model-multimodal",
-   "subcategoryLabel": "多模态"
+   "subcategory": "model-router",
+   "subcategoryLabel": "模型路由"
   },
   {
    "id": "vshulcz/deja-vu",
@@ -4540,8 +4578,8 @@
    "categoryHits": [
     "memory"
    ],
-   "subcategory": "memory-long",
-   "subcategoryLabel": "长期记忆"
+   "subcategory": "memory-general",
+   "subcategoryLabel": "综合"
   },
   {
    "id": "paean-ai/deeptide",
@@ -4881,7 +4919,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 6,
    "category": "pet",
-   "categoryLabel": "桌宠娱乐",
+   "categoryLabel": "桌宠陪伴",
    "categoryScore": 22.5,
    "categoryHits": [
     "pet",
@@ -4993,15 +5031,17 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
-   "category": "agent",
-   "categoryLabel": "智能体技能",
-   "categoryScore": 12.5,
+   "category": "model",
+   "categoryLabel": "模型接入",
+   "categoryScore": 16.5,
    "categoryHits": [
-    "agent",
-    "skill"
+    "llm",
+    "claude",
+    "router",
+    "routing"
    ],
-   "subcategory": "agent-skill",
-   "subcategoryLabel": "技能包"
+   "subcategory": "model-provider",
+   "subcategoryLabel": "模型供应商"
   },
   {
    "id": "vostride/agent-qa",
@@ -5284,8 +5324,8 @@
     "llm",
     "模型"
    ],
-   "subcategory": "model-provider",
-   "subcategoryLabel": "模型供应商"
+   "subcategory": "model-select",
+   "subcategoryLabel": "模型选择切换"
   },
   {
    "id": "jingyunstudio/jingyun-dsh",
@@ -5440,8 +5480,8 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 13,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 34,
+   "categoryLabel": "客户端应用",
+   "categoryScore": 44,
    "categoryHits": [
     "desktop",
     "client",
@@ -5538,17 +5578,14 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
-   "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 8,
+   "category": "agent",
+   "categoryLabel": "智能体技能",
+   "categoryScore": 1.5,
    "categoryHits": [
-    "desktop",
-    "electron",
-    "macos",
-    "windows"
+    "agent"
    ],
-   "subcategory": "desktop-client",
-   "subcategoryLabel": "客户端本体"
+   "subcategory": "agent-general",
+   "subcategoryLabel": "综合"
   },
   {
    "id": "hellowind777/helloagents",
@@ -5928,8 +5965,8 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 23.5,
+   "categoryLabel": "客户端应用",
+   "categoryScore": 25,
    "categoryHits": [
     "desktop",
     "client",
@@ -6029,17 +6066,16 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 2,
-   "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 17,
+   "category": "tools",
+   "categoryLabel": "工具命令",
+   "categoryScore": 7.5,
    "categoryHits": [
-    "desktop",
-    "electron",
-    "macos",
-    "windows"
+    "tool",
+    "一键",
+    "安装"
    ],
-   "subcategory": "desktop-client",
-   "subcategoryLabel": "客户端本体"
+   "subcategory": "tools-install",
+   "subcategoryLabel": "安装部署"
   },
   {
    "id": "ccch1mneyyy/working-activity",
@@ -6220,14 +6256,15 @@
    "verdict": "manual",
    "reason": "正文像插件，但没提 DSH，需要人工确认",
    "degree": 4,
-   "category": "model",
-   "categoryLabel": "模型接入",
-   "categoryScore": 3,
+   "category": "tools",
+   "categoryLabel": "工具命令",
+   "categoryScore": 5,
    "categoryHits": [
-    "gemini"
+    "cli",
+    "search"
    ],
-   "subcategory": "model-provider",
-   "subcategoryLabel": "模型供应商"
+   "subcategory": "tools-cli",
+   "subcategoryLabel": "命令行"
   },
   {
    "id": "Nagi-ovo/dsh-ads",
@@ -6326,8 +6363,8 @@
     "knowledge",
     "记忆"
    ],
-   "subcategory": "memory-long",
-   "subcategoryLabel": "长期记忆"
+   "subcategory": "memory-kb",
+   "subcategoryLabel": "知识库"
   },
   {
    "id": "antibrow/dsh-antibrow",
@@ -6480,17 +6517,13 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 4,
-   "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 15,
-   "categoryHits": [
-    "launcher",
-    "macos",
-    "windows",
-    "启动器"
-   ],
-   "subcategory": "desktop-launcher",
-   "subcategoryLabel": "启动器"
+   "category": "other",
+   "categoryLabel": "其他",
+   "categoryScore": 0,
+   "categoryHits": [],
+   "subcategory": null,
+   "subcategoryLabel": null,
+   "categoryRaw": "other"
   },
   {
    "id": "mnemon-dev/mnemon",
@@ -6548,8 +6581,8 @@
     "memory",
     "knowledge"
    ],
-   "subcategory": "memory-long",
-   "subcategoryLabel": "长期记忆"
+   "subcategory": "memory-kb",
+   "subcategoryLabel": "知识库"
   },
   {
    "id": "inclusionAI/Avernet",
@@ -6644,11 +6677,12 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 5,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 17.5,
+   "categoryLabel": "客户端应用",
+   "categoryScore": 20,
    "categoryHits": [
     "desktop",
-    "electron"
+    "electron",
+    "app"
    ],
    "subcategory": "desktop-client",
    "subcategoryLabel": "客户端本体"
@@ -6689,14 +6723,16 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 4,
-   "category": "panel",
-   "categoryLabel": "界面面板",
-   "categoryScore": 1,
+   "category": "desktop",
+   "categoryLabel": "客户端应用",
+   "categoryScore": 9,
    "categoryHits": [
-    "ui"
+    "android",
+    "mobile",
+    "安卓"
    ],
-   "subcategory": "panel-mobile",
-   "subcategoryLabel": "移动端界面"
+   "subcategory": "desktop-mobile",
+   "subcategoryLabel": "跨端客户端"
   },
   {
    "id": "liustack/modsearch",
@@ -6793,14 +6829,15 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
-   "category": "session",
-   "categoryLabel": "会话交互",
-   "categoryScore": 3,
+   "category": "pet",
+   "categoryLabel": "桌宠陪伴",
+   "categoryScore": 11,
    "categoryHits": [
-    "对话"
+    "游戏",
+    "tavern"
    ],
-   "subcategory": "session-chat",
-   "subcategoryLabel": "消息对话"
+   "subcategory": "pet-persona",
+   "subcategoryLabel": "人设陪伴"
   },
   {
    "id": "howmp/dsh-pentest",
@@ -7058,9 +7095,10 @@
    "degree": 6,
    "category": "other",
    "categoryLabel": "其他",
-   "categoryScore": 21,
+   "categoryScore": 28.5,
    "categoryHits": [
-    "image"
+    "image",
+    "comfyui"
    ],
    "subcategory": null,
    "subcategoryLabel": null,
@@ -7656,8 +7694,8 @@
     "memory",
     "knowledge"
    ],
-   "subcategory": "memory-long",
-   "subcategoryLabel": "长期记忆"
+   "subcategory": "memory-kb",
+   "subcategoryLabel": "知识库"
   },
   {
    "id": "EthanYoQ/Invoice-Downloader",
@@ -7766,8 +7804,8 @@
     "session",
     "conversation"
    ],
-   "subcategory": "session-manage",
-   "subcategoryLabel": "会话管理"
+   "subcategory": "session-chat",
+   "subcategoryLabel": "消息对话"
   },
   {
    "id": "houyanchao/chatgpt-gemini-timeline",
@@ -7977,14 +8015,16 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 2,
-   "category": "panel",
-   "categoryLabel": "界面面板",
-   "categoryScore": 2,
+   "category": "other",
+   "categoryLabel": "其他",
+   "categoryScore": 18,
    "categoryHits": [
-    "canvas"
+    "office",
+    "slides"
    ],
-   "subcategory": "panel-editor",
-   "subcategoryLabel": "编辑器"
+   "subcategory": null,
+   "subcategoryLabel": null,
+   "categoryRaw": "doc"
   },
   {
    "id": "elysia395/dsh-wallpaper-engine",
@@ -8090,8 +8130,8 @@
    "categoryHits": [
     "memory"
    ],
-   "subcategory": "memory-long",
-   "subcategoryLabel": "长期记忆"
+   "subcategory": "memory-general",
+   "subcategoryLabel": "综合"
   },
   {
    "id": "anysearch-team/anysearch-dsh",
@@ -8132,14 +8172,15 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 7,
-   "category": "model",
-   "categoryLabel": "模型接入",
-   "categoryScore": 3,
+   "category": "tools",
+   "categoryLabel": "工具命令",
+   "categoryScore": 9.5,
    "categoryHits": [
-    "provider"
+    "tool",
+    "search"
    ],
-   "subcategory": "model-provider",
-   "subcategoryLabel": "模型供应商"
+   "subcategory": "tools-search",
+   "subcategoryLabel": "检索搜索"
   },
   {
    "id": "omdsh-dev/dsh-mnemon",
@@ -8198,8 +8239,8 @@
    "categoryHits": [
     "memory"
    ],
-   "subcategory": "memory-long",
-   "subcategoryLabel": "长期记忆"
+   "subcategory": "memory-general",
+   "subcategoryLabel": "综合"
   },
   {
    "id": "ranxianglei/billion-context",
@@ -8233,15 +8274,18 @@
    "verdict": "manual",
    "reason": "正文像插件，但没提 DSH，需要人工确认",
    "degree": 0,
-   "category": "session",
-   "categoryLabel": "会话交互",
-   "categoryScore": 8,
+   "category": "other",
+   "categoryLabel": "其他",
+   "categoryScore": 25,
    "categoryHits": [
-    "session",
-    "会话"
+    "省token",
+    "token",
+    "上下文压缩",
+    "压缩"
    ],
-   "subcategory": "session-manage",
-   "subcategoryLabel": "会话管理"
+   "subcategory": null,
+   "subcategoryLabel": null,
+   "categoryRaw": "efficiency"
   },
   {
    "id": "Clarklevis1995/dsh-mobile",
@@ -8294,8 +8338,8 @@
    "categoryHits": [
     "会话"
    ],
-   "subcategory": "session-manage",
-   "subcategoryLabel": "会话管理"
+   "subcategory": "session-general",
+   "subcategoryLabel": "综合"
   },
   {
    "id": "zenstory-ai/oh-story-dsh",
@@ -8823,7 +8867,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 6,
    "category": "pet",
-   "categoryLabel": "桌宠娱乐",
+   "categoryLabel": "桌宠陪伴",
    "categoryScore": 4.5,
    "categoryHits": [
     "pet"
@@ -8876,7 +8920,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 10,
    "category": "usage",
-   "categoryLabel": "用量额度",
+   "categoryLabel": "用量计费",
    "categoryScore": 27,
    "categoryHits": [
     "usage",
@@ -9077,14 +9121,15 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
-   "category": "agent",
-   "categoryLabel": "智能体技能",
-   "categoryScore": 1.5,
+   "category": "model",
+   "categoryLabel": "模型接入",
+   "categoryScore": 10,
    "categoryHits": [
-    "agent"
+    "router",
+    "routing"
    ],
-   "subcategory": "agent-sub",
-   "subcategoryLabel": "子代理"
+   "subcategory": "model-router",
+   "subcategoryLabel": "模型路由"
   },
   {
    "id": "tingly-dev/tingly-box",
@@ -9175,17 +9220,16 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 6,
-   "category": "other",
-   "categoryLabel": "其他",
-   "categoryScore": 12,
+   "category": "desktop",
+   "categoryLabel": "客户端应用",
+   "categoryScore": 15,
    "categoryHits": [
-    "remote",
-    "局域网",
-    "远程"
+    "android",
+    "mobile",
+    "app"
    ],
-   "subcategory": null,
-   "subcategoryLabel": null,
-   "categoryRaw": "remote"
+   "subcategory": "desktop-mobile",
+   "subcategoryLabel": "跨端客户端"
   },
   {
    "id": "csyangwen/dsh-memory-evolve",
@@ -9271,7 +9315,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 1,
    "category": "pet",
-   "categoryLabel": "桌宠娱乐",
+   "categoryLabel": "桌宠陪伴",
    "categoryScore": 10.5,
    "categoryHits": [
     "pet",
@@ -9424,15 +9468,18 @@
    "verdict": "noise",
    "reason": "只挂 1 个最宽泛的 dsh 标签，正文与 DSH 无关",
    "degree": 5,
-   "category": "usage",
-   "categoryLabel": "用量额度",
-   "categoryScore": 5,
+   "category": "other",
+   "categoryLabel": "其他",
+   "categoryScore": 15,
    "categoryHits": [
-    "usage",
-    "token"
+    "data",
+    "finance",
+    "stock",
+    "行情"
    ],
-   "subcategory": "usage-stat",
-   "subcategoryLabel": "用量统计"
+   "subcategory": null,
+   "subcategoryLabel": null,
+   "categoryRaw": "data"
   },
   {
    "id": "hust-open-atom-club/oh-dsh",
@@ -9473,14 +9520,14 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
-   "category": "agent",
-   "categoryLabel": "智能体技能",
-   "categoryScore": 1.5,
+   "category": "panel",
+   "categoryLabel": "界面面板",
+   "categoryScore": 3,
    "categoryHits": [
-    "agent"
+    "tui"
    ],
-   "subcategory": "agent-runtime",
-   "subcategoryLabel": "运行时预设"
+   "subcategory": "panel-tui",
+   "subcategoryLabel": "终端界面"
   },
   {
    "id": "ZSeven-W/dsh-ios",
@@ -9594,8 +9641,8 @@
     "knowledge",
     "rag"
    ],
-   "subcategory": "memory-long",
-   "subcategoryLabel": "长期记忆"
+   "subcategory": "memory-kb",
+   "subcategoryLabel": "知识库"
   },
   {
    "id": "nutshellai-tech/mobius",
@@ -9678,15 +9725,14 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 3,
-   "category": "model",
-   "categoryLabel": "模型接入",
-   "categoryScore": 4,
+   "category": "tools",
+   "categoryLabel": "工具命令",
+   "categoryScore": 11,
    "categoryHits": [
-    "provider",
-    "api"
+    "search"
    ],
-   "subcategory": "model-provider",
-   "subcategoryLabel": "模型供应商"
+   "subcategory": "tools-search",
+   "subcategoryLabel": "检索搜索"
   },
   {
    "id": "sunchaokun/PPT-Design-Skill",
@@ -9731,14 +9777,16 @@
    "verdict": "manual",
    "reason": "正文像插件，但没提 DSH，需要人工确认",
    "degree": 6,
-   "category": "agent",
-   "categoryLabel": "智能体技能",
-   "categoryScore": 23,
+   "category": "other",
+   "categoryLabel": "其他",
+   "categoryScore": 28.5,
    "categoryHits": [
-    "skill"
+    "ppt",
+    "pptx"
    ],
-   "subcategory": "agent-skill",
-   "subcategoryLabel": "技能包"
+   "subcategory": null,
+   "subcategoryLabel": null,
+   "categoryRaw": "doc"
   },
   {
    "id": "hikariming/dshfind",
@@ -9836,8 +9884,8 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 6,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 27.5,
+   "categoryLabel": "客户端应用",
+   "categoryScore": 32,
    "categoryHits": [
     "desktop",
     "tauri",
@@ -9885,15 +9933,15 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 4,
-   "category": "memory",
-   "categoryLabel": "记忆上下文",
-   "categoryScore": 6,
+   "category": "panel",
+   "categoryLabel": "界面面板",
+   "categoryScore": 14.5,
    "categoryHits": [
-    "memory",
-    "记忆"
+    "ui",
+    "tui"
    ],
-   "subcategory": "memory-long",
-   "subcategoryLabel": "长期记忆"
+   "subcategory": "panel-tui",
+   "subcategoryLabel": "终端界面"
   },
   {
    "id": "Nagi-ovo/dsh-visualize",
@@ -9985,8 +10033,8 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 5,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 19,
+   "categoryLabel": "客户端应用",
+   "categoryScore": 20.5,
    "categoryHits": [
     "desktop",
     "client",
@@ -10153,8 +10201,8 @@
     "memory",
     "记忆"
    ],
-   "subcategory": "memory-long",
-   "subcategoryLabel": "长期记忆"
+   "subcategory": "memory-general",
+   "subcategoryLabel": "综合"
   },
   {
    "id": "ericshang98/Perfect-Web-Clone",
@@ -10478,15 +10526,14 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 3,
-   "category": "other",
-   "categoryLabel": "其他",
+   "category": "bridge",
+   "categoryLabel": "集成桥接",
    "categoryScore": 6,
    "categoryHits": [
     "connect"
    ],
-   "subcategory": null,
-   "subcategoryLabel": null,
-   "categoryRaw": "bridge"
+   "subcategory": "bridge-integration",
+   "subcategoryLabel": "第三方对接"
   },
   {
    "id": "See-Sol-Lab/DeepSeekGUI",
@@ -10537,15 +10584,15 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 3,
-   "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 7,
+   "category": "memory",
+   "categoryLabel": "记忆上下文",
+   "categoryScore": 6,
    "categoryHits": [
-    "desktop",
-    "桌面"
+    "memory",
+    "记忆"
    ],
-   "subcategory": "desktop-client",
-   "subcategoryLabel": "客户端本体"
+   "subcategory": "memory-general",
+   "subcategoryLabel": "综合"
   },
   {
    "id": "Devin-AXIS/jev-dsh-decision",
@@ -10885,16 +10932,16 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 5,
    "category": "usage",
-   "categoryLabel": "用量额度",
-   "categoryScore": 21,
+   "categoryLabel": "用量计费",
+   "categoryScore": 20,
    "categoryHits": [
     "usage",
     "balance",
     "token",
     "余额"
    ],
-   "subcategory": "usage-balance",
-   "subcategoryLabel": "余额"
+   "subcategory": "usage-stat",
+   "subcategoryLabel": "用量统计"
   },
   {
    "id": "kingOfSoySauce/dsh-liang-skin",
@@ -11036,8 +11083,8 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 1,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 24.5,
+   "categoryLabel": "客户端应用",
+   "categoryScore": 26,
    "categoryHits": [
     "desktop",
     "tauri",
@@ -11082,15 +11129,15 @@
    "verdict": "noise",
    "reason": "只挂 1 个最宽泛的 dsh 标签，正文与 DSH 无关",
    "degree": 2,
-   "category": "other",
-   "categoryLabel": "其他",
-   "categoryScore": 4.5,
+   "category": "tools",
+   "categoryLabel": "工具命令",
+   "categoryScore": 5.5,
    "categoryHits": [
-    "ssh"
+    "ssh",
+    "ops"
    ],
-   "subcategory": null,
-   "subcategoryLabel": null,
-   "categoryRaw": "remote"
+   "subcategory": "tools-ops",
+   "subcategoryLabel": "运维与自检"
   },
   {
    "id": "edonadei/caliper",
@@ -11258,7 +11305,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 3,
    "category": "usage",
-   "categoryLabel": "用量额度",
+   "categoryLabel": "用量计费",
    "categoryScore": 16,
    "categoryHits": [
     "usage",
@@ -11266,8 +11313,8 @@
     "quota",
     "token"
    ],
-   "subcategory": "usage-stat",
-   "subcategoryLabel": "用量统计"
+   "subcategory": "usage-quota",
+   "subcategoryLabel": "配额订阅"
   },
   {
    "id": "skymecode/deepseek-harness-for-vscode",
@@ -11312,15 +11359,16 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 1,
-   "category": "other",
-   "categoryLabel": "其他",
-   "categoryScore": 3,
+   "category": "tools",
+   "categoryLabel": "工具命令",
+   "categoryScore": 22,
    "categoryHits": [
-    "markdown"
+    "command",
+    "setup",
+    "vscode"
    ],
-   "subcategory": null,
-   "subcategoryLabel": null,
-   "categoryRaw": "doc"
+   "subcategory": "tools-cli",
+   "subcategoryLabel": "命令行"
   },
   {
    "id": "liceses/dsh-gitbash-preset",
@@ -11471,8 +11519,8 @@
    "categoryHits": [
     "模型"
    ],
-   "subcategory": "model-provider",
-   "subcategoryLabel": "模型供应商"
+   "subcategory": "model-general",
+   "subcategoryLabel": "综合"
   },
   {
    "id": "fangqian616/consensus-pipeline",
@@ -11700,7 +11748,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 11,
    "category": "usage",
-   "categoryLabel": "用量额度",
+   "categoryLabel": "用量计费",
    "categoryScore": 23.5,
    "categoryHits": [
     "usage",
@@ -11750,15 +11798,14 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 2,
-   "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 14,
+   "category": "tools",
+   "categoryLabel": "工具命令",
+   "categoryScore": 1.5,
    "categoryHits": [
-    "desktop",
-    "桌面"
+    "tool"
    ],
-   "subcategory": "desktop-client",
-   "subcategoryLabel": "客户端本体"
+   "subcategory": "tools-general",
+   "subcategoryLabel": "综合"
   },
   {
    "id": "sorsama/deepseek-harness-mobile",
@@ -11956,15 +12003,15 @@
    "verdict": "noise",
    "reason": "只挂 1 个最宽泛的 dsh 标签，正文与 DSH 无关",
    "degree": 14,
-   "category": "model",
-   "categoryLabel": "模型接入",
-   "categoryScore": 6,
+   "category": "tools",
+   "categoryLabel": "工具命令",
+   "categoryScore": 8,
    "categoryHits": [
-    "claude",
-    "gemini"
+    "cli",
+    "search"
    ],
-   "subcategory": "model-provider",
-   "subcategoryLabel": "模型供应商"
+   "subcategory": "tools-search",
+   "subcategoryLabel": "检索搜索"
   },
   {
    "id": "sjh9714/dsh-win32",
@@ -12016,14 +12063,14 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 8,
-   "category": "secure",
-   "categoryLabel": "安全权限",
+   "category": "tools",
+   "categoryLabel": "工具命令",
    "categoryScore": 4.5,
    "categoryHits": [
-    "sandbox"
+    "doctor"
    ],
-   "subcategory": "secure-sandbox",
-   "subcategoryLabel": "沙箱隔离"
+   "subcategory": "tools-ops",
+   "subcategoryLabel": "运维与自检"
   },
   {
    "id": "Tabbit-Browser/dsh-tabbit",
@@ -12166,17 +12213,13 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
-   "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 16,
-   "categoryHits": [
-    "desktop",
-    "client",
-    "桌面",
-    "客户端"
-   ],
-   "subcategory": "desktop-client",
-   "subcategoryLabel": "客户端本体"
+   "category": "other",
+   "categoryLabel": "其他",
+   "categoryScore": 0,
+   "categoryHits": [],
+   "subcategory": null,
+   "subcategoryLabel": null,
+   "categoryRaw": "other"
   },
   {
    "id": "JohnDoe0827/rheostat",
@@ -12277,7 +12320,6 @@
     "框架",
     "framework"
    ],
-   "categoryStrong": true,
    "subcategory": "spec-contract",
    "subcategoryLabel": "接口契约"
   },
@@ -12326,8 +12368,8 @@
     "session",
     "会话"
    ],
-   "subcategory": "session-manage",
-   "subcategoryLabel": "会话管理"
+   "subcategory": "session-maintain",
+   "subcategoryLabel": "会话维护"
   },
   {
    "id": "Aik358/dsh-auto-memory",
@@ -12572,14 +12614,14 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 5,
-   "category": "agent",
-   "categoryLabel": "智能体技能",
-   "categoryScore": 4.5,
+   "category": "panel",
+   "categoryLabel": "界面面板",
+   "categoryScore": 15,
    "categoryHits": [
-    "agent"
+    "tui"
    ],
-   "subcategory": "agent-sub",
-   "subcategoryLabel": "子代理"
+   "subcategory": "panel-tui",
+   "subcategoryLabel": "终端界面"
   },
   {
    "id": "plolpl789/dsh-raw-html",
@@ -12619,14 +12661,13 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
-   "category": "panel",
-   "categoryLabel": "界面面板",
-   "categoryScore": 1,
-   "categoryHits": [
-    "ui"
-   ],
-   "subcategory": "panel-general",
-   "subcategoryLabel": "综合"
+   "category": "other",
+   "categoryLabel": "其他",
+   "categoryScore": 0,
+   "categoryHits": [],
+   "subcategory": null,
+   "subcategoryLabel": null,
+   "categoryRaw": "other"
   },
   {
    "id": "WM-CODER/custom-first-control-prompt",
@@ -12720,9 +12761,10 @@
    "degree": 9,
    "category": "other",
    "categoryLabel": "其他",
-   "categoryScore": 13.5,
+   "categoryScore": 18,
    "categoryHits": [
-    "video"
+    "video",
+    "comfyui"
    ],
    "subcategory": null,
    "subcategoryLabel": null,
@@ -12822,15 +12864,15 @@
    "verdict": "manual",
    "reason": "正文像插件，但没提 DSH，需要人工确认",
    "degree": 0,
-   "category": "agent",
-   "categoryLabel": "智能体技能",
-   "categoryScore": 6,
+   "category": "bridge",
+   "categoryLabel": "集成桥接",
+   "categoryScore": 17,
    "categoryHits": [
-    "agent",
-    "skill"
+    "wechat",
+    "微信"
    ],
-   "subcategory": "agent-skill",
-   "subcategoryLabel": "技能包"
+   "subcategory": "bridge-im",
+   "subcategoryLabel": "IM 渠道"
   },
   {
    "id": "Nwflower/dsh-claude-style",
@@ -12940,7 +12982,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 3,
    "category": "usage",
-   "categoryLabel": "用量额度",
+   "categoryLabel": "用量计费",
    "categoryScore": 39.5,
    "categoryHits": [
     "usage",
@@ -12991,8 +13033,8 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 2,
    "category": "usage",
-   "categoryLabel": "用量额度",
-   "categoryScore": 26.5,
+   "categoryLabel": "用量计费",
+   "categoryScore": 24.5,
    "categoryHits": [
     "balance",
     "token",
@@ -13088,11 +13130,12 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 18.5,
+   "categoryLabel": "客户端应用",
+   "categoryScore": 20,
    "categoryHits": [
     "desktop",
     "electron",
+    "app",
     "桌面"
    ],
    "subcategory": "desktop-client",
@@ -13431,15 +13474,14 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
-   "category": "other",
-   "categoryLabel": "其他",
+   "category": "bridge",
+   "categoryLabel": "集成桥接",
    "categoryScore": 6,
    "categoryHits": [
     "connect"
    ],
-   "subcategory": null,
-   "subcategoryLabel": null,
-   "categoryRaw": "bridge"
+   "subcategory": "bridge-integration",
+   "subcategoryLabel": "第三方对接"
   },
   {
    "id": "zhuiyueya/dsh-im-gateway",
@@ -13484,16 +13526,17 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 1,
-   "category": "other",
-   "categoryLabel": "其他",
-   "categoryScore": 4,
+   "category": "bridge",
+   "categoryLabel": "集成桥接",
+   "categoryScore": 18,
    "categoryHits": [
     "connect",
-    "网关"
+    "网关",
+    "飞书",
+    "telegram"
    ],
-   "subcategory": null,
-   "subcategoryLabel": null,
-   "categoryRaw": "bridge"
+   "subcategory": "bridge-im",
+   "subcategoryLabel": "IM 渠道"
   },
   {
    "id": "kejixiaoliang/awesome-dsh-plugins",
@@ -13694,13 +13737,13 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 21.5,
+   "categoryLabel": "客户端应用",
+   "categoryScore": 26,
    "categoryHits": [
     "desktop",
     "electron",
     "windows",
-    "桌面"
+    "app"
    ],
    "subcategory": "desktop-client",
    "subcategoryLabel": "客户端本体"
@@ -13795,7 +13838,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 9,
    "category": "usage",
-   "categoryLabel": "用量额度",
+   "categoryLabel": "用量计费",
    "categoryScore": 15,
    "categoryHits": [
     "usage",
@@ -13940,8 +13983,8 @@
    "categoryHits": [
     "模型"
    ],
-   "subcategory": "model-provider",
-   "subcategoryLabel": "模型供应商"
+   "subcategory": "model-general",
+   "subcategoryLabel": "综合"
   },
   {
    "id": "fb0sh/dsh-pentester",
@@ -14278,7 +14321,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
+   "categoryLabel": "客户端应用",
    "categoryScore": 12,
    "categoryHits": [
     "launcher",
@@ -14331,14 +14374,14 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
-   "category": "agent",
-   "categoryLabel": "智能体技能",
-   "categoryScore": 2.5,
+   "category": "panel",
+   "categoryLabel": "界面面板",
+   "categoryScore": 4.5,
    "categoryHits": [
-    "agent"
+    "tui"
    ],
-   "subcategory": "agent-coding",
-   "subcategoryLabel": "编码代理"
+   "subcategory": "panel-tui",
+   "subcategoryLabel": "终端界面"
   },
   {
    "id": "Dely0/dsh-personal-workbench",
@@ -14428,15 +14471,14 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
-   "category": "other",
-   "categoryLabel": "其他",
+   "category": "bridge",
+   "categoryLabel": "集成桥接",
    "categoryScore": 6,
    "categoryHits": [
     "connect"
    ],
-   "subcategory": null,
-   "subcategoryLabel": null,
-   "categoryRaw": "bridge"
+   "subcategory": "bridge-integration",
+   "subcategoryLabel": "第三方对接"
   },
   {
    "id": "EdgeTypE/dsh-better-deepseek",
@@ -14477,15 +14519,14 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
-   "category": "other",
-   "categoryLabel": "其他",
+   "category": "bridge",
+   "categoryLabel": "集成桥接",
    "categoryScore": 3,
    "categoryHits": [
     "bridge"
    ],
-   "subcategory": null,
-   "subcategoryLabel": null,
-   "categoryRaw": "bridge"
+   "subcategory": "bridge-bridge",
+   "subcategoryLabel": "桥接"
   },
   {
    "id": "Vithrive/Deepseek-Harness-for-VS-Code",
@@ -14577,14 +14618,16 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 11,
-   "category": "panel",
-   "categoryLabel": "界面面板",
-   "categoryScore": 4.5,
+   "category": "other",
+   "categoryLabel": "其他",
+   "categoryScore": 6,
    "categoryHits": [
-    "sidebar"
+    "分析",
+    "行情"
    ],
-   "subcategory": "panel-side",
-   "subcategoryLabel": "侧边面板"
+   "subcategory": null,
+   "subcategoryLabel": null,
+   "categoryRaw": "data"
   },
   {
    "id": "Len7183/DSH-Think-zh",
@@ -14901,8 +14944,8 @@
     "模型",
     "api"
    ],
-   "subcategory": "model-provider",
-   "subcategoryLabel": "模型供应商"
+   "subcategory": "model-select",
+   "subcategoryLabel": "模型选择切换"
   },
   {
    "id": "hyqibot/DeepSeek-Harness-Token-Free",
@@ -14952,16 +14995,17 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 10,
-   "category": "model",
-   "categoryLabel": "模型接入",
-   "categoryScore": 7.5,
+   "category": "desktop",
+   "categoryLabel": "客户端应用",
+   "categoryScore": 8,
    "categoryHits": [
-    "模型",
-    "多模态",
-    "api"
+    "desktop",
+    "client",
+    "桌面",
+    "桌面端"
    ],
-   "subcategory": "model-provider",
-   "subcategoryLabel": "模型供应商"
+   "subcategory": "desktop-client",
+   "subcategoryLabel": "客户端本体"
   },
   {
    "id": "LoserFox/marisa-distro",
@@ -15048,7 +15092,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "pet",
-   "categoryLabel": "桌宠娱乐",
+   "categoryLabel": "桌宠陪伴",
    "categoryScore": 26,
    "categoryHits": [
     "pet",
@@ -15260,12 +15304,13 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 17,
+   "categoryLabel": "客户端应用",
+   "categoryScore": 19.5,
    "categoryHits": [
     "desktop",
     "macos",
-    "windows"
+    "windows",
+    "app"
    ],
    "subcategory": "desktop-client",
    "subcategoryLabel": "客户端本体"
@@ -15332,8 +15377,8 @@
     "模型",
     "api"
    ],
-   "subcategory": "model-provider",
-   "subcategoryLabel": "模型供应商"
+   "subcategory": "model-select",
+   "subcategoryLabel": "模型选择切换"
   },
   {
    "id": "lincong1987/dsh-model-switch",
@@ -15550,14 +15595,14 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 1,
-   "category": "market",
-   "categoryLabel": "插件市场",
-   "categoryScore": 4.5,
+   "category": "panel",
+   "categoryLabel": "界面面板",
+   "categoryScore": 3,
    "categoryHits": [
-    "hub"
+    "工作台"
    ],
-   "subcategory": "market-general",
-   "subcategoryLabel": "综合"
+   "subcategory": "panel-workbench",
+   "subcategoryLabel": "创作工作台"
   },
   {
    "id": "bloodtmai-cmyk/dsh-harness-enterprise",
@@ -15904,7 +15949,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
+   "categoryLabel": "客户端应用",
    "categoryScore": 8,
    "categoryHits": [
     "desktop"
@@ -15963,13 +16008,13 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 1,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 17,
+   "categoryLabel": "客户端应用",
+   "categoryScore": 22.5,
    "categoryHits": [
     "desktop",
     "electron",
     "windows",
-    "桌面"
+    "app"
    ],
    "subcategory": "desktop-client",
    "subcategoryLabel": "客户端本体"
@@ -16172,16 +16217,15 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
-   "category": "other",
-   "categoryLabel": "其他",
+   "category": "bridge",
+   "categoryLabel": "集成桥接",
    "categoryScore": 14,
    "categoryHits": [
     "bridge",
     "connect"
    ],
-   "subcategory": null,
-   "subcategoryLabel": null,
-   "categoryRaw": "bridge"
+   "subcategory": "bridge-bridge",
+   "subcategoryLabel": "桥接"
   },
   {
    "id": "SingleOne/deepseek-harness-desktop",
@@ -16218,10 +16262,11 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 6,
+   "categoryLabel": "客户端应用",
+   "categoryScore": 7,
    "categoryHits": [
-    "desktop"
+    "desktop",
+    "app"
    ],
    "subcategory": "desktop-client",
    "subcategoryLabel": "客户端本体"
@@ -16368,14 +16413,13 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
-   "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 2,
-   "categoryHits": [
-    "桌面"
-   ],
-   "subcategory": "desktop-client",
-   "subcategoryLabel": "客户端本体"
+   "category": "other",
+   "categoryLabel": "其他",
+   "categoryScore": 0,
+   "categoryHits": [],
+   "subcategory": null,
+   "subcategoryLabel": null,
+   "categoryRaw": "other"
   },
   {
    "id": "lifeopsgo/dsh-capability-toggle-plugin",
@@ -16570,7 +16614,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "pet",
-   "categoryLabel": "桌宠娱乐",
+   "categoryLabel": "桌宠陪伴",
    "categoryScore": 21,
    "categoryHits": [
     "pet",
@@ -16623,15 +16667,15 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
-   "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 6,
+   "category": "usage",
+   "categoryLabel": "用量计费",
+   "categoryScore": 4,
    "categoryHits": [
-    "desktop",
-    "桌面"
+    "余额",
+    "统计"
    ],
-   "subcategory": "desktop-client",
-   "subcategoryLabel": "客户端本体"
+   "subcategory": "usage-balance",
+   "subcategoryLabel": "余额"
   },
   {
    "id": "lpeixin/dsh-qualityforge",
@@ -16941,8 +16985,8 @@
     "提示词",
     "消息"
    ],
-   "subcategory": "session-chat",
-   "subcategoryLabel": "消息对话"
+   "subcategory": "session-context",
+   "subcategoryLabel": "上下文压缩"
   },
   {
    "id": "kirbylynx/deepshell-agent",
@@ -17140,7 +17184,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 4,
    "category": "usage",
-   "categoryLabel": "用量额度",
+   "categoryLabel": "用量计费",
    "categoryScore": 6,
    "categoryHits": [
     "cost"
@@ -17242,7 +17286,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 1,
    "category": "usage",
-   "categoryLabel": "用量额度",
+   "categoryLabel": "用量计费",
    "categoryScore": 4.5,
    "categoryHits": [
     "cost",
@@ -17408,12 +17452,13 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 3,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 11,
+   "categoryLabel": "客户端应用",
+   "categoryScore": 13,
    "categoryHits": [
     "desktop",
     "client",
-    "桌面"
+    "桌面",
+    "桌面端"
    ],
    "subcategory": "desktop-client",
    "subcategoryLabel": "客户端本体"
@@ -17625,14 +17670,14 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
-   "category": "desktop",
-   "categoryLabel": "桌面客户端",
+   "category": "dev",
+   "categoryLabel": "开发调试",
    "categoryScore": 3,
    "categoryHits": [
-    "launcher"
+    "verify"
    ],
-   "subcategory": "desktop-launcher",
-   "subcategoryLabel": "启动器"
+   "subcategory": "dev-test",
+   "subcategoryLabel": "测试验证"
   },
   {
    "id": "ZBCs-StudioCr-CN/dsh-skill-manager",
@@ -17784,7 +17829,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "usage",
-   "categoryLabel": "用量额度",
+   "categoryLabel": "用量计费",
    "categoryScore": 19,
    "categoryHits": [
     "usage",
@@ -17829,11 +17874,12 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 5,
+   "categoryLabel": "客户端应用",
+   "categoryScore": 6,
    "categoryHits": [
     "desktop",
-    "launcher"
+    "launcher",
+    "app"
    ],
    "subcategory": "desktop-client",
    "subcategoryLabel": "客户端本体"
@@ -17998,7 +18044,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
+   "categoryLabel": "客户端应用",
    "categoryScore": 4,
    "categoryHits": [
     "desktop"
@@ -18052,8 +18098,8 @@
    "categoryHits": [
     "面板"
    ],
-   "subcategory": "panel-side",
-   "subcategoryLabel": "侧边面板"
+   "subcategory": "panel-general",
+   "subcategoryLabel": "综合"
   },
   {
    "id": "EasyTZ/dsh-desktop",
@@ -18097,7 +18143,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
+   "categoryLabel": "客户端应用",
    "categoryScore": 12.5,
    "categoryHits": [
     "desktop",
@@ -18150,7 +18196,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "usage",
-   "categoryLabel": "用量额度",
+   "categoryLabel": "用量计费",
    "categoryScore": 13,
    "categoryHits": [
     "balance",
@@ -18202,11 +18248,12 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 8,
+   "categoryLabel": "客户端应用",
+   "categoryScore": 10,
    "categoryHits": [
     "desktop",
-    "桌面"
+    "桌面",
+    "桌面端"
    ],
    "subcategory": "desktop-client",
    "subcategoryLabel": "客户端本体"
@@ -18260,8 +18307,8 @@
     "panel",
     "settings"
    ],
-   "subcategory": "panel-side",
-   "subcategoryLabel": "侧边面板"
+   "subcategory": "panel-settings",
+   "subcategoryLabel": "设置仪表盘"
   },
   {
    "id": "Rewmington/deskwhale-harness",
@@ -18356,7 +18403,7 @@
    "reason": "挂了 5 个 DSH 标签，正文却没有插件线索",
    "degree": 0,
    "category": "usage",
-   "categoryLabel": "用量额度",
+   "categoryLabel": "用量计费",
    "categoryScore": 6,
    "categoryHits": [
     "balance"
@@ -18510,16 +18557,14 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
-   "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 13,
+   "category": "tools",
+   "categoryLabel": "工具命令",
+   "categoryScore": 4,
    "categoryHits": [
-    "desktop",
-    "client",
-    "客户端"
+    "修复"
    ],
-   "subcategory": "desktop-client",
-   "subcategoryLabel": "客户端本体"
+   "subcategory": "tools-ops",
+   "subcategoryLabel": "运维与自检"
   },
   {
    "id": "Sovero/dsh_plugins",
@@ -18661,14 +18706,14 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "usage",
-   "categoryLabel": "用量额度",
+   "categoryLabel": "用量计费",
    "categoryScore": 11,
    "categoryHits": [
     "token",
     "gauge"
    ],
-   "subcategory": "usage-general",
-   "subcategoryLabel": "综合"
+   "subcategory": "usage-stat",
+   "subcategoryLabel": "用量统计"
   },
   {
    "id": "kxdyh/dsh-agent-governor",
@@ -18855,7 +18900,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
+   "categoryLabel": "客户端应用",
    "categoryScore": 12,
    "categoryHits": [
     "desktop",
@@ -18907,14 +18952,15 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
-   "category": "dev",
-   "categoryLabel": "开发调试",
-   "categoryScore": 3,
+   "category": "tools",
+   "categoryLabel": "工具命令",
+   "categoryScore": 9,
    "categoryHits": [
-    "verify"
+    "tool",
+    "search"
    ],
-   "subcategory": "dev-test",
-   "subcategoryLabel": "测试验证"
+   "subcategory": "tools-search",
+   "subcategoryLabel": "检索搜索"
   },
   {
    "id": "davidtan2008/deepseek-harness-desktop",
@@ -18968,7 +19014,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 2,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
+   "categoryLabel": "客户端应用",
    "categoryScore": 11,
    "categoryHits": [
     "desktop"
@@ -19066,15 +19112,14 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 3,
-   "category": "model",
-   "categoryLabel": "模型接入",
-   "categoryScore": 4,
+   "category": "tools",
+   "categoryLabel": "工具命令",
+   "categoryScore": 6,
    "categoryHits": [
-    "provider",
-    "api"
+    "search"
    ],
-   "subcategory": "model-provider",
-   "subcategoryLabel": "模型供应商"
+   "subcategory": "tools-search",
+   "subcategoryLabel": "检索搜索"
   },
   {
    "id": "lauytgary/dsh_hud_plugin",
@@ -19427,7 +19472,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
+   "categoryLabel": "客户端应用",
    "categoryScore": 6,
    "categoryHits": [
     "desktop"
@@ -19725,7 +19770,7 @@
    "reason": "只挂 1 个最宽泛的 dsh 标签，正文与 DSH 无关",
    "degree": 0,
    "category": "usage",
-   "categoryLabel": "用量额度",
+   "categoryLabel": "用量计费",
    "categoryScore": 9,
    "categoryHits": [
     "balance"
@@ -19837,14 +19882,15 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
-   "category": "session",
-   "categoryLabel": "会话交互",
-   "categoryScore": 2,
+   "category": "pet",
+   "categoryLabel": "桌宠陪伴",
+   "categoryScore": 4,
    "categoryHits": [
-    "消息"
+    "游戏",
+    "酒馆"
    ],
-   "subcategory": "session-chat",
-   "subcategoryLabel": "消息对话"
+   "subcategory": "pet-game",
+   "subcategoryLabel": "游戏娱乐"
   },
   {
    "id": "Justin-Mai/dsh-stock-view",
@@ -19934,7 +19980,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "usage",
-   "categoryLabel": "用量额度",
+   "categoryLabel": "用量计费",
    "categoryScore": 19,
    "categoryHits": [
     "usage",
@@ -19942,8 +19988,8 @@
     "token",
     "用量"
    ],
-   "subcategory": "usage-stat",
-   "subcategoryLabel": "用量统计"
+   "subcategory": "usage-balance",
+   "subcategoryLabel": "余额"
   },
   {
    "id": "lsqace-del/dsh-progress",
@@ -20036,7 +20082,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 4,
    "category": "pet",
-   "categoryLabel": "桌宠娱乐",
+   "categoryLabel": "桌宠陪伴",
    "categoryScore": 4.5,
    "categoryHits": [
     "pet"
@@ -20084,10 +20130,11 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 2,
+   "categoryLabel": "客户端应用",
+   "categoryScore": 3,
    "categoryHits": [
-    "macos"
+    "macos",
+    "app"
    ],
    "subcategory": "desktop-general",
    "subcategoryLabel": "综合"
@@ -20130,14 +20177,13 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
-   "category": "panel",
-   "categoryLabel": "界面面板",
-   "categoryScore": 1,
-   "categoryHits": [
-    "ui"
-   ],
-   "subcategory": "panel-general",
-   "subcategoryLabel": "综合"
+   "category": "other",
+   "categoryLabel": "其他",
+   "categoryScore": 0,
+   "categoryHits": [],
+   "subcategory": null,
+   "subcategoryLabel": null,
+   "categoryRaw": "other"
   },
   {
    "id": "AlwaysSum/deepseek-harness-kit",
@@ -20224,14 +20270,13 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
-   "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 3,
-   "categoryHits": [
-    "launcher"
-   ],
-   "subcategory": "desktop-launcher",
-   "subcategoryLabel": "启动器"
+   "category": "other",
+   "categoryLabel": "其他",
+   "categoryScore": 0,
+   "categoryHits": [],
+   "subcategory": null,
+   "subcategoryLabel": null,
+   "categoryRaw": "other"
   },
   {
    "id": "lijian-ui/dsh-skill-manage",
@@ -20482,14 +20527,14 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
-   "category": "panel",
-   "categoryLabel": "界面面板",
-   "categoryScore": 2,
+   "category": "tools",
+   "categoryLabel": "工具命令",
+   "categoryScore": 8,
    "categoryHits": [
-    "menu"
+    "search"
    ],
-   "subcategory": "panel-general",
-   "subcategoryLabel": "综合"
+   "subcategory": "tools-search",
+   "subcategoryLabel": "检索搜索"
   },
   {
    "id": "Lucasli2018/totoro-pet",
@@ -20530,7 +20575,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "pet",
-   "categoryLabel": "桌宠娱乐",
+   "categoryLabel": "桌宠陪伴",
    "categoryScore": 15,
    "categoryHits": [
     "pet",
@@ -20578,7 +20623,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
+   "categoryLabel": "客户端应用",
    "categoryScore": 4,
    "categoryHits": [
     "desktop"
@@ -20632,8 +20677,8 @@
     "会话",
     "消息"
    ],
-   "subcategory": "session-manage",
-   "subcategoryLabel": "会话管理"
+   "subcategory": "session-chat",
+   "subcategoryLabel": "消息对话"
   },
   {
    "id": "LilycleHeart/dsh-liuli-ui-enhance",
@@ -20773,16 +20818,14 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
-   "category": "desktop",
-   "categoryLabel": "桌面客户端",
+   "category": "tools",
+   "categoryLabel": "工具命令",
    "categoryScore": 6,
    "categoryHits": [
-    "windows",
-    "桌面",
-    "启动器"
+    "shell"
    ],
-   "subcategory": "desktop-client",
-   "subcategoryLabel": "客户端本体"
+   "subcategory": "tools-cli",
+   "subcategoryLabel": "命令行"
   },
   {
    "id": "Simon-yyy/dsh-theme-escook",
@@ -20869,10 +20912,11 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 4,
    "category": "pet",
-   "categoryLabel": "桌宠娱乐",
-   "categoryScore": 7.5,
+   "categoryLabel": "桌宠陪伴",
+   "categoryScore": 9.5,
    "categoryHits": [
-    "pet"
+    "pet",
+    "persona"
    ],
    "subcategory": "pet-pet",
    "subcategoryLabel": "桌宠养成"
@@ -20921,8 +20965,8 @@
    "categoryHits": [
     "panel"
    ],
-   "subcategory": "panel-side",
-   "subcategoryLabel": "侧边面板"
+   "subcategory": "panel-general",
+   "subcategoryLabel": "综合"
   },
   {
    "id": "xiuxxx0/deepseek-harness-desktop",
@@ -20964,13 +21008,13 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 19,
+   "categoryLabel": "客户端应用",
+   "categoryScore": 22,
    "categoryHits": [
     "desktop",
     "windows",
     "桌面",
-    "客户端"
+    "桌面版"
    ],
    "subcategory": "desktop-client",
    "subcategoryLabel": "客户端本体"
@@ -21027,8 +21071,8 @@
     "session",
     "会话"
    ],
-   "subcategory": "session-manage",
-   "subcategoryLabel": "会话管理"
+   "subcategory": "session-general",
+   "subcategoryLabel": "综合"
   },
   {
    "id": "makajo/dsh-gemini-m3e-theme",
@@ -21163,7 +21207,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
+   "categoryLabel": "客户端应用",
    "categoryScore": 6,
    "categoryHits": [
     "desktop"
@@ -21309,14 +21353,18 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 1,
-   "category": "panel",
-   "categoryLabel": "界面面板",
-   "categoryScore": 3,
+   "category": "other",
+   "categoryLabel": "其他",
+   "categoryScore": 17.5,
    "categoryHits": [
-    "sidebar"
+    "office",
+    "word",
+    "excel",
+    "docx"
    ],
-   "subcategory": "panel-side",
-   "subcategoryLabel": "侧边面板"
+   "subcategory": null,
+   "subcategoryLabel": null,
+   "categoryRaw": "doc"
   },
   {
    "id": "yangkunlun/dsh-fairy",
@@ -21410,8 +21458,8 @@
     "模型",
     "推理"
    ],
-   "subcategory": "model-provider",
-   "subcategoryLabel": "模型供应商"
+   "subcategory": "model-reasoning",
+   "subcategoryLabel": "推理思考"
   },
   {
    "id": "Goothe13-gugu/dsh-audio-cue",
@@ -21506,15 +21554,15 @@
    "degree": 0,
    "category": "tools",
    "categoryLabel": "工具命令",
-   "categoryScore": 10,
+   "categoryScore": 12,
    "categoryHits": [
     "restart",
     "工具",
     "一键",
     "重启"
    ],
-   "subcategory": "tools-process",
-   "subcategoryLabel": "进程运行时"
+   "subcategory": "tools-ops",
+   "subcategoryLabel": "运维与自检"
   },
   {
    "id": "TheChengXi/dsh-session-sync",
@@ -21566,8 +21614,8 @@
     "session",
     "会话"
    ],
-   "subcategory": "session-manage",
-   "subcategoryLabel": "会话管理"
+   "subcategory": "session-maintain",
+   "subcategoryLabel": "会话维护"
   },
   {
    "id": "fewoot/dsh-whale-particles",
@@ -21613,8 +21661,8 @@
    "categoryHits": [
     "面板"
    ],
-   "subcategory": "panel-side",
-   "subcategoryLabel": "侧边面板"
+   "subcategory": "panel-general",
+   "subcategoryLabel": "综合"
   },
   {
    "id": "ashuai/dsh-ui-wrapper",
@@ -21711,17 +21759,14 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 14,
-   "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 17,
+   "category": "agent",
+   "categoryLabel": "智能体技能",
+   "categoryScore": 3,
    "categoryHits": [
-    "desktop",
-    "electron",
-    "macos",
-    "windows"
+    "工作流"
    ],
-   "subcategory": "desktop-client",
-   "subcategoryLabel": "客户端本体"
+   "subcategory": "agent-workflow",
+   "subcategoryLabel": "工作流编排"
   },
   {
    "id": "Elencher424/profile-switcher-for-DSH-Desktop",
@@ -21759,7 +21804,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
+   "categoryLabel": "客户端应用",
    "categoryScore": 10,
    "categoryHits": [
     "desktop"
@@ -21809,7 +21854,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
+   "categoryLabel": "客户端应用",
    "categoryScore": 6,
    "categoryHits": [
     "desktop"
@@ -22106,15 +22151,14 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
-   "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 12,
+   "category": "panel",
+   "categoryLabel": "界面面板",
+   "categoryScore": 2,
    "categoryHits": [
-    "desktop",
-    "client"
+    "ui"
    ],
-   "subcategory": "desktop-client",
-   "subcategoryLabel": "客户端本体"
+   "subcategory": "panel-general",
+   "subcategoryLabel": "综合"
   },
   {
    "id": "LX-HMKK/DSH-appearance",
@@ -22205,7 +22249,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
+   "categoryLabel": "客户端应用",
    "categoryScore": 14,
    "categoryHits": [
     "desktop",
@@ -22259,15 +22303,15 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
-   "category": "session",
-   "categoryLabel": "会话交互",
-   "categoryScore": 10,
+   "category": "bridge",
+   "categoryLabel": "集成桥接",
+   "categoryScore": 22.5,
    "categoryHits": [
-    "session",
-    "会话"
+    "飞书",
+    "lark"
    ],
-   "subcategory": "session-manage",
-   "subcategoryLabel": "会话管理"
+   "subcategory": "bridge-im",
+   "subcategoryLabel": "IM 渠道"
   },
   {
    "id": "QiJi-2001/dsh-casual-conversation",
@@ -22408,8 +22452,8 @@
    "categoryHits": [
     "模型"
    ],
-   "subcategory": "model-provider",
-   "subcategoryLabel": "模型供应商"
+   "subcategory": "model-select",
+   "subcategoryLabel": "模型选择切换"
   },
   {
    "id": "CSlawyer1985/dsh-excalidraw-board",
@@ -22549,11 +22593,12 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 14,
+   "categoryLabel": "客户端应用",
+   "categoryScore": 17,
    "categoryHits": [
     "desktop",
-    "launcher"
+    "launcher",
+    "app"
    ],
    "subcategory": "desktop-launcher",
    "subcategoryLabel": "启动器"
@@ -22608,8 +22653,8 @@
    "categoryHits": [
     "面板"
    ],
-   "subcategory": "panel-side",
-   "subcategoryLabel": "侧边面板"
+   "subcategory": "panel-general",
+   "subcategoryLabel": "综合"
   },
   {
    "id": "NGdust/dsh-claude-code-local",
@@ -23028,7 +23073,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 5,
    "category": "pet",
-   "categoryLabel": "桌宠娱乐",
+   "categoryLabel": "桌宠陪伴",
    "categoryScore": 4.5,
    "categoryHits": [
     "pet"
@@ -23083,10 +23128,12 @@
    "degree": 0,
    "category": "tools",
    "categoryLabel": "工具命令",
-   "categoryScore": 8,
+   "categoryScore": 14,
    "categoryHits": [
     "工具",
-    "安装"
+    "安装",
+    "搜索",
+    "检索"
    ],
    "subcategory": "tools-search",
    "subcategoryLabel": "检索搜索"
@@ -23132,13 +23179,13 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "usage",
-   "categoryLabel": "用量额度",
+   "categoryLabel": "用量计费",
    "categoryScore": 9,
    "categoryHits": [
     "usage"
    ],
-   "subcategory": "usage-stat",
-   "subcategoryLabel": "用量统计"
+   "subcategory": "usage-general",
+   "subcategoryLabel": "综合"
   },
   {
    "id": "cherrchen/dsh-plugin-git",
@@ -23533,7 +23580,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
+   "categoryLabel": "客户端应用",
    "categoryScore": 6,
    "categoryHits": [
     "desktop"
@@ -23689,7 +23736,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 7,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
+   "categoryLabel": "客户端应用",
    "categoryScore": 17,
    "categoryHits": [
     "desktop",
@@ -23788,7 +23835,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "usage",
-   "categoryLabel": "用量额度",
+   "categoryLabel": "用量计费",
    "categoryScore": 8,
    "categoryHits": [
     "cost"
@@ -23887,8 +23934,8 @@
    "categoryHits": [
     "会话"
    ],
-   "subcategory": "session-manage",
-   "subcategoryLabel": "会话管理"
+   "subcategory": "session-general",
+   "subcategoryLabel": "综合"
   },
   {
    "id": "yixiuzhemu/MCP-Manager",
@@ -24078,7 +24125,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "usage",
-   "categoryLabel": "用量额度",
+   "categoryLabel": "用量计费",
    "categoryScore": 6,
    "categoryHits": [
     "wallet"
@@ -24129,8 +24176,8 @@
     "llm",
     "模型"
    ],
-   "subcategory": "model-provider",
-   "subcategoryLabel": "模型供应商"
+   "subcategory": "model-general",
+   "subcategoryLabel": "综合"
   },
   {
    "id": "IgNit3R/DSH-Embedded-Client",
@@ -24173,7 +24220,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
+   "categoryLabel": "客户端应用",
    "categoryScore": 11,
    "categoryHits": [
     "client",
@@ -24223,11 +24270,12 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 10,
+   "categoryLabel": "客户端应用",
+   "categoryScore": 12,
    "categoryHits": [
     "desktop",
-    "桌面"
+    "桌面",
+    "桌面端"
    ],
    "subcategory": "desktop-client",
    "subcategoryLabel": "客户端本体"
@@ -24286,7 +24334,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 14,
    "category": "pet",
-   "categoryLabel": "桌宠娱乐",
+   "categoryLabel": "桌宠陪伴",
    "categoryScore": 24.5,
    "categoryHits": [
     "pet",
@@ -24345,14 +24393,16 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 4,
-   "category": "agent",
-   "categoryLabel": "智能体技能",
-   "categoryScore": 3,
+   "category": "desktop",
+   "categoryLabel": "客户端应用",
+   "categoryScore": 35,
    "categoryHits": [
-    "agent"
+    "android",
+    "mobile",
+    "app"
    ],
-   "subcategory": "agent-general",
-   "subcategoryLabel": "综合"
+   "subcategory": "desktop-mobile",
+   "subcategoryLabel": "跨端客户端"
   },
   {
    "id": "kw78/dsh-office-tools",
@@ -24395,14 +24445,18 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 2,
-   "category": "tools",
-   "categoryLabel": "工具命令",
-   "categoryScore": 4,
+   "category": "other",
+   "categoryLabel": "其他",
+   "categoryScore": 22,
    "categoryHits": [
-    "tool"
+    "office",
+    "word",
+    "excel",
+    "ppt"
    ],
-   "subcategory": "tools-media",
-   "subcategoryLabel": "媒体处理"
+   "subcategory": null,
+   "subcategoryLabel": null,
+   "categoryRaw": "doc"
   },
   {
    "id": "nevertoday/dsh-theme-plugin",
@@ -24538,15 +24592,15 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
-   "category": "session",
-   "categoryLabel": "会话交互",
-   "categoryScore": 6,
+   "category": "desktop",
+   "categoryLabel": "客户端应用",
+   "categoryScore": 10,
    "categoryHits": [
-    "会话",
-    "对话"
+    "android",
+    "mobile"
    ],
-   "subcategory": "session-manage",
-   "subcategoryLabel": "会话管理"
+   "subcategory": "desktop-mobile",
+   "subcategoryLabel": "跨端客户端"
   },
   {
    "id": "Zephyr-vibe/dsh-archived-sessions",
@@ -24599,8 +24653,8 @@
     "session",
     "conversation"
    ],
-   "subcategory": "session-manage",
-   "subcategoryLabel": "会话管理"
+   "subcategory": "session-chat",
+   "subcategoryLabel": "消息对话"
   },
   {
    "id": "sol5766/dshm",
@@ -24854,7 +24908,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 6,
    "category": "pet",
-   "categoryLabel": "桌宠娱乐",
+   "categoryLabel": "桌宠陪伴",
    "categoryScore": 19.5,
    "categoryHits": [
     "pet",
@@ -24950,16 +25004,16 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "usage",
-   "categoryLabel": "用量额度",
-   "categoryScore": 20,
+   "categoryLabel": "用量计费",
+   "categoryScore": 19,
    "categoryHits": [
     "quota",
     "billing",
     "token",
     "额度"
    ],
-   "subcategory": "usage-stat",
-   "subcategoryLabel": "用量统计"
+   "subcategory": "usage-quota",
+   "subcategoryLabel": "配额订阅"
   },
   {
    "id": "Thanksgiver233/comm-protocol-hub",
@@ -25005,10 +25059,11 @@
    "degree": 0,
    "category": "tools",
    "categoryLabel": "工具命令",
-   "categoryScore": 5,
+   "categoryScore": 7,
    "categoryHits": [
     "工具",
-    "一键"
+    "一键",
+    "搜索"
    ],
    "subcategory": "tools-search",
    "subcategoryLabel": "检索搜索"
@@ -25053,14 +25108,13 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
-   "category": "model",
-   "categoryLabel": "模型接入",
-   "categoryScore": 1,
-   "categoryHits": [
-    "route"
-   ],
-   "subcategory": "model-general",
-   "subcategoryLabel": "综合"
+   "category": "other",
+   "categoryLabel": "其他",
+   "categoryScore": 0,
+   "categoryHits": [],
+   "subcategory": null,
+   "subcategoryLabel": null,
+   "categoryRaw": "other"
   },
   {
    "id": "LAU-MARS/dsh-cad",
@@ -25347,14 +25401,13 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
-   "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 2,
-   "categoryHits": [
-    "macos"
-   ],
-   "subcategory": "desktop-general",
-   "subcategoryLabel": "综合"
+   "category": "other",
+   "categoryLabel": "其他",
+   "categoryScore": 0,
+   "categoryHits": [],
+   "subcategory": null,
+   "subcategoryLabel": null,
+   "categoryRaw": "other"
   },
   {
    "id": "tingfeng347/dsh-vscode-workbench",
@@ -25395,14 +25448,15 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
-   "category": "skin",
-   "categoryLabel": "皮肤美化",
-   "categoryScore": 3,
+   "category": "tools",
+   "categoryLabel": "工具命令",
+   "categoryScore": 9,
    "categoryHits": [
-    "theme"
+    "vscode",
+    "搜索"
    ],
-   "subcategory": "skin-theme",
-   "subcategoryLabel": "主题皮肤"
+   "subcategory": "tools-cli",
+   "subcategoryLabel": "命令行"
   },
   {
    "id": "jiuge2467/dsh-studio",
@@ -25495,16 +25549,17 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 3,
-   "category": "usage",
-   "categoryLabel": "用量额度",
-   "categoryScore": 8,
+   "category": "tools",
+   "categoryLabel": "工具命令",
+   "categoryScore": 11,
    "categoryHits": [
-    "usage",
-    "gauge",
-    "用量"
+    "tool",
+    "工具",
+    "search",
+    "搜索"
    ],
-   "subcategory": "usage-stat",
-   "subcategoryLabel": "用量统计"
+   "subcategory": "tools-search",
+   "subcategoryLabel": "检索搜索"
   },
   {
    "id": "warmwine/dsh-ui-font",
@@ -25742,16 +25797,17 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
-   "category": "other",
-   "categoryLabel": "其他",
-   "categoryScore": 9,
+   "category": "bridge",
+   "categoryLabel": "集成桥接",
+   "categoryScore": 21,
    "categoryHits": [
-    "提醒",
-    "通知"
+    "中转",
+    "网关",
+    "weixin",
+    "qq"
    ],
-   "subcategory": null,
-   "subcategoryLabel": null,
-   "categoryRaw": "notify"
+   "subcategory": "bridge-im",
+   "subcategoryLabel": "IM 渠道"
   },
   {
    "id": "TryDing-T/dsh-Plugin--ChineseChess",
@@ -25846,8 +25902,8 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 2,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 24.5,
+   "categoryLabel": "客户端应用",
+   "categoryScore": 26,
    "categoryHits": [
     "desktop",
     "launcher",
@@ -25913,13 +25969,13 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 25,
+   "categoryLabel": "客户端应用",
+   "categoryScore": 26.5,
    "categoryHits": [
     "desktop",
+    "app",
     "桌面",
-    "客户端",
-    "安装包"
+    "客户端"
    ],
    "subcategory": "desktop-client",
    "subcategoryLabel": "客户端本体"
@@ -26013,8 +26069,8 @@
     "session",
     "会话"
    ],
-   "subcategory": "session-manage",
-   "subcategoryLabel": "会话管理"
+   "subcategory": "session-maintain",
+   "subcategoryLabel": "会话维护"
   },
   {
    "id": "licyer/dsh-token-monitor",
@@ -26057,12 +26113,11 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 6,
    "category": "usage",
-   "categoryLabel": "用量额度",
-   "categoryScore": 9,
+   "categoryLabel": "用量计费",
+   "categoryScore": 8,
    "categoryHits": [
     "token",
-    "用量",
-    "监控"
+    "用量"
    ],
    "subcategory": "usage-stat",
    "subcategoryLabel": "用量统计"
@@ -26491,15 +26546,14 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
-   "category": "other",
-   "categoryLabel": "其他",
+   "category": "bridge",
+   "categoryLabel": "集成桥接",
    "categoryScore": 3,
    "categoryHits": [
     "bridge"
    ],
-   "subcategory": null,
-   "subcategoryLabel": null,
-   "categoryRaw": "bridge"
+   "subcategory": "bridge-bridge",
+   "subcategoryLabel": "桥接"
   },
   {
    "id": "cocofhu/skillhub",
@@ -26788,8 +26842,8 @@
     "session",
     "会话"
    ],
-   "subcategory": "session-manage",
-   "subcategoryLabel": "会话管理"
+   "subcategory": "session-general",
+   "subcategoryLabel": "综合"
   },
   {
    "id": "Thedeergod666/dsh-musage",
@@ -26836,16 +26890,15 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "usage",
-   "categoryLabel": "用量额度",
-   "categoryScore": 20.5,
+   "categoryLabel": "用量计费",
+   "categoryScore": 19.5,
    "categoryHits": [
     "usage",
     "quota",
-    "余额",
-    "监控"
+    "余额"
    ],
-   "subcategory": "usage-stat",
-   "subcategoryLabel": "用量统计"
+   "subcategory": "usage-quota",
+   "subcategoryLabel": "配额订阅"
   },
   {
    "id": "shuind/dsh-codex-harness",
@@ -27025,15 +27078,14 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
-   "category": "other",
-   "categoryLabel": "其他",
+   "category": "bridge",
+   "categoryLabel": "集成桥接",
    "categoryScore": 12,
    "categoryHits": [
     "adapter"
    ],
-   "subcategory": null,
-   "subcategoryLabel": null,
-   "categoryRaw": "bridge"
+   "subcategory": "bridge-adapter",
+   "subcategoryLabel": "适配器"
   },
   {
    "id": "pgmi-builds/better-dsh",
@@ -27245,7 +27297,7 @@
    "degree": 0,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 9,
+   "categoryScore": 8,
    "categoryHits": [
     "llm",
     "接入"
@@ -27289,7 +27341,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 2,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
+   "categoryLabel": "客户端应用",
    "categoryScore": 16.5,
    "categoryHits": [
     "launcher",
@@ -27350,17 +27402,15 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 8,
-   "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 26,
+   "category": "agent",
+   "categoryLabel": "智能体技能",
+   "categoryScore": 9,
    "categoryHits": [
-    "desktop",
-    "electron",
-    "macos",
-    "windows"
+    "agent",
+    "automation"
    ],
-   "subcategory": "desktop-client",
-   "subcategoryLabel": "客户端本体"
+   "subcategory": "agent-workflow",
+   "subcategoryLabel": "工作流编排"
   },
   {
    "id": "JustGenius-s/DSH-Desktop",
@@ -27399,7 +27449,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
+   "categoryLabel": "客户端应用",
    "categoryScore": 8,
    "categoryHits": [
     "desktop"
@@ -27497,14 +27547,16 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 3,
-   "category": "agent",
-   "categoryLabel": "智能体技能",
-   "categoryScore": 3,
+   "category": "other",
+   "categoryLabel": "其他",
+   "categoryScore": 5,
    "categoryHits": [
-    "智能体"
+    "finance",
+    "金融"
    ],
-   "subcategory": "agent-general",
-   "subcategoryLabel": "综合"
+   "subcategory": null,
+   "subcategoryLabel": null,
+   "categoryRaw": "data"
   },
   {
    "id": "foolgry/dsh-desktop",
@@ -27549,13 +27601,13 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 12,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 33,
+   "categoryLabel": "客户端应用",
+   "categoryScore": 39,
    "categoryHits": [
     "desktop",
     "electron",
-    "桌面",
-    "客户端"
+    "app",
+    "桌面"
    ],
    "subcategory": "desktop-client",
    "subcategoryLabel": "客户端本体"
@@ -27602,8 +27654,8 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 4,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 13,
+   "categoryLabel": "客户端应用",
+   "categoryScore": 14,
    "categoryHits": [
     "desktop",
     "macos",
@@ -27652,7 +27704,7 @@
    "degree": 3,
    "category": "model",
    "categoryLabel": "模型接入",
-   "categoryScore": 11,
+   "categoryScore": 10,
    "categoryHits": [
     "proxy",
     "模型",
@@ -27697,7 +27749,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
+   "categoryLabel": "客户端应用",
    "categoryScore": 8,
    "categoryHits": [
     "desktop"
@@ -27751,7 +27803,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
+   "categoryLabel": "客户端应用",
    "categoryScore": 12,
    "categoryHits": [
     "launcher"
@@ -27809,8 +27861,8 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 3,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 23,
+   "categoryLabel": "客户端应用",
+   "categoryScore": 28.5,
    "categoryHits": [
     "desktop",
     "electron",
@@ -27871,8 +27923,8 @@
    "categoryHits": [
     "session"
    ],
-   "subcategory": "session-manage",
-   "subcategoryLabel": "会话管理"
+   "subcategory": "session-general",
+   "subcategoryLabel": "综合"
   },
   {
    "id": "gluztm/DSHGuard",
@@ -27927,13 +27979,14 @@
    "degree": 7,
    "category": "tools",
    "categoryLabel": "工具命令",
-   "categoryScore": 5,
+   "categoryScore": 7,
    "categoryHits": [
     "工具",
-    "一键"
+    "一键",
+    "诊断"
    ],
-   "subcategory": "tools-process",
-   "subcategoryLabel": "进程运行时"
+   "subcategory": "tools-ops",
+   "subcategoryLabel": "运维与自检"
   },
   {
    "id": "EternalNight996/dsh-desktop",
@@ -27973,7 +28026,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 3,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
+   "categoryLabel": "客户端应用",
    "categoryScore": 10,
    "categoryHits": [
     "desktop",
@@ -28028,8 +28081,8 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 7,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 33,
+   "categoryLabel": "客户端应用",
+   "categoryScore": 34.5,
    "categoryHits": [
     "desktop",
     "client",
@@ -28086,8 +28139,8 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 8,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 26,
+   "categoryLabel": "客户端应用",
+   "categoryScore": 27.5,
    "categoryHits": [
     "desktop",
     "client",
@@ -28143,7 +28196,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 3,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
+   "categoryLabel": "客户端应用",
    "categoryScore": 15,
    "categoryHits": [
     "desktop",
@@ -28342,7 +28395,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
+   "categoryLabel": "客户端应用",
    "categoryScore": 9,
    "categoryHits": [
     "desktop"
@@ -28401,15 +28454,14 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 8,
-   "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 19,
+   "category": "agent",
+   "categoryLabel": "智能体技能",
+   "categoryScore": 13.5,
    "categoryHits": [
-    "desktop",
-    "electron"
+    "agent"
    ],
-   "subcategory": "desktop-client",
-   "subcategoryLabel": "客户端本体"
+   "subcategory": "agent-coding",
+   "subcategoryLabel": "编码代理"
   },
   {
    "id": "tyche66/AI-Legal-Advisor",
@@ -28512,8 +28564,8 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 23.5,
+   "categoryLabel": "客户端应用",
+   "categoryScore": 26,
    "categoryHits": [
     "desktop",
     "electron",
@@ -28614,7 +28666,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 1,
    "category": "usage",
-   "categoryLabel": "用量额度",
+   "categoryLabel": "用量计费",
    "categoryScore": 16.5,
    "categoryHits": [
     "balance",
@@ -28659,15 +28711,14 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 6,
-   "category": "other",
-   "categoryLabel": "其他",
+   "category": "bridge",
+   "categoryLabel": "集成桥接",
    "categoryScore": 9,
    "categoryHits": [
     "bridge"
    ],
-   "subcategory": null,
-   "subcategoryLabel": null,
-   "categoryRaw": "bridge"
+   "subcategory": "bridge-bridge",
+   "subcategoryLabel": "桥接"
   },
   {
    "id": "limileo/DSH-Desktop",
@@ -28710,7 +28761,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
+   "categoryLabel": "客户端应用",
    "categoryScore": 14,
    "categoryHits": [
     "desktop",
@@ -28811,7 +28862,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
+   "categoryLabel": "客户端应用",
    "categoryScore": 17.5,
    "categoryHits": [
     "desktop",
@@ -28866,17 +28917,15 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 3,
-   "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 29,
+   "category": "tools",
+   "categoryLabel": "工具命令",
+   "categoryScore": 4,
    "categoryHits": [
-    "desktop",
-    "client",
-    "macos",
-    "客户端"
+    "一键",
+    "安装"
    ],
-   "subcategory": "desktop-client",
-   "subcategoryLabel": "客户端本体"
+   "subcategory": "tools-install",
+   "subcategoryLabel": "安装部署"
   },
   {
    "id": "ningbonb/dsh-web-desktop",
@@ -28920,7 +28969,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
+   "categoryLabel": "客户端应用",
    "categoryScore": 23,
    "categoryHits": [
     "desktop",
@@ -29072,8 +29121,8 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 16.5,
+   "categoryLabel": "客户端应用",
+   "categoryScore": 22,
    "categoryHits": [
     "desktop",
     "tauri",
@@ -29181,11 +29230,12 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 17,
+   "categoryLabel": "客户端应用",
+   "categoryScore": 21,
    "categoryHits": [
     "desktop",
     "桌面",
+    "桌面应用",
     "客户端"
    ],
    "subcategory": "desktop-client",
@@ -29227,16 +29277,15 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
-   "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 8,
+   "category": "panel",
+   "categoryLabel": "界面面板",
+   "categoryScore": 5,
    "categoryHits": [
-    "desktop",
-    "macos",
-    "windows"
+    "sidebar",
+    "hud"
    ],
-   "subcategory": "desktop-client",
-   "subcategoryLabel": "客户端本体"
+   "subcategory": "panel-side",
+   "subcategoryLabel": "侧边面板"
   },
   {
    "id": "zouzhe1/dsh-desktop",
@@ -29275,11 +29324,12 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 3,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 16,
+   "categoryLabel": "客户端应用",
+   "categoryScore": 18.5,
    "categoryHits": [
     "desktop",
     "electron",
+    "app",
     "installer"
    ],
    "subcategory": "desktop-client",
@@ -29330,12 +29380,13 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 8,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 20.5,
+   "categoryLabel": "客户端应用",
+   "categoryScore": 23.5,
    "categoryHits": [
     "desktop",
     "electron",
-    "macos"
+    "macos",
+    "gui"
    ],
    "subcategory": "desktop-client",
    "subcategoryLabel": "客户端本体"
@@ -29387,8 +29438,8 @@
    "categoryHits": [
     "panel"
    ],
-   "subcategory": "panel-side",
-   "subcategoryLabel": "侧边面板"
+   "subcategory": "panel-tui",
+   "subcategoryLabel": "终端界面"
   },
   {
    "id": "IQzhan/dsh-rebooter",
@@ -29442,8 +29493,8 @@
     "面板",
     "ui"
    ],
-   "subcategory": "panel-side",
-   "subcategoryLabel": "侧边面板"
+   "subcategory": "panel-general",
+   "subcategoryLabel": "综合"
   },
   {
    "id": "xswt442-cmd/dsh-xswt-tauriapp",
@@ -29485,16 +29536,13 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
-   "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 17.5,
-   "categoryHits": [
-    "desktop",
-    "tauri",
-    "桌面"
-   ],
-   "subcategory": "desktop-client",
-   "subcategoryLabel": "客户端本体"
+   "category": "other",
+   "categoryLabel": "其他",
+   "categoryScore": 0,
+   "categoryHits": [],
+   "subcategory": null,
+   "subcategoryLabel": null,
+   "categoryRaw": "other"
   },
   {
    "id": "piyrin/dsh-desktop",
@@ -29532,7 +29580,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 1,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
+   "categoryLabel": "客户端应用",
    "categoryScore": 14,
    "categoryHits": [
     "desktop",
@@ -29579,11 +29627,12 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 12,
+   "categoryLabel": "客户端应用",
+   "categoryScore": 13,
    "categoryHits": [
     "desktop",
     "windows",
+    "app",
     "installer"
    ],
    "subcategory": "desktop-installer",
@@ -29625,7 +29674,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
+   "categoryLabel": "客户端应用",
    "categoryScore": 9,
    "categoryHits": [
     "desktop",
@@ -29674,11 +29723,12 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 8,
+   "categoryLabel": "客户端应用",
+   "categoryScore": 10,
    "categoryHits": [
     "desktop",
-    "桌面"
+    "桌面",
+    "桌面端"
    ],
    "subcategory": "desktop-client",
    "subcategoryLabel": "客户端本体"
@@ -29719,15 +29769,13 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
-   "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 5,
-   "categoryHits": [
-    "desktop",
-    "macos"
-   ],
-   "subcategory": "desktop-client",
-   "subcategoryLabel": "客户端本体"
+   "category": "other",
+   "categoryLabel": "其他",
+   "categoryScore": 0,
+   "categoryHits": [],
+   "subcategory": null,
+   "subcategoryLabel": null,
+   "categoryRaw": "other"
   },
   {
    "id": "vianvio/dsh-plugin-drop-path",
@@ -29810,12 +29858,13 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 10,
+   "categoryLabel": "客户端应用",
+   "categoryScore": 11.5,
    "categoryHits": [
     "desktop",
     "client",
-    "tauri"
+    "tauri",
+    "app"
    ],
    "subcategory": "desktop-client",
    "subcategoryLabel": "客户端本体"
@@ -29862,14 +29911,14 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
-   "category": "tools",
-   "categoryLabel": "工具命令",
-   "categoryScore": 2,
+   "category": "market",
+   "categoryLabel": "插件市场",
+   "categoryScore": 3,
    "categoryHits": [
-    "一键"
+    "市场"
    ],
-   "subcategory": "tools-general",
-   "subcategoryLabel": "综合"
+   "subcategory": "market-store",
+   "subcategoryLabel": "市场商店"
   },
   {
    "id": "Kitup666/dsh-dshnext-launcher",
@@ -29920,13 +29969,13 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 10,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 28.5,
+   "categoryLabel": "客户端应用",
+   "categoryScore": 30,
    "categoryHits": [
     "desktop",
     "launcher",
     "windows",
-    "启动器"
+    "app"
    ],
    "subcategory": "desktop-launcher",
    "subcategoryLabel": "启动器"
@@ -29975,13 +30024,13 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 11,
+   "categoryLabel": "客户端应用",
+   "categoryScore": 12.5,
    "categoryHits": [
     "desktop",
     "client",
-    "桌面",
-    "客户端"
+    "app",
+    "桌面"
    ],
    "subcategory": "desktop-client",
    "subcategoryLabel": "客户端本体"
@@ -30032,7 +30081,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 5,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
+   "categoryLabel": "客户端应用",
    "categoryScore": 13.5,
    "categoryHits": [
     "desktop",
@@ -30078,7 +30127,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
+   "categoryLabel": "客户端应用",
    "categoryScore": 6,
    "categoryHits": [
     "desktop",
@@ -30136,8 +30185,8 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 7,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 32,
+   "categoryLabel": "客户端应用",
+   "categoryScore": 33.5,
    "categoryHits": [
     "desktop",
     "electron",
@@ -30282,14 +30331,17 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
-   "category": "skin",
-   "categoryLabel": "皮肤美化",
-   "categoryScore": 2,
+   "category": "session",
+   "categoryLabel": "会话交互",
+   "categoryScore": 8.5,
    "categoryHits": [
-    "主题"
+    "chat",
+    "emoji",
+    "表情",
+    "表情包"
    ],
-   "subcategory": "skin-theme",
-   "subcategoryLabel": "主题皮肤"
+   "subcategory": "session-chat",
+   "subcategoryLabel": "消息对话"
   },
   {
    "id": "Mo3ter/dsh-top-drag",
@@ -30427,15 +30479,15 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
-   "category": "other",
-   "categoryLabel": "其他",
-   "categoryScore": 3,
+   "category": "bridge",
+   "categoryLabel": "集成桥接",
+   "categoryScore": 15,
    "categoryHits": [
-    "notification"
+    "bridge",
+    "telegram"
    ],
-   "subcategory": null,
-   "subcategoryLabel": null,
-   "categoryRaw": "notify"
+   "subcategory": "bridge-im",
+   "subcategoryLabel": "IM 渠道"
   },
   {
    "id": "LucasleeCN/dsh-token-api",
@@ -30476,14 +30528,14 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "usage",
-   "categoryLabel": "用量额度",
+   "categoryLabel": "用量计费",
    "categoryScore": 8,
    "categoryHits": [
     "billing",
     "token"
    ],
-   "subcategory": "usage-billing",
-   "subcategoryLabel": "计费成本"
+   "subcategory": "usage-stat",
+   "subcategoryLabel": "用量统计"
   },
   {
    "id": "change979666/ox-alpha-dsh",
@@ -30736,16 +30788,16 @@
    "verdict": "related",
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 4,
-   "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 8,
+   "category": "other",
+   "categoryLabel": "其他",
+   "categoryScore": 2.5,
    "categoryHits": [
-    "launcher",
-    "windows",
-    "桌面"
+    "file",
+    "文件"
    ],
-   "subcategory": "desktop-launcher",
-   "subcategoryLabel": "启动器"
+   "subcategory": null,
+   "subcategoryLabel": null,
+   "categoryRaw": "file"
   },
   {
    "id": "qingchunnh/dsh-desktop",
@@ -30786,7 +30838,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
+   "categoryLabel": "客户端应用",
    "categoryScore": 10,
    "categoryHits": [
     "desktop",
@@ -30835,7 +30887,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 6,
    "category": "usage",
-   "categoryLabel": "用量额度",
+   "categoryLabel": "用量计费",
    "categoryScore": 16,
    "categoryHits": [
     "usage",
@@ -30889,9 +30941,10 @@
    "degree": 3,
    "category": "tools",
    "categoryLabel": "工具命令",
-   "categoryScore": 3,
+   "categoryScore": 5,
    "categoryHits": [
-    "工具"
+    "工具",
+    "修复"
    ],
    "subcategory": "tools-cli",
    "subcategoryLabel": "命令行"
@@ -30935,11 +30988,12 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
-   "categoryScore": 19.5,
+   "categoryLabel": "客户端应用",
+   "categoryScore": 21,
    "categoryHits": [
     "desktop",
-    "tauri"
+    "tauri",
+    "app"
    ],
    "subcategory": "desktop-client",
    "subcategoryLabel": "客户端本体"
@@ -30981,7 +31035,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
+   "categoryLabel": "客户端应用",
    "categoryScore": 8,
    "categoryHits": [
     "desktop"
@@ -31024,7 +31078,7 @@
    "reason": "名字/描述/主题里有 DSH 专有线索",
    "degree": 0,
    "category": "desktop",
-   "categoryLabel": "桌面客户端",
+   "categoryLabel": "客户端应用",
    "categoryScore": 6,
    "categoryHits": [
     "desktop"

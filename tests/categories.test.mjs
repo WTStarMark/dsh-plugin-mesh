@@ -306,3 +306,129 @@ test("单扇区放大：扇区变成细枝分类，成员只含该扇区", () =>
     assert.equal(n.category, focusId);
   }
 });
+
+test("置信门槛：单个权重 1 泛词不再独占扇区，名字/topic 命中仍保留", () => {
+  // 只在描述里出现一个权重 1 的泛词（ui/agent/route）→ 得分 1，低于 1.5，归「其他」
+  assert.equal(classifyNode({ name: "x", description: "a ui thing", topics: [] }).id, "other");
+  assert.equal(classifyNode({ name: "x", description: "an agent helper", topics: [] }).id, "other");
+  assert.equal(classifyNode({ name: "x", description: "free token route", topics: [] }).id, "other");
+  // 名字命中（×2）、topic 命中（×1.5）、描述里权重 ≥2 的词仍然保留
+  assert.equal(classifyNode({ name: "dsh-ui-kit", description: "", topics: [] }).id, "panel");
+  assert.equal(classifyNode({ name: "x", description: "", topics: ["ui"] }).id, "panel");
+  assert.equal(classifyNode({ name: "x", description: "命令行工具", topics: [] }).id, "tools");
+});
+
+test("市场误收回归：细分市场、管理/目录类插件不算插件市场", () => {
+  const market = (name, description) => classifyNode({ id: "x/" + name, name, description, topics: [] }).id;
+  assert.notEqual(market("dsh-stock-market", "有效解决了写代码的时候账户不能同时亏钱的BUG"), "market");
+  assert.notEqual(market("dsh-workspace-hub", ""), "market");
+  assert.notEqual(market("dsh-model-context-catalog", "DeepSeek Harness 插件：一键匹配模型上下文窗口"), "market");
+  assert.notEqual(market("dsh-meme", "表情包插件：输入框一键发图，图库市场一键安装"), "market");
+  assert.notEqual(market("dsh-prompt-market", "提示词市场插件：浏览、搜索、收藏提示词"), "market");
+  assert.notEqual(market("dsh-skin-market", "皮肤市场：已收录五百+皮肤"), "market");
+  // 真正的插件汇总仍然保留
+  assert.equal(
+    market("Blue-Whale-Harness", "DeepSeek Harness 插件总目录 · The catalog of DSH plugins：1958 个仓库"),
+    "market",
+  );
+  assert.equal(market("dsh-plugins-index", "收录全部 dsh 插件"), "market");
+});
+
+test("客户端：dsh-Go 这类客户端本体归客户端，客户端插件仍然排除", () => {
+  const dshGo = classifyNode({
+    id: "ccch1mneyyy/dsh-Go",
+    name: "dsh-Go",
+    description: "dsh-go — DeepSeek Harness 装进口袋：手机本机运行，也能遥控你的电脑。",
+    topics: ["android-app", "flutter", "dsh-plugin"],
+  });
+  assert.equal(dshGo.id, "desktop", "dsh-Go 应是客户端：" + JSON.stringify(dshGo));
+  assert.equal(dshGo.sub.id, "desktop-mobile");
+
+  const mac = classifyNode({
+    id: "x/dsh-go-mac",
+    name: "dsh-go-mac",
+    description: "DSH Go Mac —— 全世界最好用的第三方Mac 端DeepSeek Harness GUI",
+    topics: ["macos", "flutter"],
+  });
+  assert.equal(mac.id, "desktop", "Mac 客户端应归客户端：" + JSON.stringify(mac));
+
+  // 给客户端写的插件仍不能算客户端
+  const brand = classifyNode({ name: "dsh-client-ui-brand", description: "Custom product name and logo branding for DSH Web", topics: [] });
+  assert.notEqual(brand.id, "desktop");
+  const statusbar = classifyNode({ name: "dsh-desktop-statusbar", description: "把 DSH 桌面端底部的统计行换成可配置状态栏", topics: [] });
+  assert.notEqual(statusbar.id, "desktop");
+  const notifier = classifyNode({ name: "dsh-desktop-notifier", description: "", topics: [] });
+  assert.notEqual(notifier.id, "desktop");
+});
+
+test("协议基座：普通「X框架插件」不再被当成生态基座", () => {
+  assert.notEqual(
+    classifyNode({ name: "dsh-memflow", description: "DeepSeek Harness 记忆框架插件：会话会结束，记忆不会", topics: [] }).id,
+    "spec",
+  );
+  assert.notEqual(
+    classifyNode({ name: "dsh-spec-ponytail", description: "懒惰 senior 模式，hook 注入，迁移成 dsh", topics: [] }).id,
+    "spec",
+  );
+  // 真正的基座自述仍然强命中：侧边栏底座 / 皮肤框架
+  assert.equal(
+    classifyNode({ name: "DSH-better-sidebar", description: "开放的侧边栏底座，支持三方拓展注册新侧边栏页面", topics: [] }).id,
+    "spec",
+  );
+  assert.equal(
+    classifyNode({ name: "dsh-myskin", description: "DSH 通用皮肤框架：可视化自定义 + 实时预览", topics: [] }).id,
+    "spec",
+  );
+});
+
+test("细枝不靠父级泛词硬填：只有 session 时归「综合」", () => {
+  const onlySession = classifyNode({ name: "dsh-session-helper", description: "a session helper plugin", topics: [] });
+  assert.equal(onlySession.id, "session");
+  assert.equal(onlySession.sub.id, "session-general");
+  const provider = classifyNode({ name: "dsh-provider-box", description: "openai provider settings", topics: [] });
+  assert.equal(provider.id, "model");
+  assert.equal(provider.sub.id, "model-provider");
+});
+
+test("v3 分类改名：usage→用量计费、notify→通知提醒，dsh-ops 归效率优化", () => {
+  assert.equal(CATEGORY_RULES.find((r) => r.id === "usage").label, "用量计费");
+  assert.equal(CATEGORY_RULES.find((r) => r.id === "notify").label, "通知提醒");
+  const effRule = CATEGORY_RULES.find((r) => r.id === "efficiency");
+  assert.equal(effRule?.label, "效率优化");
+
+  const ops = classifyNode({
+    name: "dsh-ops",
+    description:
+      "A toolkit for low-level operations in DSH, designed to reduce token usage and task execution time / DSH 底层操作工具插件，旨在减少 Token 消耗与任务耗时",
+    topics: ["dsh-plugin"],
+  });
+  assert.equal(ops.id, "efficiency", "dsh-ops 不应留在用量计费：" + JSON.stringify(ops));
+  assert.ok(["eff-tool", "eff-token"].includes(ops.sub.id), "dsh-ops 细枝应偏工具/节省：" + ops.sub.id);
+});
+
+test("效率优化：省 Token/上下文压缩归 efficiency，记账仍归 usage", () => {
+  const of = (name, description) => classifyNode({ id: "x/" + name, name, description, topics: [] });
+  assert.equal(of("dsh-flash-presets", "降低 DeepSeek v4.1 flash 的 Token 消耗 / Raising Token efficiency").id, "efficiency");
+  assert.equal(of("dsh-token-saver", "aggressive token savings, no task-quality loss").id, "efficiency");
+  assert.equal(of("dsh-compaction-instant", "LLM-free lossless compaction engine for DeepSeek Harness").id, "efficiency");
+  assert.equal(of("dsh-cost-meter", "Cost tracking for DeepSeek Harness: session and model costs, token usage, budgets").id, "usage");
+  assert.equal(of("dsh-balance", "DeepSeek account balance plugin for the settings page").id, "usage");
+});
+
+test("运维自检归 tools-ops 细枝，普通工具不误分", () => {
+  const health = classifyNode({ name: "dsh-plugin-healthcheck", description: "检测插件是否正常、是否含木马，健康检查", topics: [] });
+  assert.equal(health.id, "tools");
+  assert.equal(health.sub.id, "tools-ops");
+  const writer = classifyNode({ name: "dsh-novel-writer", description: "大肥鱼小说工坊：九阶段创作流程 + 黄金三章诊断", topics: [] });
+  assert.notEqual(writer.sub && writer.sub.id, "tools-ops");
+});
+
+test("v3 新细枝：破甲/开屏/图像生成/IM/本地化/模型路由", () => {
+  const subOf = (name, description) => classifyNode({ id: "x/" + name, name, description, topics: [] }).sub.id;
+  assert.equal(subOf("dsh-purge", "DeepSeek Harness 破甲：jailbreak 提示词"), "session-jailbreak");
+  assert.equal(subOf("dsh-boot-animation", "开屏动画 + 片头 boot animation"), "skin-splash");
+  assert.equal(subOf("dsh-comfyui", "ComfyUI 插件：文生图 / 生图"), "media-gen");
+  assert.equal(subOf("dsh-lark", "Lark / 飞书 IM bot channel"), "bridge-im");
+  assert.equal(subOf("dsh-russian-lang", "locale 本地化 / 语言包"), "doc-locale");
+  assert.equal(subOf("dsh-model-router", "Model Router 模型路由"), "model-router");
+});

@@ -1,5 +1,5 @@
 id,label,acceptable
-"ypingcn/dsh-web-search-insights","web","panel,session"
+"ypingcn/dsh-web-search-insights","tools","panel,session,tools"
 "ricardochen1996/dsh-browser-use","web",""
 "lijiaqi-AI-Product-Manager/dsh-bug-gps","web","dev"
 "why-did/dsh-tailscale-access","remote",""
@@ -27,7 +27,7 @@ id,label,acceptable
 "MKInori/dsh-oneclick-desktop","desktop",""
 "dsh-mixxed/dsh-client-ui-git-branch","panel","desktop"
 "zmm863-commits/dsh-paopaocat-suite","market",""
-"LTao96/dsh-plugin-overview","market","panel"
+"LTao96/dsh-plugin-overview","tools","panel,tools"
 "imyasonly/dsh-plugin-market","market",""
 "PerryLink/dsh-emergency-plan","doc","tools,secure"
 "9087/dsh-diff-approval","secure",""

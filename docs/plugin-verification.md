@@ -152,7 +152,7 @@ npm --prefix tools/plugin-verifier test
 - 市场：10,304 个包 → 严格规则（确认 bundle + repo 在插件图）约 **9,488 个包 / 9,158 个唯一仓库**；
 - 其中 403 个 `dsh-bundle-unconfirmed` 包（337 仓库）会被排除；
 - 187 个无 GitHub 仓库地址、226 个 repo 不在图里的确认包也会被排除；
-- 插件视图当前 **35,270 个节点**（23 个扇区）：npm 已确证 + 根 manifest 扫描 + monorepo tree 扫描 + README 证据 + 策划基座；分类优化后 `other` **11.1%**、子分类覆盖 **88.8%**；
+- 插件视图当前 **35,270 个节点**（24 个扇区）：npm 已确证 + 根 manifest 扫描 + monorepo tree 扫描 + README 证据 + 策划基座；分类 v3 后 `other` **11.8%**、具体细枝覆盖 **73.4%**（另有 14.8% 归「综合」），新增 `efficiency` 效率优化扇区；
 - 分类规则已同步 JS/Python，详见 [classification-eval.md](classification-eval.md)。
 
 ## 9. 双模式与严格市场（本地已落地）
