@@ -18,9 +18,13 @@
     "scan:manifests": "node tools/scan-manifests.mjs",
     "scan:tree": "node tools/scan-manifests-tree.mjs",
     "crawl:evidence": "node tools/crawl-plugin-evidence.mjs",
+    "noise:scan": "node tools/noise-evidence-scan.mjs",
+    "review:suggest": "node tools/review-suggest.mjs",
     "verify:plugins": "node tools/plugin-verifier/cli.mjs",
     "verify:market": "node tools/verify-market.mjs",
     "eval:classify": "node tools/classify-eval.mjs",
+    "scan:market-ui": "node tools/market-ui-scan.mjs",
+    "sync:market": "node tools/market-sync.mjs",
     "test:verifier": "npm --prefix tools/plugin-verifier test"
   },
   "engines": { "node": ">=22" }

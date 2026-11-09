@@ -87,7 +87,13 @@ node tools/classify-eval.mjs --sample 120 --out docs/classification-labels.csv  
 node tools/scan-manifests.mjs --concurrency 16 --token-file .tmp/github-token  # 扫描仓库 manifest（需要 GitHub token）
 # 产出 data/plugins/*（插件图预计算产物）
 # 产出 dist/market/index.strict.json；--apply-market 同时替换本地 index.json（备份 index.ecosystem.json）
+
+# 市场索引的「含界面」标签只按发布包内容判定，不认 README / 声明：
+node tools/market-ui-scan.mjs                 # 扫描 npm 包文件清单 + package.json，产出 data/cache/market-ui-evidence.json（按包名@版本增量）
+node tools/market-sync.mjs                    # 把最新分类与「含界面」标签原地同步进 dist/market/index.json（+ .gz/.br/strict）
 ```
+
+「含界面」的判定口径：发布包里真的有 HTML/CSS/TSX 等前端资源，或 `dsh.client` 声明的 `exports["./client"]` 入口文件真的存在于发布包；扫描失败一律不打标签。细节与审计数据见 [docs/market-ui-evidence.md](docs/market-ui-evidence.md)。
 
 插件判定标准、验证器与安全边界见 [docs/plugin-verification.md](docs/plugin-verification.md)。
 

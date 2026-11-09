@@ -49,6 +49,7 @@ import {
 } from "./repo-dir-verify.mjs";
 import { decisionFor, hiddenLabelIds, listHit, marketPaths, packageBlacklistReason, readMarketOverrides } from "./market-overrides.mjs";
 import { MARKET_LABELS } from "./market-labels.mjs";
+import { uiEvidenceVerdict } from "./market-ui.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const UA = "dsh-plugin-mesh-market-index/0.1 (+https://github.com/WTStarMark/dsh-plugin-mesh)";
@@ -78,6 +79,8 @@ const OUT = resolve(ROOT, argOf("out", "dist/market/index.json"));
 const REGISTRY_CACHE = resolve(ROOT, argOf("npm-registry", "data/cache/npm-registry.json"));
 /* 人工裁决/名单（后台写、生成器读）。文件缺失/损坏 = 空表，完全等同旧行为。 */
 const OVERRIDES = resolve(ROOT, argOf("overrides", "data/admin/market-index/overrides.json"));
+/* 「含界面」只认真实扫描证据（tools/market-ui-scan.mjs 产出）；没有证据就不打这个标签。 */
+const UI_EVIDENCE = resolve(ROOT, argOf("ui-evidence", "data/cache/market-ui-evidence.json"));
 
 /* 子目录归属校验（tools/repo-dir-verify.mjs）：npm 自述的 repository.directory 从来没被打开看过。
  * 线上实测 7 个包把 repository 写成官方仓库、directory 写成发布者本机的 .dsh/plugins/…，
@@ -105,6 +108,12 @@ const readJson = (path, fallback) => {
     return fallback;
   }
 };
+const UI_EVIDENCE_DOC = readJson(UI_EVIDENCE, null);
+/* v1 证据只数文件名、没有 dsh.client 平台与 exports["./client"] 入口，不能用来判定「含界面」。 */
+const UI_EVIDENCE_OK = !!UI_EVIDENCE_DOC && UI_EVIDENCE_DOC.version === 2;
+const UI_EVIDENCE_PACKAGES = UI_EVIDENCE_OK ? UI_EVIDENCE_DOC.packages ?? {} : {};
+if (!UI_EVIDENCE_DOC) console.warn("没有 UI 证据缓存（" + UI_EVIDENCE + "）：本次不会输出 has-client 标签，先跑 node tools/market-ui-scan.mjs");
+else if (!UI_EVIDENCE_OK) console.warn("UI 证据是旧格式（version=" + UI_EVIDENCE_DOC.version + "）：本次不会输出 has-client 标签，先重跑 node tools/market-ui-scan.mjs");
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 const toUnixSeconds = (iso) => {
   const t = Date.parse(String(iso ?? ""));
@@ -974,7 +983,7 @@ async function main() {
         labels: filterHiddenLabels(
           [
             rec.isBundle ? "dsh-bundle" : "dsh-bundle-unconfirmed",
-            ...(rec.hasClient ? ["has-client"] : []),
+            ...(uiEvidenceVerdict(UI_EVIDENCE_PACKAGES[pkg]).ui ? ["has-client"] : []),
             ...(freshRelease ? ["recent-release"] : []),
             // 「仓库内子包」是事实主张：只有目录里的 package.json 真的写了这个名字才配挂
             ...(subdirLabel ? ["subdir-package"] : []),

@@ -173,6 +173,18 @@ npm --prefix tools/plugin-verifier test
 - 采样 12 个严格市场包：12/12 confirmed（修复了 tarball 缺 repository 时用 registry/market 条目兜底）。
 - 当前限制：完整 9,488 个包的 V2 全量验证耗时/流量大，尚未默认跑；大 tarball（>32MB）仍判 review。
 
+### 市场「含界面 / Has UI」标签的真实检验（2026-11-07）
+
+- 旧口径：市场生成器直接读 npm package.json 的 `dsh.client` 字段 → 只是**作者声明**，没看过发布包里有没有对应的浏览器代码；声明了但没有客户端入口文件的包也会挂「带界面」。
+- 新口径（`tools/market-ui.mjs`，纯函数可单测）：标签只由**发布包内容**决定，扫描失败 = 未验证 = 不打标签。
+  1. 发布包文件清单里有前端资源：`.html/.htm/.css/.scss/.sass/.less/.styl/.vue/.svelte/.jsx/.tsx`（用户口径：有 HTML/CSS 就算）；
+  2. 或 `dsh.client` 声明的 `exports["./client"]` 入口文件**真的出现在发布包里**（DSH 的浏览器半边就是从这里加载的）；
+  3. 或 `dsh.client`（`platform` 不是 `host`/`headless`）且有运行时客户端入口文件（`client.js`、`src/ui/App.tsx` 等）；
+  4. `.d.ts` / `.map` 不算运行时资源；`vendor/node_modules/test/docs/examples/skills/templates` 等目录与 `*-template.html`、`*-preview.*` 一类文件名不算界面 —— 避免技能包里的教学模板、API client（如 `dumate-client.js`）被误判。
+- 数据来源：`tools/market-ui-scan.mjs` 只读 npm 已发布内容 —— package.json（jsDelivr CDN → unpkg）与文件清单（jsDelivr flat → unpkg `?meta` → npm tarball 兜底）；不安装、不执行、不读 README。缓存按 `包名@版本` 记，可断点续跑。
+- 同步进索引：`node tools/market-ui-scan.mjs` → `node tools/market-sync.mjs`；`tools/market-index.mjs` 全量重建时也读同一份 v2 证据（没有证据就不输出该标签）。
+- 审计数据与取舍（误报/漏报抽样）见 [market-ui-evidence.md](market-ui-evidence.md)。
+
 ## 10. 仓库 manifest 扫描（已实现）
 
 - `tools/scan-manifests.mjs`：多并发读取仓库根 `package.json`（raw.githubusercontent，不占 API 配额），再读取它声明的 patch 文件并用受限 YAML 校验；不执行任何包代码。

@@ -9,7 +9,7 @@
 export const MARKET_LABELS = [
   { id: "dsh-bundle", en: "DSH bundle", zh: "DSH 组合包" },
   { id: "dsh-bundle-unconfirmed", en: "Likely bundle", zh: "疑似组合包" },
-  { id: "has-client", en: "Has UI", zh: "带界面" },
+  { id: "has-client", en: "Has UI", zh: "含界面" },
   { id: "recent-release", en: "Updated this week", zh: "近 7 天有新版" },
   { id: "subdir-package", en: "Bundle in subdir", zh: "仓库内子包" },
   { id: "owner-unverified", en: "Owner unverified", zh: "作者待确认" },
