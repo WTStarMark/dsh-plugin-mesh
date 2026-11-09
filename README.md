@@ -5,7 +5,7 @@
 [![在线访问](https://img.shields.io/badge/在线访问-node.moc--chen.cn-2f7df6?style=flat-square)](https://node.moc-chen.cn/)
 [![测试](https://img.shields.io/badge/tests-408%20JS%20%2B%20182%20Python-3fb8a8?style=flat-square)](#测试与-ci)
 [![依赖](https://img.shields.io/badge/dependencies-0-57b894?style=flat-square)](#技术选型)
-[![版本](https://img.shields.io/badge/version-v0.5.4-9b8cf0?style=flat-square)]()
+[![版本](https://img.shields.io/badge/version-v0.5.5-9b8cf0?style=flat-square)]()
 
 在线地址有两个节点：
 
