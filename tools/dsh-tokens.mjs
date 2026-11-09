@@ -76,14 +76,58 @@ export function readDshTokens(root = DSH_ROOT) {
     }
   }
   if (Object.keys(light).length === 0) return null;
-  const resolve = (value, depth = 0) => {
-    const m = /^var\((--[a-z0-9-]+)\)$/.exec(value);
-    if (m === null || depth > 8) return value;
-    return resolve(statics[m[1]] ?? "", depth + 1);
+  /**
+   * 解析 CSS var()：支持嵌套 fallback（var(--x, var(--y))）与作用域内任意声明，而不再只认
+   * “整值恰好是一个 var(--x)”且只查 --dsw-static-*。DSH 升级后 --dsw-font-family 变成了
+   * var(--dsh-font-family-text, var(--dsh-font-family-text-default)), …，旧解析器会原样留在快照里。
+   */
+  const expandVars = (value, scope, level = 0) => {
+    const text = String(value ?? "");
+    if (!text || level > 12) return text;
+    let out = "";
+    let cursor = 0;
+    while (cursor < text.length) {
+      const at = text.indexOf("var(", cursor);
+      if (at < 0) { out += text.slice(cursor); break; }
+      out += text.slice(cursor, at);
+      // 找到与 var( 配对的右括号（fallback 里可能还有嵌套 var()）
+      let depth = 0;
+      let end = at + 4;
+      for (; end < text.length; end += 1) {
+        if (text[end] === "(") depth += 1;
+        else if (text[end] === ")") {
+          if (depth === 0) break;
+          depth -= 1;
+        }
+      }
+      if (end >= text.length) { out += text.slice(at); break; }
+      const inner = text.slice(at + 4, end);
+      // 在深度 0 处切第一个逗号：前面是变量名，后面是 fallback
+      let comma = -1;
+      let innerDepth = 0;
+      for (let i = 0; i < inner.length; i += 1) {
+        if (inner[i] === "(") innerDepth += 1;
+        else if (inner[i] === ")") innerDepth -= 1;
+        else if (inner[i] === "," && innerDepth === 0) { comma = i; break; }
+      }
+      const name = (comma < 0 ? inner : inner.slice(0, comma)).trim();
+      const fallback = comma < 0 ? null : inner.slice(comma + 1).trim();
+      let replacement = scope[name];
+      if (replacement === undefined || replacement === null) replacement = fallback;
+      if (replacement === undefined || replacement === null) {
+        out += text.slice(at, end + 1);
+      } else {
+        out += expandVars(replacement, scope, level + 1);
+      }
+      cursor = end + 1;
+    }
+    return out;
   };
-  const all = (map) => Object.fromEntries(Object.entries(map).map(([k, v]) => [k, resolve(v)]));
-  const lightAll = all({ ...roots, ...light });
-  const darkAll = all({ ...roots, ...light, ...dark });
+  const lightScope = { ...statics, ...roots, ...light };
+  const darkScope = { ...statics, ...roots, ...light, ...dark };
+  const all = (map, scope) => Object.fromEntries(Object.entries(map).map(([k, v]) => [k, expandVars(v, scope)]));
+  const lightAll = all({ ...roots, ...light }, lightScope);
+  const darkAll = all({ ...roots, ...light, ...dark }, darkScope);
   return { pkg: found.pkg, light: lightAll, dark: darkAll, statics };
 }
 
