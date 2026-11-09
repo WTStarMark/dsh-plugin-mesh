@@ -258,7 +258,7 @@ test("趋势图左侧严格对齐：整行列宽必须固定（auto 列会让每
   assert.ok(/width:\s*\d+px/.test(spark), "趋势图本身也要固定宽度：" + spark);
 });
 
-test("噪声行：默认只标注不隐藏；开了开关才藏，且名次不重排", async () => {
+test("噪声行：默认隐藏已确认噪声；关开关即回，且名次不重排", async () => {
   const data = JSON.parse(JSON.stringify(payload));
   data.boards.updated.items = [
     { ...data.boards.updated.items[0], id: "acme/noisy", name: "noisy", verdict: "noise", reason: "挂了 3 个 DSH 标签，正文却没有插件线索" },
@@ -268,27 +268,30 @@ test("噪声行：默认只标注不隐藏；开了开关才藏，且名次不�
   ui.button.fire("click");
   await settle();
 
+  // 默认隐藏确认噪声：噪声行不出现，但开关仍如实报被藏条数（不是清空榜）
   let list = rows(ui.body);
-  assert.equal(list.length, 2, "默认不隐藏：噪声行照常显示（只标注）");
+  assert.equal(list.length, 1, "默认藏掉噪声行：只剩真实行");
+  assert.match(ui.noiseToggle.title, /1 条/, "被藏条数写进悬停：" + ui.noiseToggle.title);
+  assert.equal(ui.noiseToggle.classList.contains("is-idle"), false, "有噪声行时开关可见");
+
+  // 关掉开关：噪声行回来（照常只标注），名次保持原位
+  ui.noiseBox.checked = false;
+  ui.noiseBox.fire("change");
+  list = rows(ui.body);
+  assert.equal(list.length, 2, "关掉开关就回来");
   const chip = list[0].find((n) => n.className === "noise");
   assert.ok(chip, "噪声行要有标注：" + list[0].all.map((n) => n.className).join(","));
   assert.equal(chip.textContent, "噪声");
   assert.match(chip.title, /已判定为噪声：/, "悬停要给出判定理由：" + chip.title);
   assert.equal(ui.noiseLabel.textContent, "隐藏噪声", "文案固定；条数进 title，避免撑宽抖动");
-  assert.match(ui.noiseToggle.title, /1 条/, "条数写在悬停里：" + ui.noiseToggle.title);
-  assert.equal(ui.noiseToggle.classList.contains("is-idle"), false, "有噪声行时开关可见");
 
-  // 打开开关：只藏这一行，剩下的行保留原来的名次（名次是榜位，不重新编号）
+  // 再打开开关：只藏这一行，剩下的行保留原来的名次（名次是榜位，不重新编号）
   ui.noiseBox.checked = true;
   ui.noiseBox.fire("change");
   list = rows(ui.body);
   assert.equal(list.length, 1, "藏掉后只剩 1 行");
   assert.equal(list[0].find((n) => n.className === "rk").textContent, "2", "第 2 名还是第 2 名，不能被顶成第 1");
   assert.ok(!list[0].className.includes("top1"), "被顶上来的行不该拿到冠军样式：" + list[0].className);
-
-  ui.noiseBox.checked = false;
-  ui.noiseBox.fire("change");
-  assert.equal(rows(ui.body).length, 2, "关掉开关就回来");
 });
 
 test("榜单里没有噪声行时：开关占位隐藏（visibility），避免周下载开关跳位", async () => {

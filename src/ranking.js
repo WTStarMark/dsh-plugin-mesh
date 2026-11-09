@@ -78,8 +78,9 @@ export function createRankingBoard({ button, modal, tabs, body, close, fetcher, 
   let open = false;
   let loading = false;
   let error = null;
-  // 只隐藏、不重排：被藏起来的行仍然占着它原来的名次，后面的行不会被顶上来（名次是榜位，不是显示序号）
-  let hideNoise = false;
+  // 只隐藏、不重排：被藏起来的行仍然占着它原来的名次，后面的行不会被顶上来（名次是榜位，不是显示序号）。
+  // 默认隐藏已确认噪声（开关可一键看回；榜单底部/头部计数仍如实报被藏条数）。
+  let hideNoise = true;
   let showNpm = false;
 
   /** 大数缩写：12.3k / 1.2M —— 下载量榜与星标榜共用同一把尺子 */

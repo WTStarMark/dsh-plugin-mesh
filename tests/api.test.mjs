@@ -269,6 +269,11 @@ test("榜单：周更新榜按更新次数排序，star 榜给真实增量与真
   if (stars.available) {
     assert.equal(stars.items[0].series.length, 7, "star 榜每行也要有 7 个槽位");
     assert.ok(Array.isArray(stars.items[0].spans), "每行都要带跨天累计段（可以是空数组）");
+    assert.equal(
+      stars.spanCount,
+      stars.items.reduce((n, it) => n + (it.spans?.length ?? 0), 0),
+      "spanCount 必须等于当前页可展示的宽条数，不能报全局值",
+    );
     if (stars.spanCount > 0) {
       const row = stars.items.find((it) => it.spans.length > 0);
       assert.ok(row, "报告有跨天段时，至少一行要带得上");

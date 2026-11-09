@@ -1130,12 +1130,16 @@ export function createApi({ root, meshPath = null }) {
         series: seriesFromDaily(g.node.id),
         spans: g.spans,
       }));
+      // spanCount 是「当前页真正画得出来的宽条数」：全局 spans 可能属于未进榜仓库。
+      const totalSpans = starDailyIndex.spans.length;
+      starsBoard.spanCount = starsBoard.items.reduce((n, it) => n + (it.spans?.length ?? 0), 0);
       const missingDays = seriesDays.length - coveredDays.length;
       starsBoard.note =
         "增量 = 窗口内每一天真实观测到的星标变化之和（不估算、不平摊；已排除归档与复刻）。已观测 " +
         coveredDays.length + " 天（" + coveredDays[0] + " 起）" +
         (missingDays > 0 ? "，另有 " + missingDays + " 天没有观测 —— 那是「未知」而不是「零增长」" : "") +
-        (starDailyIndex.spans.length ? "；" + starDailyIndex.spans.length + " 段跨天观测画成宽条，不计入任何一天" : "") +
+        (starsBoard.spanCount ? "；" + starsBoard.spanCount + " 段跨天观测画成宽条，不计入任何一天" : "") +
+        (totalSpans > starsBoard.spanCount ? "（另有 " + (totalSpans - starsBoard.spanCount) + " 段来自未进榜仓库，未画）" : "") +
         (aliasMerged > 0 ? "；其中 " + aliasMerged + " 行的增量来自改名仓库的旧名台账（已并入现名，旧名不再单独成行）" : "") +
         "。";
     } else if (base) {
@@ -1173,6 +1177,8 @@ export function createApi({ root, meshPath = null }) {
         series: seriesForStars(g.node.id),
         spans: spansForStars(g.node.id),
       }));
+      // 与逐日台账同口径：只报当前页真正画出来的宽条数
+      starsBoard.spanCount = starsBoard.items.reduce((n, it) => n + (it.spans?.length ?? 0), 0);
       starsBoard.note =
         "增量 = 两个时间点的星标之差（真实观测，非估算；已排除归档与复刻）。窗口 " + starsBoard.window.days + " 天" +
         (starsBoard.window.days < windowDays - 0.5 ? "（历史还没攒够 " + windowDays + " 天，先按现有历史算）" : "") +

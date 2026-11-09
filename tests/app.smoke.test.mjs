@@ -17,9 +17,12 @@ const coreJson = JSON.parse(await readFile(new URL("../data/mesh-core.json", imp
 // 基准必须取【二进制契约】的节点数：页面实际渲染的是它（prepareCore），
 // 而 mesh.json 与 mesh-core.json 的节点数可以不一样（预计算会再剔一遍噪声作者）。
 const NODE_COUNT = coreJson.nodes.length;
+// 「隐藏确认噪声」默认开（2026-11-07）：首屏命中 = 全量 - 已确认噪声；开关可看回。
+const NOISE_COUNT = coreJson.nodes.filter((n) => n.verdict === "noise").length;
+const VISIBLE_COUNT = NODE_COUNT - NOISE_COUNT;
 const SECTOR_COUNT = mesh.clusters.length;
 const SECTOR_DEG = (360 / SECTOR_COUNT).toFixed(1).replace(".", "\\.");
-const atFull = new RegExp("命中 " + NODE_COUNT + " / " + NODE_COUNT);
+const atFull = new RegExp("命中 " + VISIBLE_COUNT + " / " + NODE_COUNT);
 
 const drawCalls = { fillRect: 0, arc: 0, stroke: 0, fill: 0, fillText: 0, closePath: 0, clip: 0, drawImage: 0, curve: 0, lineTo: 0, segments: [], strokeWidths: [], strokeStyles: [] };
 
@@ -384,7 +387,7 @@ test("布局会沉降并真的画出东西", () => {
   const frames = pump(900);
   // 预计算布局没有长沉降（一帧即就位），所以这里只要求"跑过帧"且真的画了东西
   assert.ok(frames >= 1, "应至少跑了一帧，实际 " + frames);
-  assert.ok(drawCalls.fill > NODE_COUNT * 0.8, "节点绘制次数异常少: " + drawCalls.fill + "（节点 " + NODE_COUNT + "）");
+  assert.ok(drawCalls.fill > VISIBLE_COUNT * 0.8, "节点绘制次数异常少: " + drawCalls.fill + "（可见节点 " + VISIBLE_COUNT + "）");
   assert.ok(drawCalls.closePath >= SECTOR_COUNT, SECTOR_COUNT + " 个扇区的光锥没有画出来: " + drawCalls.closePath);
   assert.ok(drawCalls.clip >= SECTOR_COUNT, "扇区光的裁剪没有生效: " + drawCalls.clip);
   assert.equal(drawCalls.curve, 0, "默认不画任何连线，实际画了 " + drawCalls.curve + " 条");

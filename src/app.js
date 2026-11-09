@@ -170,7 +170,8 @@ const state = {
   ownerRepoMax: null, // 上限；null = 不限
   pushedDays: 0,
   language: "all",
-  hideNoise: false,
+  // 「隐藏确认噪声」默认开：三档结论里已确认的 noise 不再出现在图/筛选里；开关一键可看回（manual 仍照常显示）。
+  hideNoise: true,
   archived: "all",
   clusterFocus: null,
   focusCategory: null, // 单扇区放大：非空时只铺该分类，扇区变成它的细枝分类
@@ -419,7 +420,7 @@ function resetView() {
   state.minStars = 0;
   state.pushedDays = 0;
   state.language = "all";
-  state.hideNoise = false;
+  state.hideNoise = true; // 重置也回到默认：确认噪声默认隐藏
   state.archived = "all";
   state.clusterFocus = null;
   state.centerId = null;
