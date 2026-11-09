@@ -32,3 +32,4 @@ data/renames.json
 data/*.bak-*.json
 docs/*.png
 docs/frontend-design.md
+docs/review-suggest.csv
