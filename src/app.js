@@ -2,7 +2,7 @@
  * app.js —— 状态中枢：把数据、布局、渲染器、面板接起来。状态变更路径永远是「改 state -> applyHighlight() -> 重绘 / 重渲染面板」；
  * 过滤一律「淡化」而非「移除」，保证同一份数据在任意过滤下位置一致、可对比。
  */
-import { countReposByOwner, starPercentile, loadMeshBest, prepare, prepareCore, prepareCoreAsync, precomputedLayout, matches, formatStars, groupColor, starThreshold, ownerSiblings, stripNoiseOwners, isConfirmedNoise, EDGE_TYPE_BY_CODE, EDGE_STYLES, RAY_HIT_LIMIT, dataSignature } from "./mesh-data.js";
+import { countReposByOwner, starPercentile, loadMeshBest, prepare, prepareCore, prepareCoreAsync, precomputedLayout, matches, formatStars, groupColor, starThreshold, ownerSiblings, stripNoiseOwners, stripConfirmedNoise, EDGE_TYPE_BY_CODE, EDGE_STYLES, RAY_HIT_LIMIT, dataSignature } from "./mesh-data.js";
 import { createDetailStore } from "./details.js";
 import { createStore } from "./cache.js";
 import { startStats, formatCount } from "./stats.js";
@@ -170,8 +170,6 @@ const state = {
   ownerRepoMax: null, // 上限；null = 不限
   pushedDays: 0,
   language: "all",
-  // 「隐藏确认噪声」默认开：三档结论里已确认的 noise 不再出现在图/筛选里；开关一键可看回（manual 仍照常显示）。
-  hideNoise: true,
   archived: "all",
   clusterFocus: null,
   focusCategory: null, // 单扇区放大：非空时只铺该分类，扇区变成它的细枝分类
@@ -420,7 +418,6 @@ function resetView() {
   state.minStars = 0;
   state.pushedDays = 0;
   state.language = "all";
-  state.hideNoise = true; // 重置也回到默认：确认噪声默认隐藏
   state.archived = "all";
   state.clusterFocus = null;
   state.centerId = null;
@@ -479,8 +476,6 @@ function computeHighlight() {
       if (!ts || now - ts > state.pushedDays * 86400000) continue;
     }
     if (state.language !== "all" && n.language !== state.language) continue;
-    // 「隐藏确认噪声」只隐藏三档结论里已确认的那批；待复核的仍然画出来（它们还没定性）
-    if (state.hideNoise && isConfirmedNoise(n)) continue;
     if (state.archived === "hide" && n.archived) continue;
     if (state.archived === "only" && !n.archived) continue;
     // 放大模式下 clusterFocus 是「细枝」id，必须用细枝键比较，否则拿大类去比细枝永远不相等，会把所有节点都过滤掉（整个图被隐藏）。
@@ -651,10 +646,6 @@ const actions = {
   },
   setLanguage(lang) {
     state.language = lang;
-    apply();
-  },
-  setHideNoise(on) {
-    state.hideNoise = on;
     apply();
   },
   setArchived(mode) {
@@ -1020,6 +1011,8 @@ function loadPanels() {
 async function bootMesh(mesh, { resetFilters, core }) {
   // 噪声黑名单必须在 prepareCore / precomputedLayout 之前剔除，否则预计算里的节点索引与扇区成员会对不上（旧快照兜底，新数据本就干净）。
   mesh = stripNoiseOwners(mesh);
+  // 确认噪声已在预计算生成期从 core / 详情分片剔除；无 core 的回退路径在这里兜底，保证图上永远不出现。
+  if (!core) mesh = stripConfirmedNoise(mesh);
   prepared = core ? await prepareCoreAsync(mesh) : prepare(mesh);
   precomputed = core ? precomputedLayout(mesh) : null;
   details = core ? createDetailStore(mesh.meta ?? {}) : null;

@@ -464,6 +464,19 @@ export function stripNoiseOwners(mesh) {
   return out;
 }
 
+/**
+ * 剔除「确认噪声」节点及其连线：生态图（core / 详情分片）里不该出现它们。
+ * 预计算生成期调用一次（tools/precompute-layout.mjs）；无 core 的回退路径由 app.js 兜底。
+ * 注意：必须在布局之前剔除，否则预计算坐标会按含噪声的节点数组生成，前端索引对不上、图上留空洞。
+ */
+export function stripConfirmedNoise(mesh) {
+  const nodes = mesh.nodes ?? [];
+  const noiseIds = new Set(nodes.filter(isConfirmedNoise).map((n) => n.id));
+  if (noiseIds.size === 0) return mesh;
+  const edges = (mesh.edges ?? []).filter((e) => !noiseIds.has(e.source ?? e.a) && !noiseIds.has(e.target ?? e.b));
+  return { ...mesh, nodes: nodes.filter((n) => !noiseIds.has(n.id)), edges };
+}
+
 /** 与 id 同一个作者（owner）的其它仓库，按星标降序；这是「完整」的同作者关系、不从存边推导，没有伙伴时返回空数组。 */
 export function ownerSiblings(prepared, id) {
   if (!prepared?.byId || !prepared.ownerIndex) return EMPTY_IDS;

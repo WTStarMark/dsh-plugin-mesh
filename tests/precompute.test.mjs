@@ -8,7 +8,7 @@ import { mkdtempSync, readFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { prepareCore, precomputedLayout, prepare } from "../src/mesh-data.js";
+import { prepareCore, precomputedLayout, prepare, isConfirmedNoise } from "../src/mesh-data.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const tmp = mkdtempSync(join(tmpdir(), "mesh-precompute-"));
@@ -19,7 +19,11 @@ const original = JSON.parse(readFileSync(join(ROOT, "data/mesh.json"), "utf8"));
 
 test("预计算契约：节点带坐标、连线是索引三元组、扇区齐备", () => {
   assert.equal(core.meta.layout, "precomputed");
-  assert.equal(core.nodes.length, original.nodes.length, "节点数必须与原始数据一致");
+  // 确认噪声在生成期就被剔除：core / 详情分片 / 布局里都不该出现它们（与噪声作者同一口径）
+  const expectedNodes = original.nodes.filter((n) => !isConfirmedNoise(n)).length;
+  assert.ok(expectedNodes < original.nodes.length, "夹具里应有确认噪声（否则这条断言没意义）");
+  assert.equal(core.nodes.length, expectedNodes, "节点数 = 原始数据 - 确认噪声");
+  assert.ok(core.nodes.every((n) => n.verdict !== "noise"), "core 里不应再出现确认噪声节点");
   for (const n of core.nodes.slice(0, 50)) {
     assert.equal(typeof n.x, "number");
     assert.equal(typeof n.y, "number");

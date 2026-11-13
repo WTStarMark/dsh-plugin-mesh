@@ -59,7 +59,6 @@ function starText(value) {
 
 export function renderRail(root, prepared, state, actions, view = {}) {
   const { meta, nodes, edges, owners, review, tags, hubs } = prepared;
-  const confirmed = prepared.noise ?? [];
   const hit = state.lastHit ?? null;
   const groups = view.groups ?? prepared.clusters;
   const hubId = view.hubId ?? "—";
@@ -206,8 +205,8 @@ export function renderRail(root, prepared, state, actions, view = {}) {
       el("div", {
         class: "note",
         text:
-          "相关性判定：已确认相关 " + Math.max(0, nodes.length - review.length - confirmed.length)
-          + " · 确认噪声 " + confirmed.length + "（可一键隐藏）· 仍需人工复核 " + review.length + "。",
+          "相关性判定：已确认相关 " + Math.max(0, nodes.length - review.length)
+          + " · 确认噪声 " + (meta.verdictCounts?.noise ?? 0) + "（不进图）· 仍需人工复核 " + review.length + "。",
       }),
       (meta.noiseBlacklistSize ?? 0) > 0
         ? el("div", {
@@ -311,10 +310,6 @@ export function renderRail(root, prepared, state, actions, view = {}) {
       field("推送时间", pushedSelect),
       field("仓库语言", languageSelect),
       field("归档状态", archivedSelect),
-      el("label", { class: "switch" }, [
-        el("input", { type: "checkbox", checked: state.hideNoise, on: { change: (ev) => actions.setHideNoise(ev.target.checked) } }),
-        "隐藏确认噪声（" + confirmed.length + " 个）",
-      ]),
       el("div", { class: "row" }, [
         el("button", { class: "key", text: "重置筛选", title: "清空标签/语言/归档/星标/搜索，并退出放大与关联聚焦", on: { click: () => actions.resetFilters() } }),
       ]),

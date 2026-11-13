@@ -59,7 +59,6 @@ const baseState = () => ({
   minStars: 0,
   pushedDays: 0,
   language: "all",
-  hideNoise: false,
   archived: "all",
   clusterFocus: null,
   neighborFocus: null,

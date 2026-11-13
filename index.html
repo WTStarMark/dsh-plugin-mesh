@@ -44,7 +44,7 @@
 
   【数据口径，读错会得出错误结论】
     · 缺数据一律是「—」或 unknown，不是 0；不要把「取不到」当成「没有」。
-    · verdict 三档：related / noise / manual；API 默认只标注、不过滤（noise=all|hide|only）；站点前端默认隐藏已确认噪声，开关可看回。
+    · verdict 三档：related / noise / manual；API 默认只标注、不过滤（noise=all|hide|only）；站点前端球图不再画已确认噪声（预计算时已从 core 与详情分片剔除）。
     · 各榜窗口互相独立：npm 的最近 7 天与 star 的 7 个自然日不一定重合，行里带窗口字段。
 
   【引用与礼仪】
@@ -290,7 +290,7 @@
         <h4><span class="mo-n">04</span>数据口径，别读错</h4>
         <ul>
           <li>缺数据一律是「—」或 <code>unknown</code>，<b>不是 0</b>；把"取不到"当成 0 会得出错误结论。</li>
-          <li><code>verdict</code> 三档：related / noise / manual；默认 <code>noise=all</code> 只标注、不过滤；站点前端默认隐藏已确认噪声（开关可看回）。</li>
+          <li><code>verdict</code> 三档：related / noise / manual；默认 <code>noise=all</code> 只标注、不过滤；站点前端球图不再画已确认噪声（预计算时已从 core 与详情分片剔除）。</li>
           <li>各榜窗口互相独立：npm 的最近 7 天与 star 的 7 个自然日不一定重合，行里带窗口字段。</li>
           <li>星标与下载量都是采集时刻的快照，不是实时值。</li>
         </ul>

@@ -36,7 +36,7 @@
 ## 数据口径
 
 - 缺数据一律是「—」或 `unknown`，**不是 0**；把"取不到"当成 0 会得出错误结论。
-- `verdict` 三档：related / noise / manual；API 默认只标注、不过滤（noise=all|hide|only）；站点前端默认隐藏已确认噪声，开关可看回。
+- `verdict` 三档：related / noise / manual；API 默认只标注、不过滤（noise=all|hide|only）；站点前端球图不再画已确认噪声（预计算时已从 core 与详情分片剔除），榜单与 API 口径不变。
 - 各榜窗口互相独立：npm 的最近 7 天与 star 的 7 个自然日不一定重合，行里带窗口字段。
 - 星标与下载量都是采集快照，不是实时值。
 - 评测数据来自 review.lingshulab.com 的公开接口，最多延迟约 11 分钟；上游不可达时沿用旧数据（`stale`），超过 7 天标 `expired` 并停止展示光环。它是可选功能，默认关闭。

@@ -291,7 +291,7 @@ curl -s "$BASE/api/ranking?limit=10" | jq '.boards.updated.items[] | {id, update
 
 ### 相关性三档（`verdict`）
 
-每个仓库带一个 `verdict`：`related`（确认相关）/ `noise`（确认噪声：与 DSH 生态无关、或挂了一堆 DSH 标签却没有任何插件线索的通用项目）/ `manual`（线索不足，待人工复核）。`/api/repos` 与 `/api/ranking` 的每一行都会带上它，默认**只标注、不过滤**——榜单的排序口径不因为噪声而改变；要过滤就显式传 `noise=hide`（或 `only`），响应里的 `noise.filter` 与 `noise.matched` 会如实说明当前口径和这批条件里一共有多少条噪声。判定规则在 `tools/relevance.mjs`（纯规则、零 AI），与前端球图的「隐藏确认噪声」是同一套结论。
+每个仓库带一个 `verdict`：`related`（确认相关）/ `noise`（确认噪声：与 DSH 生态无关、或挂了一堆 DSH 标签却没有任何插件线索的通用项目）/ `manual`（线索不足，待人工复核）。`/api/repos` 与 `/api/ranking` 的每一行都会带上它，默认**只标注、不过滤**——榜单的排序口径不因为噪声而改变；要过滤就显式传 `noise=hide`（或 `only`），响应里的 `noise.filter` 与 `noise.matched` 会如实说明当前口径和这批条件里一共有多少条噪声。判定规则在 `tools/relevance.mjs`（纯规则、零 AI），与前端球图剔除确认噪声的口径是同一套结论。
 
 2026-11-07 起判定在启发式之前多一层**离线证据**（`backend/dsh_mesh/build.py:load_noise_evidence`，JS 镜像在 `tools/noise-evidence.mjs`，改一边要改两边）：
 
@@ -299,7 +299,7 @@ curl -s "$BASE/api/ranking?limit=10" | jq '.boards.updated.items[] | {id, update
 - README 存在且正文没有任何 DSH 线索、也不像插件本体 → `noise`（原因注明「README 证据」）；
 - README 抓不到 = 没有证据，不新增结论（宁可留人工，不给用户藏错）。
 
-站点前端（球图筛选与榜单）把「隐藏确认噪声」**默认开启**：已判 noise 的默认不显示、可一键看回；`manual`（待人工）仍照常显示。API 口径不变，仍是 `noise=all` 只标注不过滤。
+站点前端球图**不再画确认噪声**：生成预计算产物时就把 noise 从 core 与详情分片里剔除（图上没有「隐藏 / 看回」开关），`manual`（待人工）仍照常显示。榜单与 API 口径不变，仍是 `noise=all` 只标注、由调用方自行过滤。
 
 ### 限流（所有接口共用，含 `/market/index.json`）
 

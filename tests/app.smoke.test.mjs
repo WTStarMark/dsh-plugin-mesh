@@ -17,7 +17,7 @@ const coreJson = JSON.parse(await readFile(new URL("../data/mesh-core.json", imp
 // 基准必须取【二进制契约】的节点数：页面实际渲染的是它（prepareCore），
 // 而 mesh.json 与 mesh-core.json 的节点数可以不一样（预计算会再剔一遍噪声作者）。
 const NODE_COUNT = coreJson.nodes.length;
-// 「隐藏确认噪声」默认开（2026-11-07）：首屏命中 = 全量 - 已确认噪声；开关可看回。
+// 确认噪声已在预计算生成期剔除（2026-11-13）：core 里不该再有 noise，首屏命中 = core 全量。
 const NOISE_COUNT = coreJson.nodes.filter((n) => n.verdict === "noise").length;
 const VISIBLE_COUNT = NODE_COUNT - NOISE_COUNT;
 const SECTOR_COUNT = mesh.clusters.length;

@@ -53,7 +53,7 @@
 | `topics` | string[] | 仓库真实主题数组 |
 | `matchedTags` | string[] | **白名单里精确命中的标签**；名字收录的仓库为空数组（此时 `primaryTag` 为 `dsh-*（名字收录）`） |
 | `relevance` / `noise` | number | 相关度评分（0~8）与噪声分（`1 - relevance/5`，仅展示用） |
-| `verdict` | `"related" \| "noise" \| "manual"` | **三档相关性结论**（v0.4.2）：确认相关 / 确认噪声（可一键隐藏）/ 仍需人工复核。2026-11-07 起判定先吃一层离线证据（manifest 清单校验 + README 正文扫描，`tools/noise-evidence-scan.mjs` 补扫 manual/疑点队列）：正证据压过启发式，README 实证「没提 DSH 且不像插件」才判噪声 |
+| `verdict` | `"related" \| "noise" \| "manual"` | **三档相关性结论**（v0.4.2）：确认相关 / 确认噪声（不进生态图）/ 仍需人工复核。2026-11-07 起判定先吃一层离线证据（manifest 清单校验 + README 正文扫描，`tools/noise-evidence-scan.mjs` 补扫 manual/疑点队列）：正证据压过启发式，README 实证「没提 DSH 且不像插件」才判噪声 |
 | `reason` | string | 上面那条结论的一句话原因，面板直接展示；人工复核结论为 `人工复核（后台）` 或 `人工复核：<备注>`（后台复核页写入 `data/review-verdicts.json`，构建时压过规则与证据判定） |
 | `review` | boolean | 等价于 `verdict === "manual"`，保留给老前端 |
 | `primaryTag` | string | 最具体的命中标签（仅用于筛选与展示，**不再决定颜色与扇区**） |
